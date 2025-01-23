@@ -1,5 +1,5 @@
 [project]
-name = "continual-learning"
+name = "continual_learning"
 version = "0.1.0"
 description = "Codebase for continual learning"
 readme = "README.md"
@@ -22,7 +22,7 @@ ignore = ["F722"]
 ignore-init-module-imports = true
 
 [tool.setuptools.packages.find]
-include = ["continual-learning", "continual-learning.*"]
+include = ["continual_learning", "continual_learning.*"]
 
 # [tool.uv.sources]
 # metaworld = { git = "https://github.com/reginald-mclean/Metaworld", rev = "release" }
