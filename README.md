@@ -1,4 +1,4 @@
-# Continual Reinforcement Learning
+# Continual Learning
 
 ## Set up TODO
 ### Test settings

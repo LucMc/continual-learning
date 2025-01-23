@@ -1,7 +1,7 @@
 [project]
-name = "mtrl"
+name = "continual-learning"
 version = "0.1.0"
-description = "Codebase for ablating MTRL"
+description = "Codebase for continual learning"
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
@@ -22,7 +22,7 @@ ignore = ["F722"]
 ignore-init-module-imports = true
 
 [tool.setuptools.packages.find]
-include = ["mtrl", "mtrl.*"]
+include = ["continual-learning", "continual-learning.*"]
 
-[tool.uv.sources]
-metaworld = { git = "https://github.com/reginald-mclean/Metaworld", rev = "release" }
+# [tool.uv.sources]
+# metaworld = { git = "https://github.com/reginald-mclean/Metaworld", rev = "release" }
