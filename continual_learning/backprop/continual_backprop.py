@@ -1,6 +1,6 @@
 from torch import optim
-from lop.algos.gnt import GnT
-from lop.utils.AdamGnT import AdamGnT
+from continual_learning.backprop.gnt import GnT
+from continual_learning.backprop.AdamGnT import AdamGnT
 import torch.nn.functional as F
 
 
