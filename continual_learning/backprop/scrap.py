@@ -14,7 +14,7 @@ from continual_learning.utils.miscellaneous import (
     nll_accuracy,
 )
 
-matplotlib.use("QtAgg")
+# matplotlib.use("QtAgg")
 
 
 class SimpleNet(nn.Module):
@@ -134,27 +134,28 @@ def compute_metrics(
     approximate_ranks_abs,
     effective_ranks,
     global_iter,
+    idx,
     weight_mag_sum,
     losses_per_task,
     accuracies_per_task,
+    task,
+    loss
 ):  # Fix tracking based on global or idx
     # Calculate accuracy
     _, predicted = torch.max(outputs.data, 1)
     accuracy = (predicted == labels).sum().item() / labels.size(0)
 
-    _, predicted = torch.max(cbp_outputs.data, 1)
-    cbp_accuracy = (predicted == labels).sum().item() / labels.size(0)
-
-    losses_per_task[task].append(cbp_loss.item())
-    accuracies_per_task[task].append(cbp_accuracy)
+    # Store the metrics in the appropriate lists
+    losses_per_task[task].append(loss.item())
+    accuracies_per_task[task].append(accuracy)
 
     _, features = net.predict(test_examples_perm)
 
-    idx = int(global_iter / RANK_MEASURE_PERIOD)
 
     # Only measure the hidden layer (skip input and output)
     for layer_idx in range(num_hidden_layers):
-        feature_matrix = features[layer_idx * 2]  # Skip ReLU layers
+        # Get post-activation features (after ReLU)
+        feature_matrix = features[layer_idx * 2 + 1]  # Use post-ReLU activation
 
         (
             ranks[idx][layer_idx],
@@ -163,7 +164,8 @@ def compute_metrics(
             approximate_ranks_abs[idx][layer_idx],
         ) = compute_matrix_rank_summaries(m=feature_matrix, use_scipy=True)
 
-        dead_neurons[new_idx][layer_idx] = (feature_matrix.abs().sum(dim=0) == 0).sum()
+        # A neuron is considered dead if it never activates (always outputs zero) across all batch samples
+        dead_neurons[idx][layer_idx] = (feature_matrix == 0).all(dim=0).sum().item()
 
     # Log weight magnitudes
     for idx, layer_idx in enumerate(
@@ -200,9 +202,10 @@ for task in range(num_tasks):
             cbp_loss, cbp_outputs = cont_backprop_trainer.learn(images, labels)
 
             global_iter += 1
+            idx = int(global_iter / RANK_MEASURE_PERIOD)
 
             if (global_iter + 1) % RANK_MEASURE_PERIOD == 0:
-                # Compute metrics
+                # Compute metrics for backprop network
                 (
                     bp_dead_neurons,
                     bp_ranks,
@@ -211,20 +214,25 @@ for task in range(num_tasks):
                     bp_effective_ranks,
                     bp_weight_mag_sum,
                 ) = compute_metrics(
-                    bp_net,  # TOD: Make a dataclass to store these
-                    bp_outputs,
-                    test_examples[:, permutation],
-                    bp_dead_neurons,
-                    bp_ranks,
-                    bp_approximate_ranks,
-                    bp_approximate_ranks_abs,
-                    bp_effective_ranks,
-                    global_iter,
-                    bp_weight_mag_sum,
-                    bp_losses_per_task,
-                    bp_accuracies_per_task,
+                    net=bp_net,
+                    outputs=bp_outputs,
+                    test_examples_perm=test_examples[:, permutation],
+                    dead_neurons=bp_dead_neurons,
+                    ranks=bp_ranks,
+                    approximate_ranks=bp_approximate_ranks,
+                    approximate_ranks_abs=bp_approximate_ranks_abs,
+                    effective_ranks=bp_effective_ranks,
+                    global_iter=global_iter,
+                    idx=idx,
+                    weight_mag_sum=bp_weight_mag_sum,
+                    losses_per_task=bp_losses_per_task,
+                    accuracies_per_task=bp_accuracies_per_task,
+                    task=task,
+                    loss=bp_loss,
+
                 )
 
+                # Compute metrics for continual backprop network
                 (
                     cbp_dead_neurons,
                     cbp_ranks,
@@ -233,43 +241,46 @@ for task in range(num_tasks):
                     cbp_effective_ranks,
                     cbp_weight_mag_sum,
                 ) = compute_metrics(
-                    cbp_net,
-                    cbp_outputs,
-                    test_examples[:, permutation],
-                    cbp_dead_neurons,
-                    cbp_ranks,
-                    cbp_approximate_ranks,
-                    cbp_approximate_ranks_abs,
-                    cbp_effective_ranks,
-                    global_iter,
-                    cbp_weight_mag_sum,
-                    cbp_losses_per_task,
-                    cbp_accuracies_per_task,
+                    net=cbp_net,
+                    outputs=cbp_outputs,
+                    test_examples_perm=test_examples[:, permutation],
+                    dead_neurons=cbp_dead_neurons,
+                    ranks=cbp_ranks,
+                    approximate_ranks=cbp_approximate_ranks,
+                    approximate_ranks_abs=cbp_approximate_ranks_abs,
+                    effective_ranks=cbp_effective_ranks,
+                    global_iter=global_iter,
+                    idx=idx,
+                    weight_mag_sum=cbp_weight_mag_sum,
+                    losses_per_task=cbp_losses_per_task,
+                    accuracies_per_task=cbp_accuracies_per_task,
+                    task=task,
+                    loss=cbp_loss,
                 )
 
                 print(
                     "BP: approximate rank:",
                     bp_approximate_ranks[idx],
                     ", dead neurons:",
-                    bp_dead_neurons[new_idx],
+                    bp_dead_neurons[idx],
                 )
                 print(
                     "CBP: approximate rank:",
                     cbp_approximate_ranks[idx],
                     ", dead neurons:",
-                    cbp_dead_neurons[new_idx],
+                    cbp_dead_neurons[idx],
                 )
 
                 print(
                     f"Task {task + 1} - Backprop Epoch [{epoch + 1}/{num_epochs}], "
                     f"Step [{i + 1}/{len(train_loader)}], "
-                    f"Loss: {bp_loss.item():.4f}, Accuracy: {bp_accuracy:.4f}"
+                    f"Loss: {bp_loss.item()}, Accuracy: {bp_accuracies_per_task[task]}"
                 )
 
                 print(
                     f"Task {task + 1} - Continual Backprop Epoch [{epoch + 1}/{num_epochs}], "
                     f"Step [{i + 1}/{len(train_loader)}], "
-                    f"Loss: {cbp_loss.item():.4f}, Accuracy: {cbp_accuracy:.4f}"
+                    f"Loss: {cbp_loss.item()}, Accuracy: {cbp_accuracies_per_task[task]}"
                 )
 
 # Save metrics
