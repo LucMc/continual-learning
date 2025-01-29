@@ -18,11 +18,11 @@ from continual_learning.utils.miscellaneous import (
 
 
 class SimpleNet(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_size=512):
         super(SimpleNet, self).__init__()
         self.act_type = "relu"
         self.layers = nn.ModuleList(
-            [nn.Linear(784, 128), nn.ReLU(), nn.Linear(128, 10)]
+            [nn.Linear(784, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 10)]
         )
         self.layers_to_log = [0, 2]  # Track the linear layers
 
@@ -40,8 +40,10 @@ class SimpleNet(nn.Module):
 
 # Device and hyperparameters setup remains the same...
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-num_tasks = 100
-num_epochs = 2
+print(device)
+hidden_size = 512
+num_tasks = 500
+num_epochs = 1
 batch_size = 64
 learning_rate = 0.001
 img_size = 28 * 28
@@ -59,13 +61,13 @@ train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=
 
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
-# Initialize network and trainers
-bp_net = SimpleNet().to(device)
+bp_net = SimpleNet(hidden_size=hidden_size).to(device)
 backprop_trainer = backprop.Backprop(
+# Initialize network and trainers
     bp_net, step_size=learning_rate, loss="nll", opt="adam", device=device
 )
 
-cbp_net = SimpleNet().to(device)
+cbp_net = SimpleNet(hidden_size=hidden_size).to(device)
 cont_backprop_trainer = backprop.ContinualBackprop(
     cbp_net, step_size=learning_rate, loss="nll", opt="adam", device=device
 )

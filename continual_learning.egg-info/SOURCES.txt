@@ -9,8 +9,14 @@ continual_learning.egg-info/SOURCES.txt
 continual_learning.egg-info/dependency_links.txt
 continual_learning.egg-info/requires.txt
 continual_learning.egg-info/top_level.txt
+continual_learning/backprop/AdamGnT.py
+continual_learning/backprop/__init__.py
 continual_learning/backprop/backprop.py
+continual_learning/backprop/backprop_jax.py
+continual_learning/backprop/continual_backprop.py
+continual_learning/backprop/gnt.py
 continual_learning/backprop/scrap.py
+continual_learning/backprop/scrap2.py
 continual_learning/config/__init__.py
 continual_learning/config/networks.py
 continual_learning/config/nn.py
@@ -48,3 +54,4 @@ continual_learning/rl/algorithms/mtppo.py
 continual_learning/rl/algorithms/mtsac.py
 continual_learning/rl/algorithms/sac.py
 continual_learning/rl/algorithms/utils.py
+continual_learning/utils/miscellaneous.py
