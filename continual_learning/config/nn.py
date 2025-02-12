@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mtrl.config.optim import OptimizerConfig
+from continual_learning.config.optim import OptimizerConfig
 
 from .utils import Activation, Initializer
 

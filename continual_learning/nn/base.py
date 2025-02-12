@@ -3,7 +3,7 @@ from collections.abc import Callable
 import flax.linen as nn
 import jax
 
-from mtrl.config.nn import VanillaNetworkConfig
+from continual_learning.config.nn import VanillaNetworkConfig
 
 from .utils import name_prefix
 

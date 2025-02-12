@@ -1,3 +1,8 @@
 .envrc
 .venv/
 .git/
+*.pyc
+*.swp
+__pycache__/
+*.vim
+.todo

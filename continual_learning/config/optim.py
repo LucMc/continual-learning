@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import jax
 import optax
 
-from mtrl.optim.gradnorm import gradnorm
-from mtrl.optim.pcgrad import pcgrad
+# from continual_learning.optim.gradnorm import gradnorm
+# from continual_learning.optim.pcgrad import pcgrad
 
 from .utils import Optimizer
 
@@ -34,40 +34,40 @@ class OptimizerConfig:
         return optim
 
 
-@dataclass(frozen=True, kw_only=True)
-class PCGradConfig(OptimizerConfig):
-    num_tasks: int
-    cosine_sim_logs: bool = False
-
-    @property
-    def requires_split_task_losses(self) -> bool:
-        return True
-
-    def spawn(self) -> optax.GradientTransformationExtraArgs:
-        return optax.chain(
-            pcgrad(num_tasks=self.num_tasks, cosine_sim_logs=self.cosine_sim_logs),
-            super().spawn(),
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class GradNormConfig(OptimizerConfig):
-    num_tasks: int
-    gradnorm_optimizer: OptimizerConfig
-    initial_weights: jax.Array | None = None
-    asymmetry: float = 0.12
-
-    @property
-    def requires_split_task_losses(self) -> bool:
-        return True
-
-    def spawn(self) -> optax.GradientTransformation:
-        return optax.chain(
-            gradnorm(
-                optim=self.gradnorm_optimizer,
-                num_tasks=self.num_tasks,
-                asymmetry=self.asymmetry,
-                initial_weights=self.initial_weights,
-            ),
-            super().spawn(),
-        )
+# @dataclass(frozen=True, kw_only=True)
+# class PCGradConfig(OptimizerConfig):
+#     num_tasks: int
+#     cosine_sim_logs: bool = False
+#
+#     @property
+#     def requires_split_task_losses(self) -> bool:
+#         return True
+#
+#     def spawn(self) -> optax.GradientTransformationExtraArgs:
+#         return optax.chain(
+#             pcgrad(num_tasks=self.num_tasks, cosine_sim_logs=self.cosine_sim_logs),
+#             super().spawn(),
+#         )
+#
+#
+# @dataclass(frozen=True, kw_only=True)
+# class GradNormConfig(OptimizerConfig):
+#     num_tasks: int
+#     gradnorm_optimizer: OptimizerConfig
+#     initial_weights: jax.Array | None = None
+#     asymmetry: float = 0.12
+#
+#     @property
+#     def requires_split_task_losses(self) -> bool:
+#         return True
+#
+#     def spawn(self) -> optax.GradientTransformation:
+#         return optax.chain(
+#             gradnorm(
+#                 optim=self.gradnorm_optimizer,
+#                 num_tasks=self.num_tasks,
+#                 asymmetry=self.asymmetry,
+#                 initial_weights=self.initial_weights,
+#             ),
+#             super().spawn(),
+#         )
