@@ -1,4 +1,5 @@
 from flax.core import FrozenDict
+from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
 from jaxtyping import Array, Float, PRNGKeyArray, PyTree
 from flax.training.train_state import TrainState
@@ -94,22 +95,29 @@ class CBPTrainState(TrainState):
         """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
         # Extract the params we want to optimize
         grads_with_opt = grads["params"]
+        # print("self.params", self.params)
         params_with_opt = self.params["params"]
 
         # Update with optimizer
         # updates, new_opt_state = self.tx.update(
         #     grads_with_opt, self.opt_state, params_with_opt, features=features
         # )
-        updates, new_opt_state = continual_backprop().update(
+
+        new_params, new_opt_state = continual_backprop().update(
             grads_with_opt,
             self.opt_state[0],
             params_with_opt,
             features=features["intermediates"]["activations"][0],
         )
-        new_params_with_opt = optax.apply_updates(params_with_opt, updates)
+        old_tree_structure = jax.tree_util.tree_structure(params_with_opt)
+        new_tree_structure = jax.tree_util.tree_structure(new_params)
+        # assert old_tree_structure == new_tree_structure, (
+        #     f"Tree structure has changed from {old_tree_structure} to {new_tree_structure} after cbp update"
+        # )
+        # new_params_with_opt = optax.apply_updates(params_with_opt, updates)
 
         # Maintain the nested structure of params
-        new_params = {"params": new_params_with_opt}
+        new_params = {"params": new_params}
 
         return self.replace(
             step=self.step + 1,
@@ -147,8 +155,10 @@ def continual_backprop(
 
     def process_params(params: FrozenDict):
         # seperates bias from params
-        _params = deepcopy(params)#["params"]
-        _params.pop("out_layer")  # As it doesn't pass through activation
+        _params = deepcopy(params)  # ["params"]
+        excluded = {
+            "out_layer": _params.pop("out_layer")
+        }  # TODO: pass excluded layer names as inputs to cp optim
 
         bias = {}
         weights = {}
@@ -157,24 +167,22 @@ def continual_backprop(
             bias[layer_name] = _params[layer_name].pop("bias")
             weights[layer_name] = _params[layer_name].pop("kernel")
 
-        return weights, bias
+        return weights, bias, excluded
 
     def init(params: optax.Params):
         assert util_type in UTIL_TYPES, ValueError(
             f"Invalid util type, select from ({'|'.join(UTIL_TYPES)})"
         )
-        weights, bias = process_params(params["params"])
+        weights, bias, _ = process_params(params["params"])
 
-        # Delete params?
+        del params  # Delete params?
+
         return CBPOptimState(
             utilities=jax.tree.map(
-                lambda layer: jnp.ones_like(layer), weights
-            ),  # All utils are 1 initially
+                lambda layer: jnp.ones_like(layer), bias
+            ),  # TODO: bias?
             mean_feature_act=jnp.zeros(0),
-            ages=jax.tree_map(
-                lambda x: jnp.zeros_like(x),
-                weights,  # should be bias
-            ),  # 1 neuron has 1 bias and n_hidden weights
+            ages=jax.tree_map(lambda x: jnp.zeros_like(x), bias),
             util_type_id=UTIL_TYPES.index(
                 util_type
             ),  # Replace with util function directly?
@@ -210,9 +218,15 @@ def continual_backprop(
         # Calculate new_util based on util_type
         # util_function =
 
-        # return -p + new_param  # (p > 0) * p
+        # @jax.jit
         def update_utility(
-            layer: Array, utility: Array, ages: Array, key: PRNGKey, bound: float = 0.01
+            layer_w: Array,
+            layer_b: Array,
+            utility: Array,
+            ages: Array,
+            key: PRNGKey,
+            features: Array,
+            bound: float = 0.01,
         ):
             """
             TODO:
@@ -223,85 +237,125 @@ def continual_backprop(
             """
 
             # Maybe have a dictionary of the different util func transformations and then call the index in a cond
-            new_param = layer * state.decay_rate
+            new_param = layer_w * state.decay_rate
 
-            features = layer  # Should be relu(wx+b), might have to overwrite apply updates like Angel said
-            updated_utility = (state.decay_rate * layer) + (
+            # features = layer_w  # Should be relu(wx+b), might have to overwrite apply updates like Angel said
+            updated_utility = (state.decay_rate * layer_w) + (
                 1 - state.decay_rate
-            ) * jnp.abs(features) * jnp.sum(layer)
+            ) * jnp.abs(features) * jnp.sum(layer_w)
 
-            key = random.PRNGKey(0)
             # get nodes over maturity threshold
-            mature_features_idx = jnp.where(ages > state.maturity_threshold)[0]
-            # mature_features_idx = jnp.argmax()
-            n_to_replace = int(mature_features_idx.shape[0] * state.replacement_rate)
-            mature_utils = updated_utility[mature_features_idx]
+            # breakpoint()
+            # mature_features_idx = jnp.where(ages > state.maturity_threshold)[0]
+            maturity_mask = ages > state.maturity_threshold ##
+            n_to_replace = int(jnp.sum(maturity_mask) * state.replacement_rate)
+
+            ## ----- jits till this line -----
+
+            # mask utility if mature (immature inf util?)
+            # mask bottom X utils
+            # -- Sort and mask the k lowest
+            # reset using this mask
+
+            updated_utility_masked = jnp.where(maturity_mask, jnp.inf, updated_utility)
+            sorted_utility = jnp.sort(updated_utility_masked, axis=-1) # NOTE: There might be a fast sort method, look into it
+            breakpoint()
+            #####
+            mature_utils = updated_utility[:, maturity_mask]
+
             idx_nodes_to_reset = mature_utils[
                 jnp.argsort(mature_utils)[-n_to_replace:][::-1]
             ]
 
-            # reset input AND output weights AND bias terms
             # resetting outbound connections [128] per node
-
             if len(idx_nodes_to_reset) > 0:
-                _layer = layer.at[idx_nodes_to_reset].set(
-                    random.uniform(key, layer.shape[1], float, -bound, bound)
+                _layer_w = layer_w.at[idx_nodes_to_reset].set(
+                    random.uniform(key, layer_w.shape[1], float, -bound, bound)
                 )
                 _ages = ages.at[idx_nodes_to_reset].set(0.0)
+                _layer_b = layer_b.at[idx_nodes_to_reset].set(0.0)
             else:
-                _layer = layer
-                _ages = ages
+                _layer_w = layer_w
+                _layer_b = layer_b
+                _ages = ages + 1
 
             # For now let's just ignore activation and calculate the outputbased i+
-            return (
-                _layer,
-            )  # ages_  # , ages+1, {"n_nodes_to_reset": len(nodes_to_reset)}, I do need to reutn ages but just for now
+            return {
+                "kernel": _layer_w,
+                "bias": _layer_b,
+                "ages": _ages,
+            }
 
         def _continual_backprop(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            """
-            This feels like it could be made more efficient. Perhaps I should combine bias and weights into one 2D array and just do it for the
-            one layer now before vmapping over multiple layers/tree vmapping latter
-            """
-            weights, bias = process_params(params)
+
+            weights, bias, excluded = process_params(params)
 
             # because we need the next layers weight magnitude
             _ages = jax.tree.map(lambda x: x + 1, state.ages)
             _rng, util_key = random.split(state.rng)
             key_tree = gen_key_tree(util_key, weights)
 
-            # update_utility
-            new_weights = jax.tree.map(
-                update_utility, weights, features, state.utilities, state.ages, key_tree
-            )  # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
+            print("key_tree:\n", key_tree["dense1"].shape)
+            print("state.ages:\n", state.ages["dense1"].shape)
+            print("state.utilities:\n", state.utilities["dense1"].shape)
+            print("features:\n", features["dense1"].shape)
+            print("weights:\n", weights["dense1"].shape)
+            print("key_tree,", key_tree)
 
-            # Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
+            # update_utility
+            # We will need to vmap over batches, for now using single batches
+            cbp_update = jax.tree.map(
+                update_utility,
+                weights,
+                bias,
+                state.utilities,
+                state.ages,
+                key_tree,
+                features,
+            )  # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
+            # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
+
+            new_ages = {}
+            new_params = {}
+
+            # TODO: Replace with vmap/treemap
+            def split_data(layer):
+                ages = layer.pop("ages")
+                return layer, ages
+
+            for key, value in cbp_update.items():
+                new_params[key], new_ages[key] = split_data(value)
+
+            # IDEA: Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
             # num_new_features_to_replace = state.replacement_rate * eligable_features_to_replace
             # new_accumulated_features_to_replace += features_to_replace
             # I actually think it's this layers weight sum since this layer weights connect to next
             # See """calculate feature utility""" because it looks a little different, certainly need features
 
-            # new_state = ContinualBackpropState(
-            #     # utilities=_utilities,
-            #     # mean_feature_act=_mean_feature_act,
-            #     ages=_ages,
-            #     # util_type_id=_util_type_id,
-            #     # accumulated_features_to_replace=_accumulated_features_to_replace,
-            #     rng=_rng,
-            #     # step_size=_step_size,
-            #     # replacement_rate=_replacement_rate,
-            #     # decay_rate=_decay_rate,
-            #     # maturity_threshold=_maturity_threshold,
-            #     # accumulate=_accumulate,
-            # )
+            new_state = state.replace(
+                ages=new_ages,
+                rng=_rng,
+            )
             new_state = state
+            new_params.update(excluded)
 
-            return params, (new_state,)  # For now
+            return new_params, (new_state,)  # For now
 
         return _continual_backprop(updates)  # updates, ContinualBackpropState()
 
     return optax.GradientTransformation(init=init, update=update)
+
+    # utilities=_utilities,
+    # mean_feature_act=_mean_feature_act,
+    # util_type_id=_util_type_id,
+    # accumulated_features_to_replace=_accumulated_features_to_replace,
+    # step_size=_step_size,
+    # replacement_rate=_replacement_rate,
+    # decay_rate=_decay_rate,
+    # maturity_threshold=_maturity_threshold,
+    # accumulate=_accumulate,
 
 
 """ old code snippets:

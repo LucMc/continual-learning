@@ -16,9 +16,9 @@ class FFNN(nn.Module):
     def __call__(self, x):
         intermediates = {}
 
-        layers = ["dense1", "dense2"]
+        layers = ["dense1", "dense2", "dense3"] # Could make list of dicts if I wanna changes sizes per layer
 
-        for i in range(2):
+        for i in range(len(layers)):
             x = nn.Dense(features=128, name=layers[i])(x)
             x = nn.relu(x)
             intermediates[layers[i]] = x
@@ -41,14 +41,10 @@ def test_optim():
     key = random.PRNGKey(0)
 
     # Create dummy data (batch_size=2, input_dim=784 for MNIST)
-    batch_size = 2
+    batch_size = 1
     input_dim = 784
     dummy_input = random.normal(key, (batch_size, input_dim))
     dummy_labels = jax.nn.one_hot(random.randint(key, (batch_size,), 0, 10), 10)
-
-    # Initialize the network
-    # net = FFNN()
-    # Initialize parameters with dummy input
 
     net_custom = FFNN()
     params = net_custom.init(key, dummy_input)
