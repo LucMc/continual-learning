@@ -6,7 +6,10 @@ import optax
 from flax.training.train_state import TrainState
 
 # from continual_learning.nn.continual_dense import ContinualDense
-from continual_learning.optim.continual_backprop import continual_backprop, CBPTrainState
+from continual_learning.optim.continual_backprop import (
+    continual_backprop,
+    CBPTrainState,
+)
 
 
 class FFNN(nn.Module):
@@ -16,14 +19,20 @@ class FFNN(nn.Module):
     def __call__(self, x):
         intermediates = {}
 
-        layers = ["dense1", "dense2", "dense3"] # Could make list of dicts if I wanna changes sizes per layer
+        layers = [
+            "dense1",
+            "dense2",
+            "dense3",
+        ]  # Could make list of dicts if I wanna changes sizes per layer
 
         for i in range(len(layers)):
             x = nn.Dense(features=128, name=layers[i])(x)
             x = nn.relu(x)
             intermediates[layers[i]] = x
 
-        self.sow('intermediates', 'activations', intermediates) # Only really want to reset layers after an activation
+        self.sow(
+            "intermediates", "activations", intermediates
+        )  # Only really want to reset layers after an activation
 
         # Output layer
         x = nn.Dense(features=10, name="out_layer")(x)
@@ -56,7 +65,12 @@ def test_optim():
     tx_adam = optax.adam(0)
 
     net_ts = CBPTrainState.create(apply_fn=net_custom.predict, params=params, tx=tx)
-    net_ts_adam = TrainState.create(apply_fn=net_custom.predict, params=params, tx=tx_adam)
+    net_ts_adam = TrainState.create(
+        apply_fn=net_custom.predict, params=params, tx=tx_adam
+    )
+
+    # print weight layer sizes
+    for name, param in net_ts.params["params"].items(): print(name, param["kernel"].shape)
 
     # Test backwards pass
     def loss_fn(params, inputs, labels):
@@ -73,7 +87,7 @@ def test_optim():
     # Update parameters
     initial_weights = net_ts.params["params"]["dense1"]["kernel"]
 
-    for i in range(10): # 10 grad steps
+    for i in range(10):  # 10 grad steps
         net_ts = net_ts.apply_gradients(grads=grads, features=features)
         net_ts_adam = net_ts_adam.apply_gradients(grads=grads)
 
@@ -84,7 +98,7 @@ def test_optim():
     print(f"Input shape: {dummy_input.shape}")
     print(f"Output shape: {logits.shape}")
     # print("features", features)
-    print(f"Number of intermediate features: {len(features["intermediates"])}")
+    print(f"Number of intermediate features: {len(features['intermediates'])}")
 
     # for i, feat in enumerate(features):
     #     print(f"Feature {i} shape: {feat.shape}")
@@ -105,56 +119,5 @@ def test_optim():
     print(f"weights > 0 adam: {(updated_weights_adam > 0).sum()}")
 
 
-
-
 if __name__ == "__main__":  # test neural network
     test_optim()
-
-#     class FFNN_custom(nn.Module):
-#         """Simple Flax neural network"""
-#
-#     @nn.compact
-# def __call__(self, x):
-#     features = []
-#
-# # First linear layer
-# x = ContinualDense(features=128, name="dense1")(x)
-# features.append(x)
-#
-# # ReLU activation
-# x = nn.relu(x)
-# features.append(x)
-#
-# # Output layer
-# x = ContinualDense(features=10, name="dense2")(x)
-# features.append(x)
-#
-# return x, features
-#
-# def predict(self, params, x):
-#     return self.apply({"params": params}, x)
-# def test_layer():
-#     # Initialize random key
-#     key = random.PRNGKey(0)
-#
-#     # Create dummy data (batch_size=2, input_dim=784 for MNIST)
-#     batch_size = 2
-#     input_dim = 784
-#     dummy_input = jnp.ones((batch_size, input_dim))
-#
-#     # Initialize the network
-#     # net = FFNN()
-#     net_custom = FFNN_custom()
-#
-#     # Initialize parameters with dummy input
-#     params = net_custom.init(key, dummy_input)
-#
-#     # Test forward pass
-#     output, features = net_custom.apply(params, dummy_input)
-#
-#     # Print shapes to verify
-#     print(f"Input shape: {dummy_input.shape}")
-#     print(f"Output shape: {output.shape}")
-#     print(f"Number of intermediate features: {len(features)}")
-#     for i, feat in enumerate(features):
-#         print(f"Feature {i} shape: {feat.shape}")

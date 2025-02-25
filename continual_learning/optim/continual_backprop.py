@@ -143,6 +143,27 @@ class CBPOptimState:
     maturity_threshold: int = 2  # 100
     accumulate: bool = False
 
+def get_layer_bound(layer_shape, init='kaiming', gain=1.0):
+    """Calculate initialization bounds similar to https://github.com/shibhansh/loss-of-plasticity/blob/main/lop/algos/cbp_linear.py"""
+    if len(layer_shape) == 4:  # Conv layer
+        in_channels = layer_shape[2]
+        kernel_size = layer_shape[0] * layer_shape[1]
+        return jnp.sqrt(1.0 / (in_channels * kernel_size))
+
+    else:  # Linear layer
+        in_features = layer_shape[0]
+        out_features = layer_shape[1]
+        
+        if init == 'default':
+            bound = jnp.sqrt(1.0 / in_features)
+        elif init == 'xavier':
+            bound = gain * jnp.sqrt(6.0 / (in_features + out_features))
+        elif init == 'lecun':
+            bound = jnp.sqrt(3.0 / in_features)
+        else:  # kaiming
+            bound = gain * jnp.sqrt(3.0 / in_features)
+        return bound
+
 
 # Give this the ContinualBackpropState params
 def continual_backprop(
@@ -158,7 +179,7 @@ def continual_backprop(
         _params = deepcopy(params)  # ["params"]
         excluded = {
             "out_layer": _params.pop("out_layer")
-        }  # TODO: pass excluded layer names as inputs to cp optim
+        }  # TODO: pass excluded layer names as inputs to cp optim/final by default
 
         bias = {}
         weights = {}
@@ -178,9 +199,7 @@ def continual_backprop(
         del params  # Delete params?
 
         return CBPOptimState(
-            utilities=jax.tree.map(
-                lambda layer: jnp.ones_like(layer), bias
-            ),  # TODO: bias?
+            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree_map(lambda x: jnp.zeros_like(x), bias),
             util_type_id=UTIL_TYPES.index(
@@ -199,6 +218,26 @@ def continual_backprop(
         leaves, treedef = jax.tree_flatten(tree)
         subkeys = jax.random.split(key, len(leaves))
         return jax.tree_unflatten(treedef, subkeys)
+
+    def get_bottom_k_mask(values, n_to_replace):
+        """Get mask for bottom k elements, JIT-compatible with no dynamic indexing."""
+        # Get array size
+        size = values.shape[-1]
+
+        # Create positions for tie-breaking
+        positions = jnp.arange(size)
+
+        # Compute ranks (smaller values → smaller ranks)
+        # Double argsort trick to get ranks with tie-breaking
+        eps = (
+            jnp.finfo(values.dtype).eps * 10.0
+        )  # Add small epsilon to avoid equal values
+        ranks = jnp.argsort(jnp.argsort(values + positions * eps))
+
+        # Create mask for values with rank < n_to_replace
+        mask = ranks < n_to_replace
+
+        return mask
 
     # @jax.jit
     def update(
@@ -220,12 +259,12 @@ def continual_backprop(
 
         # @jax.jit
         def update_utility(
-            layer_w: Array,
-            layer_b: Array,
-            utility: Array,
-            ages: Array,
+            layer_w: Float[Array, "#weights"],
+            layer_b: Float[Array, "#neurons"],
+            utility: Float[Array, "#neurons"],
+            ages: Float[Array, "#neurons"],
+            features: Float[Array, "#neurons"],
             key: PRNGKey,
-            features: Array,
             bound: float = 0.01,
         ):
             """
@@ -240,46 +279,42 @@ def continual_backprop(
             new_param = layer_w * state.decay_rate
 
             # features = layer_w  # Should be relu(wx+b), might have to overwrite apply updates like Angel said
-            updated_utility = (state.decay_rate * layer_w) + (
-                1 - state.decay_rate
-            ) * jnp.abs(features) * jnp.sum(layer_w)
+            updated_utility = (
+                (state.decay_rate * utility)
+                + (1 - state.decay_rate) * jnp.abs(features) * jnp.sum(layer_w)
+            ).flatten()  # Arr[#neurons]
 
             # get nodes over maturity threshold
-            # breakpoint()
             # mature_features_idx = jnp.where(ages > state.maturity_threshold)[0]
-            maturity_mask = ages > state.maturity_threshold ##
-            n_to_replace = int(jnp.sum(maturity_mask) * state.replacement_rate)
-
-            ## ----- jits till this line -----
+            maturity_mask = ages > state.maturity_threshold  ##
+            n_to_replace = jnp.round(
+                jnp.sum(maturity_mask) * state.replacement_rate
+            )  # int
 
             # mask utility if mature (immature inf util?)
             # mask bottom X utils
             # -- Sort and mask the k lowest
             # reset using this mask
 
-            updated_utility_masked = jnp.where(maturity_mask, jnp.inf, updated_utility)
-            sorted_utility = jnp.sort(updated_utility_masked, axis=-1) # NOTE: There might be a fast sort method, look into it
-            breakpoint()
-            #####
-            mature_utils = updated_utility[:, maturity_mask]
+            # Replace your problematic line with:
+            k_masked_utility = get_bottom_k_mask(updated_utility, n_to_replace)
+            # Why are exactly half the same?? How can I manage multiple utilities with the same value?
 
-            idx_nodes_to_reset = mature_utils[
-                jnp.argsort(mature_utils)[-n_to_replace:][::-1]
-            ]
-
-            # resetting outbound connections [128] per node
-            if len(idx_nodes_to_reset) > 0:
-                _layer_w = layer_w.at[idx_nodes_to_reset].set(
-                    random.uniform(key, layer_w.shape[1], float, -bound, bound)
-                )
-                _ages = ages.at[idx_nodes_to_reset].set(0.0)
-                _layer_b = layer_b.at[idx_nodes_to_reset].set(0.0)
-            else:
-                _layer_w = layer_w
-                _layer_b = layer_b
-                _ages = ages + 1
-
-            # For now let's just ignore activation and calculate the outputbased i+
+            _layer_w = jnp.where(
+                k_masked_utility,
+                random.uniform(key, layer_w.shape[-1], float, -bound, bound),
+                layer_w,
+            )
+            _ages = jnp.where(
+                k_masked_utility,
+                jnp.zeros(ages.shape),
+                ages,
+            )
+            _layer_b = jnp.where(
+                k_masked_utility,
+                jnp.zeros(layer_b.shape),
+                layer_b,
+            )
             return {
                 "kernel": _layer_w,
                 "bias": _layer_b,
@@ -289,15 +324,14 @@ def continual_backprop(
         def _continual_backprop(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-
             weights, bias, excluded = process_params(params)
 
             # because we need the next layers weight magnitude
-            _ages = jax.tree.map(lambda x: x + 1, state.ages)
+            # _ages = jax.tree.map(lambda x: x + 1, state.ages)
             _rng, util_key = random.split(state.rng)
             key_tree = gen_key_tree(util_key, weights)
 
-            print("key_tree:\n", key_tree["dense1"].shape)
+            ## DEBUG
             print("state.ages:\n", state.ages["dense1"].shape)
             print("state.utilities:\n", state.utilities["dense1"].shape)
             print("features:\n", features["dense1"].shape)
@@ -305,15 +339,14 @@ def continual_backprop(
             print("key_tree,", key_tree)
 
             # update_utility
-            # We will need to vmap over batches, for now using single batches
             cbp_update = jax.tree.map(
                 update_utility,
                 weights,
                 bias,
                 state.utilities,
                 state.ages,
-                key_tree,
                 features,
+                key_tree,
             )  # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
             # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
 
@@ -369,4 +402,29 @@ def continual_backprop(
             # next_layer_weight_sum = jax.tree.map(lambda layer: layer.sum(), params) # Instead of applying to each neuron we split it into layers now
             # updated_utility = (state.decay_rate * layer) + (1-state.decay_rate) * jnp.abs(features) * next_layer_weight_sum
             # idx_nodes_to_reset = lax.top_k_idx(, )
+
+            k_masked_utility = jax.lax.cond(
+                n_to_replace == 0,
+                lambda _: jnp.full_like(sorted_utility, fill_value=False, dtype=bool),
+                lambda _: jnp.asarray(sorted_utility < sorted_utility[n_to_replace - 1], dtype=bool),
+                operand=None
+            )
+
+            # resetting outbound connections [128] per node
+            # if len(idx_nodes_to_reset) > 0:
+            #     _layer_w = layer_w.at[idx_nodes_to_reset].set(
+            #         random.uniform(key, layer_w.shape[1], float, -bound, bound)
+            #     )
+            #     _ages = ages.at[idx_nodes_to_reset].set(0.0)
+            #     _layer_b = layer_b.at[idx_nodes_to_reset].set(0.0)
+            # else:
+            #     _layer_w = layer_w
+            #     _layer_b = layer_b
+            #     _ages = ages + 1
+
+            # mature_utils = updated_utility[:, maturity_mask]
+            #
+            # idx_nodes_to_reset = mature_utils[
+            #     jnp.argsort(mature_utils)[-n_to_replace:][::-1]
+            # ]
 """
