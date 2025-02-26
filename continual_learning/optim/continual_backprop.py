@@ -205,7 +205,7 @@ def continual_backprop(
 
         return mask
 
-    # @jax.jit
+    @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
@@ -223,7 +223,6 @@ def continual_backprop(
         # Calculate new_util based on util_type
         # util_function =
 
-        # @jax.jit
         def update_utility(
             layer_w: Float[Array, "#weights"],
             layer_b: Float[Array, "#neurons"],
@@ -297,11 +296,11 @@ def continual_backprop(
             key_tree = gen_key_tree(util_key, weights)
 
             ## DEBUG
-            print("state.ages:\n", state.ages["dense1"].shape)
-            print("state.utilities:\n", state.utilities["dense1"].shape)
-            print("features:\n", features["dense1"].shape)
-            print("weights:\n", weights["dense1"].shape)
-            print("key_tree,", key_tree)
+            # print("state.ages:\n", state.ages["dense1"].shape)
+            # print("state.utilities:\n", state.utilities["dense1"].shape)
+            # print("features:\n", features["dense1"].shape)
+            # print("weights:\n", weights["dense1"].shape)
+            # print("key_tree,", key_tree)
 
             # update_utility
             cbp_update = jax.tree.map(
