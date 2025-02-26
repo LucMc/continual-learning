@@ -1,3 +1,4 @@
+from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
@@ -12,74 +13,6 @@ import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
 
-# class ContinualBackprop(optax.GradientTransformation):
-#     def __init__(
-#         self,
-#         threshold: float = 0.1,
-#         sparsity: float = 0.5,
-#         begin_step: int = 0,
-#         end_step: None | int = None,
-#         frequency: int = 100,
-#     ):
-#         """Continual backpropergation optimiser.
-#
-#         Args:
-#             threshold: Magnitude threshold below which to prune
-#             sparsity: Target sparsity ratio (0 to 1)
-#             begin_step: Step to begin pruning
-#             end_step: Step to end pruning (None = no end)
-#             frequency: How often to update pruning mask
-#         """
-#         self.threshold = threshold
-#         self.sparsity = sparsity
-#         self.begin_step = begin_step
-#         self.end_step = end_step
-#         self.frequency = frequency
-#
-#     def init(self, params):
-#         """Initialize pruning state with mask of ones."""
-#         return PruningState(mask=jax.tree_map(lambda x: jnp.ones_like(x), params))
-#
-#     def update_mask(self, params, state):
-#         """Update pruning mask based on parameter magnitudes."""
-#         # Calculate magnitude of parameters
-#         magnitudes = jax.tree_map(lambda x: jnp.abs(x), params)
-#
-#         # Find threshold for desired sparsity
-#         flat_magnitudes = jax.tree_util.tree_leaves(magnitudes)
-#         flat_magnitudes = jnp.concatenate([x.ravel() for x in flat_magnitudes])
-#         threshold = jnp.quantile(flat_magnitudes, self.sparsity)
-#
-#         # Create new mask
-#         new_mask = jax.tree_map(
-#             lambda x: jnp.where(jnp.abs(x) > threshold, 1.0, 0.0), params
-#         )
-#         return new_mask
-#
-#     def update(self, updates, state, params=None):
-#         """Apply pruning transform to updates."""
-#         del params
-#
-#         # Increment counter
-#         new_count = state.count + 1
-#
-#         # Update mask if needed
-#         should_update = (
-#             (new_count >= self.begin_step)
-#             & ((self.end_step is None) | (new_count <= self.end_step))
-#             & (new_count % self.frequency == 0)
-#         )
-#
-#         def update_fn(mask, update):
-#             # Apply existing mask
-#             pruned_update = update * mask
-#             return pruned_update
-#
-#         # Apply mask to updates
-#         new_updates = jax.tree_map(update_fn, state.mask, updates)
-#
-#         return new_updates, PruningState(mask=state.mask, count=new_count)
-
 UTIL_TYPES = [
     "weight",
     "contribution",
@@ -88,44 +21,76 @@ UTIL_TYPES = [
     "adaptable_contribution",
     "feature_by_input",
 ]
-
+def check_tree_shapes(tree1: PyTree, tree2: PyTree):
+    ## assert tree shapes havn't changed
+    old_tree_structure = jax.tree_util.tree_structure(tree1)
+    new_tree_structure = jax.tree_util.tree_structure(tree2)
+    assert old_tree_structure == new_tree_structure, (
+        f"Tree structure has changed from {old_tree_structure} to {new_tree_structure}"
+    )
 
 class CBPTrainState(TrainState):
+    cbp_state: optax.OptState = struct.field(pytree_node=True)
+
+    @classmethod
+    def create(cls, *, apply_fn, params, tx, **kwargs):
+        """Creates a new instance with ``step=0`` and initialized ``opt_state``."""
+        # We exclude OWG params when present because they do not need opt states.
+        # params_with_opt = (
+        #   params['params'] if OVERWRITE_WITH_GRADIENT in params else params
+        # )
+        opt_state = tx.init(params)
+        cbp_state = continual_backprop().init(params)
+        return cls(
+          step=0,
+          apply_fn=apply_fn,
+          params=params,
+          tx=tx,
+          opt_state=opt_state,
+          cbp_state=cbp_state,
+          **kwargs,
+        )
+
+
     def apply_gradients(self, *, grads, features, **kwargs):
         """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
         # Extract the params we want to optimize
-        grads_with_opt = grads["params"]
-        # print("self.params", self.params)
-        params_with_opt = self.params["params"]
+        grads = grads["params"]
+        params_for_cbp = self.params["params"]
 
-        # Update with optimizer
-        # updates, new_opt_state = self.tx.update(
-        #     grads_with_opt, self.opt_state, params_with_opt, features=features
-        # )
-
-        new_params, new_opt_state = continual_backprop().update(
-            grads_with_opt,
-            self.opt_state[0],
-            params_with_opt,
+        # Update with continual backprop
+        new_params, new_cbp_state = continual_backprop().update(
+            grads,
+            self.cbp_state,
+            params_for_cbp,
             features=features["intermediates"]["activations"][0],
         )
-        old_tree_structure = jax.tree_util.tree_structure(params_with_opt)
-        new_tree_structure = jax.tree_util.tree_structure(new_params)
-        # assert old_tree_structure == new_tree_structure, (
-        #     f"Tree structure has changed from {old_tree_structure} to {new_tree_structure} after cbp update"
-        # )
-        # new_params_with_opt = optax.apply_updates(params_with_opt, updates)
+        
+        check_tree_shapes(new_params, params_for_cbp)
 
-        # Maintain the nested structure of params
-        new_params = {"params": new_params}
+        # Prepare for optax optimizer
+        params_for_opt = {"params": new_params}
+        grad_for_opt = {"params": grads}
+        
+        print("params_for_opt", params_for_opt.keys())
+        print("grad_for_opt", grad_for_opt.keys())
+        
+        # Get updates from optimizer
+        tx_updates, new_opt_state = self.tx.update(grad_for_opt, self.opt_state, params_for_opt)
+        
+        # FIXED: Apply updates to params_for_opt (which has 'params' key) not new_params
+        new_params_with_opt = optax.apply_updates(params_for_opt, tx_updates)
+        
+        # Extract the updated parameters from the nested structure
+        final_params = new_params_with_opt["params"]
 
         return self.replace(
             step=self.step + 1,
-            params=new_params,
+            params={"params": final_params},  # Make sure to maintain the 'params' structure
             opt_state=new_opt_state,
+            cbp_state=new_cbp_state[0],
             **kwargs,
         )
-
 
 @dataclass
 class CBPOptimState:
@@ -177,6 +142,7 @@ def continual_backprop(
     def process_params(params: FrozenDict):
         # seperates bias from params
         _params = deepcopy(params)  # ["params"]
+        # breakpoint()
         excluded = {
             "out_layer": _params.pop("out_layer")
         }  # TODO: pass excluded layer names as inputs to cp optim/final by default
@@ -269,10 +235,9 @@ def continual_backprop(
         ):
             """
             TODO:
-            > loops through weights and bias, skip biases if not needed note this will need to happen for util initialisation too
-            > features are after activation, can maybe just assume relu but remember last layer has no activation
-            > make actual bound
-            > Don't need an age for each connection, only each neuron in the network
+            > Only get the masks for which neurons need pruning
+            > Then process so that both layers are masked for pruning
+            > Prune based on new mask.
             """
 
             # Maybe have a dictionary of the different util func transformations and then call the index in a cond

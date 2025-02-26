@@ -174,11 +174,11 @@ def continual_sine_learning(
     params = net.init(init_key, dummy_input)
 
     # Initialize optimizers
-    cbp_tx = optax.chain(continual_backprop(), optax.adam(learning_rate))
+    # cbp_tx = optax.chain(continual_backprop(), optax.adam(learning_rate))
     adam_tx = optax.adam(learning_rate)
 
     # Create train states
-    cbp_state = CBPTrainState.create(apply_fn=net.predict, params=params, tx=cbp_tx)
+    cbp_state = CBPTrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
     adam_state = TrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
 
     # Define loss function

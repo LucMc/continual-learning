@@ -58,13 +58,13 @@ def test_optim():
     net_custom = FFNN()
     params = net_custom.init(key, dummy_input)
 
-    tx = optax.chain(
-        continual_backprop(),
-        # optax.adam(1e-1)  # Base optimiser
-    )
+    # tx = optax.chain(
+    #     continual_backprop(),
+    #     # optax.adam(1e-1)  # Base optimiser
+    # )
     tx_adam = optax.adam(0)
 
-    net_ts = CBPTrainState.create(apply_fn=net_custom.predict, params=params, tx=tx)
+    net_ts = CBPTrainState.create(apply_fn=net_custom.predict, params=params, tx=tx_adam)
     net_ts_adam = TrainState.create(
         apply_fn=net_custom.predict, params=params, tx=tx_adam
     )
