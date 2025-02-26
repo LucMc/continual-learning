@@ -12,6 +12,7 @@ import jax.random as random
 import jax.numpy as jnp
 from copy import deepcopy
 from functools import partial
+from dataclasses import field
 
 UTIL_TYPES = [
     "weight",
@@ -107,6 +108,7 @@ class CBPOptimState:
     decay_rate: float = 0.9
     maturity_threshold: int = 2  # 100
     accumulate: bool = False
+    logs: dict = field(default_factory=dict)
 
 def get_layer_bound(layer_shape, init='kaiming', gain=1.0):
     """Calculate initialization bounds similar to https://github.com/shibhansh/loss-of-plasticity/blob/main/lop/algos/cbp_linear.py"""
@@ -137,6 +139,14 @@ def continual_backprop(
     """
     Since when applying gradients you do params + updates, if we make the update
     to dead nodes (-weight value + reinit value) this would be the same as reinitialising
+
+    TODO for both in and out weights:
+     - Stop tree map ealy and just get the mask
+     - new function to reset_layer_pairs :: statis_args=num_pairs
+     - get each pair of layers i.e. [dense1, dense2],[dense2, dense3] etc.
+     - vmap over these, if layer1 utilities need reset (since utilities are the out end of weights, they're axis 1 anyway):
+       - reset row in layer1 (784)
+       - reset col in layer2 (128)
     """
 
     def process_params(params: FrozenDict):
@@ -212,16 +222,6 @@ def continual_backprop(
         params: optax.Params | None = None,
         features: PyTree | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
-        # util_functions = [
-        #     lambda x: output_weight_mag, # weight
-        #     lambda x: weight_mag * features.abs().mean(dim=1), # contribution
-        # lambda x: x, # adaptation
-        # lambda x: x, # zero_contribution
-        # lambda x: x, # adaptable_contribution
-        # lambda x: x, # feature_by_input
-        # ]
-        # Calculate new_util based on util_type
-        # util_function =
 
         def update_utility(
             layer_w: Float[Array, "#weights"],
@@ -249,16 +249,10 @@ def continual_backprop(
             ).flatten()  # Arr[#neurons]
 
             # get nodes over maturity threshold
-            # mature_features_idx = jnp.where(ages > state.maturity_threshold)[0]
             maturity_mask = ages > state.maturity_threshold  ##
             n_to_replace = jnp.round(
                 jnp.sum(maturity_mask) * state.replacement_rate
             )  # int
-
-            # mask utility if mature (immature inf util?)
-            # mask bottom X utils
-            # -- Sort and mask the k lowest
-            # reset using this mask
 
             # Replace your problematic line with:
             k_masked_utility = get_bottom_k_mask(updated_utility, n_to_replace)
@@ -283,6 +277,7 @@ def continual_backprop(
                 "kernel": _layer_w,
                 "bias": _layer_b,
                 "ages": _ages,
+                "logs": {"nodes_reset": n_to_replace}
             }
 
         def _continual_backprop(
@@ -292,7 +287,7 @@ def continual_backprop(
 
             # because we need the next layers weight magnitude
             # _ages = jax.tree.map(lambda x: x + 1, state.ages)
-            _rng, util_key = random.split(state.rng)
+            new_rng, util_key = random.split(state.rng)
             key_tree = gen_key_tree(util_key, weights)
 
             ## DEBUG
@@ -316,14 +311,16 @@ def continual_backprop(
 
             new_ages = {}
             new_params = {}
+            new_logs = {}
 
             # TODO: Replace with vmap/treemap
             def split_data(layer):
                 ages = layer.pop("ages")
-                return layer, ages
+                logs = layer.pop("logs")
+                return layer, ages, logs
 
             for key, value in cbp_update.items():
-                new_params[key], new_ages[key] = split_data(value)
+                new_params[key], new_ages[key], new_logs[key] = split_data(value)
 
             # IDEA: Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
             # num_new_features_to_replace = state.replacement_rate * eligable_features_to_replace
@@ -333,7 +330,8 @@ def continual_backprop(
 
             new_state = state.replace(
                 ages=new_ages,
-                rng=_rng,
+                rng=new_rng,
+                logs=new_logs
             )
             new_state = state
             new_params.update(excluded)
@@ -391,4 +389,14 @@ def continual_backprop(
             # idx_nodes_to_reset = mature_utils[
             #     jnp.argsort(mature_utils)[-n_to_replace:][::-1]
             # ]
+        # util_functions = [
+        #     lambda x: output_weight_mag, # weight
+        #     lambda x: weight_mag * features.abs().mean(dim=1), # contribution
+        # lambda x: x, # adaptation
+        # lambda x: x, # zero_contribution
+        # lambda x: x, # adaptable_contribution
+        # lambda x: x, # feature_by_input
+        # ]
+        # Calculate new_util based on util_type
+        # util_function =
 """

@@ -260,6 +260,7 @@ def continual_sine_learning(
         cbp_phase_losses = []
         adam_phase_losses = []
         adamw_phase_losses = []
+        extra_logs = []
 
         # Generate evaluation data for this phase
         key, eval_key = random.split(key)
@@ -286,6 +287,9 @@ def continual_sine_learning(
             cbp_phase_losses.append(float(cbp_loss))
             adam_phase_losses.append(float(adam_loss))
             adamw_phase_losses.append(float(adamw_loss))
+
+            # Extra logs
+            extra_logs.append(jax.tree.map(lambda x: int(x["nodes_reset"].sum()), cbp_state.cbp_state.logs))
 
         # Evaluate final performance on this phase
         cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
@@ -465,6 +469,7 @@ def continual_sine_learning(
                 print(
                     f"  AdamW Forgetting: {adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {adamw_tradeoff:.6f}"
                 )
+                print("nodes reset", extra_logs) ## nodes reset
 
             print("---")
 
