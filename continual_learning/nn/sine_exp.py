@@ -262,7 +262,6 @@ def continual_sine_learning(
         cbp_phase_losses = []
         adam_phase_losses = []
         adamw_phase_losses = []
-        extra_logs = {}
 
         # Generate evaluation data for this phase
         key, eval_key = random.split(key)
@@ -290,13 +289,6 @@ def continual_sine_learning(
             adam_phase_losses.append(float(adam_loss))
             adamw_phase_losses.append(float(adamw_loss))
 
-            # Extra logs
-            cbp_logs = cbp_state.cbp_state.logs # ["dense1", ..., "dense3"]
-            for value in cbp_logs.values():
-                extra_logs["nodes_reset"] = jax.tree.reduce(jnp.add, value["nodes_reset"])
-                breakpoint()
-                extra_logs["n_mature"] = jax.tree.reduce(jnp.add, value["n_mature"])
-                extra_logs["avg_age"] = jax.tree.reduce(jnp.mean, value["avg_age"])
 
         # Evaluate final performance on this phase
         cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
@@ -455,6 +447,7 @@ def continual_sine_learning(
         # Print progress
         if verbose and (shift_idx % 10 == 0 or shift_idx == num_phase_shifts - 1):
             elapsed = time.time() - start_time
+            print(":: Optimiser metrics ::")
             print(
                 f"Phase {shift_idx}/{num_phase_shifts}, Shift: {phase_shift:.2f}, Time: {elapsed:.1f}s"
             )
@@ -478,12 +471,23 @@ def continual_sine_learning(
                 print(
                     f"  AdamW Forgetting: {adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {adamw_tradeoff:.6f}"
                 )
-                print("nodes reset", extra_logs["nodes_reset"])
-                print("avg node age", jnp.mean(extra_logs["avg_age"]))
-                print("n_mature", jnp.mean(extra_logs["n_mature"]))
+
+            # Extra logs
+            cbp_logs = cbp_state.cbp_state.logs # ["dense1", ..., "dense3"]
+            first_value = next(iter(cbp_logs.values()))
+            extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
+
+            for k, v in cbp_logs.items():
+                extra_logs["nodes_reset"] += v["nodes_reset"] 
+                extra_logs["n_mature"] += v["n_mature"]      
+                extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
+
+            print(":: Extra Metrics ::")
+            print("nodes reset", extra_logs["nodes_reset"])
+            print("avg node age", jnp.mean(extra_logs["avg_age"]))
+            print("n_mature", jnp.mean(extra_logs["n_mature"]))
 
             print("---")
-
         # Save and plot results periodically
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
             plot_results(
@@ -679,7 +683,7 @@ def print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics):
 if __name__ == "__main__":
     # Use reasonable defaults for quick testing
     # For the full 20,000 shifts experiment, set debug_mode = False
-    debug_mode = False
+    debug_mode = True
 
     if debug_mode:
         # import bpdb

@@ -285,7 +285,7 @@ def continual_backprop(
                 "ages": _ages,
                 "logs": {
                     "nodes_reset": n_to_replace,
-                    "avg_age": jax.tree.reduce(jnp.mean, _ages),
+                    "avg_age": jnp.mean(_ages),
                     "n_mature": jnp.sum(maturity_mask),
                 },  # n_to_replace
             }
