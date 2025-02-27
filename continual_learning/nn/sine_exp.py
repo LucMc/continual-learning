@@ -294,6 +294,7 @@ def continual_sine_learning(
             cbp_logs = cbp_state.cbp_state.logs # ["dense1", ..., "dense3"]
             for value in cbp_logs.values():
                 extra_logs["nodes_reset"] = jax.tree.reduce(jnp.add, value["nodes_reset"])
+                breakpoint()
                 extra_logs["n_mature"] = jax.tree.reduce(jnp.add, value["n_mature"])
                 extra_logs["avg_age"] = jax.tree.reduce(jnp.mean, value["avg_age"])
 
