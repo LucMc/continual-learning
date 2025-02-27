@@ -73,13 +73,8 @@ class CBPTrainState(TrainState):
         params_for_opt = {"params": new_params}
         grad_for_opt = {"params": grads}
         
-        print("params_for_opt", params_for_opt.keys())
-        print("grad_for_opt", grad_for_opt.keys())
-        
         # Get updates from optimizer
         tx_updates, new_opt_state = self.tx.update(grad_for_opt, self.opt_state, params_for_opt)
-        
-        # FIXED: Apply updates to params_for_opt (which has 'params' key) not new_params
         new_params_with_opt = optax.apply_updates(params_for_opt, tx_updates)
         
         # Extract the updated parameters from the nested structure
@@ -104,7 +99,7 @@ class CBPOptimState:
 
     rng: PRNGKeyArray  # = random.PRNGKey(0)
     step_size: float = 0.001
-    replacement_rate: float = 0.001
+    replacement_rate: float = 0.01
     decay_rate: float = 0.9
     maturity_threshold: int = 2  # 100
     accumulate: bool = False
@@ -152,7 +147,6 @@ def continual_backprop(
     def process_params(params: FrozenDict):
         # seperates bias from params
         _params = deepcopy(params)  # ["params"]
-        # breakpoint()
         excluded = {
             "out_layer": _params.pop("out_layer")
         }  # TODO: pass excluded layer names as inputs to cp optim/final by default
@@ -266,7 +260,7 @@ def continual_backprop(
             _ages = jnp.where(
                 k_masked_utility,
                 jnp.zeros(ages.shape),
-                ages,
+                ages+1,
             )
             _layer_b = jnp.where(
                 k_masked_utility,
@@ -277,7 +271,9 @@ def continual_backprop(
                 "kernel": _layer_w,
                 "bias": _layer_b,
                 "ages": _ages,
-                "logs": {"nodes_reset": n_to_replace}
+                "logs": {"nodes_reset": n_to_replace,
+                         "avg_age": jax.tree.reduce(jnp.mean, _ages),
+                         "n_mature": jnp.sum(maturity_mask)} # n_to_replace
             }
 
         def _continual_backprop(
@@ -333,7 +329,6 @@ def continual_backprop(
                 rng=new_rng,
                 logs=new_logs
             )
-            new_state = state
             new_params.update(excluded)
 
             return new_params, (new_state,)  # For now

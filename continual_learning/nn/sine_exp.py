@@ -147,7 +147,7 @@ def continual_sine_learning(
     epochs_per_phase=100,  # Epochs to train on each phase
     batch_size=64,  # Batch size for training
     learning_rate=1e-3,  # Learning rate for optimizer
-    weight_decay=0.01,   # Weight decay for AdamW
+    weight_decay=0.01,  # Weight decay for AdamW
     phase_shift_step=0.1,  # Amount to shift the phase by each time
     eval_interval=100,  # How often to evaluate forgetting on previous tasks
     save_interval=1000,  # How often to save metrics
@@ -183,7 +183,9 @@ def continual_sine_learning(
     adamw_tx = optax.adamw(learning_rate, weight_decay=weight_decay)
 
     # Create train states
-    cbp_state = CBPTrainState.create(apply_fn=net.predict, params=params, tx=cbp_adam_tx)
+    cbp_state = CBPTrainState.create(
+        apply_fn=net.predict, params=params, tx=cbp_adam_tx
+    )
     adam_state = TrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
     adamw_state = TrainState.create(apply_fn=net.predict, params=params, tx=adamw_tx)
 
@@ -208,14 +210,13 @@ def continual_sine_learning(
         (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss
-        
+
     @jax.jit
     def train_adamw_step(state, inputs, targets):
         (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss
 
-    # JIT-compiled evaluation
     @jax.jit
     def evaluate(params, inputs, targets):
         predictions, _ = net.apply(params, inputs, mutable="intermediates")
@@ -238,7 +239,8 @@ def continual_sine_learning(
     adamw_current_losses = {}
 
     # print weight sizes
-    for name, param in cbp_state.params["params"].items(): print(name, param["kernel"].shape)
+    for name, param in cbp_state.params["params"].items():
+        print(name, param["kernel"].shape)
 
     # Main training loop for each phase shift
     start_time = time.time()
@@ -260,7 +262,7 @@ def continual_sine_learning(
         cbp_phase_losses = []
         adam_phase_losses = []
         adamw_phase_losses = []
-        extra_logs = []
+        extra_logs = {}
 
         # Generate evaluation data for this phase
         key, eval_key = random.split(key)
@@ -289,7 +291,11 @@ def continual_sine_learning(
             adamw_phase_losses.append(float(adamw_loss))
 
             # Extra logs
-            extra_logs.append(jax.tree.map(lambda x: int(x["nodes_reset"].sum()), cbp_state.cbp_state.logs))
+            cbp_logs = cbp_state.cbp_state.logs # ["dense1", ..., "dense3"]
+            for value in cbp_logs.values():
+                extra_logs["nodes_reset"] = jax.tree.reduce(jnp.add, value["nodes_reset"])
+                extra_logs["n_mature"] = jax.tree.reduce(jnp.add, value["n_mature"])
+                extra_logs["avg_age"] = jax.tree.reduce(jnp.mean, value["avg_age"])
 
         # Evaluate final performance on this phase
         cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
@@ -352,7 +358,9 @@ def continual_sine_learning(
                 # Evaluate on previous task
                 cbp_prev_loss = evaluate(cbp_state.params, prev_inputs, prev_targets)
                 adam_prev_loss = evaluate(adam_state.params, prev_inputs, prev_targets)
-                adamw_prev_loss = evaluate(adamw_state.params, prev_inputs, prev_targets)
+                adamw_prev_loss = evaluate(
+                    adamw_state.params, prev_inputs, prev_targets
+                )
 
                 # Update current losses
                 task_id = float(prev_shift)
@@ -430,7 +438,7 @@ def continual_sine_learning(
                 "tradeoff": adam_tradeoff,
             }
         )
-        
+
         adamw_metrics.append(
             {
                 "phase": shift_idx,
@@ -469,13 +477,17 @@ def continual_sine_learning(
                 print(
                     f"  AdamW Forgetting: {adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {adamw_tradeoff:.6f}"
                 )
-                print("nodes reset", extra_logs) ## nodes reset
+                print("nodes reset", extra_logs["nodes_reset"])
+                print("avg node age", jnp.mean(extra_logs["avg_age"]))
+                print("n_mature", jnp.mean(extra_logs["n_mature"]))
 
             print("---")
 
         # Save and plot results periodically
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
-            plot_results(cbp_metrics, adam_metrics, adamw_metrics, f"results_{shift_idx}")
+            plot_results(
+                cbp_metrics, adam_metrics, adamw_metrics, f"results_{shift_idx}"
+            )
 
     # Final analysis
     print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics)
@@ -485,6 +497,7 @@ def continual_sine_learning(
 
 def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="results"):
     """Plot metrics from the continual learning experiment using Altair."""
+
     # Prepare data for Altair
     def prepare_data(metrics_list, algorithm_name):
         data = []
@@ -496,105 +509,116 @@ def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="resu
                 "plasticity": metric["plasticity"],
                 "adaptation": metric["adaptation"],
                 "forgetting": metric["forgetting"],
-                "tradeoff": metric["tradeoff"]
+                "tradeoff": metric["tradeoff"],
             }
             data.append(entry)
         return data
-    
+
     # Combine data from all algorithms
-    data = (prepare_data(cbp_metrics, "CBP") + 
-            prepare_data(adam_metrics, "Adam") + 
-            prepare_data(adamw_metrics, "AdamW"))
+    data = (
+        prepare_data(cbp_metrics, "CBP")
+        + prepare_data(adam_metrics, "Adam")
+        + prepare_data(adamw_metrics, "AdamW")
+    )
     df = pl.DataFrame(data)
-    
+
     # Set some common properties for all charts
     width = 300
     height = 250
-    
+
     # Create individual charts
-    
+
     # Plot 1: Final loss
-    final_loss_chart = alt.Chart(df).mark_line().encode(
-        x=alt.X('phase:Q', title='Phase'),
-        y=alt.Y('final_loss:Q', title='MSE Loss'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'final_loss']
-    ).properties(
-        width=width,
-        height=height,
-        title='Final Loss After Each Phase'
+    final_loss_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("final_loss:Q", title="MSE Loss"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "final_loss"],
+        )
+        .properties(width=width, height=height, title="Final Loss After Each Phase")
     )
-    
+
     # Plot 2: Plasticity
-    plasticity_chart = alt.Chart(df).mark_line().encode(
-        x=alt.X('phase:Q', title='Phase'),
-        y=alt.Y('plasticity:Q', title='Plasticity'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'plasticity']
-    ).properties(
-        width=width,
-        height=height,
-        title='Neural Plasticity After Each Phase'
+    plasticity_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("plasticity:Q", title="Plasticity"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "plasticity"],
+        )
+        .properties(
+            width=width, height=height, title="Neural Plasticity After Each Phase"
+        )
     )
-    
+
     # Plot 3: Adaptation
-    adaptation_chart = alt.Chart(df).mark_line().encode(
-        x=alt.X('phase:Q', title='Phase'),
-        y=alt.Y('adaptation:Q', title='Improvement (Initial - Final Loss)'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'adaptation']
-    ).properties(
-        width=width,
-        height=height,
-        title='Adaptation to New Tasks'
+    adaptation_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("adaptation:Q", title="Improvement (Initial - Final Loss)"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "adaptation"],
+        )
+        .properties(width=width, height=height, title="Adaptation to New Tasks")
     )
-    
+
     # Plot 4: Forgetting
-    forgetting_chart = alt.Chart(df).mark_line().encode(
-        x=alt.X('phase:Q', title='Phase'),
-        y=alt.Y('forgetting:Q', title='Forgetting'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'forgetting']
-    ).properties(
-        width=width, 
-        height=height,
-        title='Catastrophic Forgetting'
+    forgetting_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("forgetting:Q", title="Forgetting"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "forgetting"],
+        )
+        .properties(width=width, height=height, title="Catastrophic Forgetting")
     )
-    
+
     # Plot 5: Stability-Plasticity Tradeoff
-    tradeoff_chart = alt.Chart(df).mark_line().encode(
-        x=alt.X('phase:Q', title='Phase'),
-        y=alt.Y('tradeoff:Q', title='Tradeoff Metric'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'tradeoff']
-    ).properties(
-        width=width,
-        height=height,
-        title='Stability-Plasticity Tradeoff'
+    tradeoff_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("tradeoff:Q", title="Tradeoff Metric"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "tradeoff"],
+        )
+        .properties(width=width, height=height, title="Stability-Plasticity Tradeoff")
     )
-    
+
     # Plot 6: Forgetting vs. Plasticity Scatterplot
-    scatter_chart = alt.Chart(df).mark_circle(size=60, opacity=0.7).encode(
-        x=alt.X('plasticity:Q', title='Plasticity'),
-        y=alt.Y('forgetting:Q', title='Forgetting'),
-        color=alt.Color('algorithm:N', legend=alt.Legend(title='Algorithm')),
-        tooltip=['phase', 'algorithm', 'plasticity', 'forgetting']
-    ).properties(
-        width=width,
-        height=height,
-        title='Plasticity vs. Forgetting'
+    scatter_chart = (
+        alt.Chart(df)
+        .mark_circle(size=60, opacity=0.7)
+        .encode(
+            x=alt.X("plasticity:Q", title="Plasticity"),
+            y=alt.Y("forgetting:Q", title="Forgetting"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "plasticity", "forgetting"],
+        )
+        .properties(width=width, height=height, title="Plasticity vs. Forgetting")
     )
-    
+
     # Combine charts into a grid layout
     row1 = alt.hconcat(final_loss_chart, plasticity_chart)
     row2 = alt.hconcat(adaptation_chart, forgetting_chart)
     row3 = alt.hconcat(tradeoff_chart, scatter_chart)
     final_chart = alt.vconcat(row1, row2, row3)
-    
+
     # Save the chart
-    if not os.path.exists("./results"): os.makedirs("results", exist_ok=True)
-    final_chart.save("./results/"+f"{filename_prefix}.svg")
-    
+    if not os.path.exists("./results"):
+        os.makedirs("results", exist_ok=True)
+    final_chart.save("./results/" + f"{filename_prefix}.svg")
+
     # Return the chart for display in notebooks
     return final_chart
 
@@ -624,7 +648,9 @@ def print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics):
 
     # Print summary table
     print("\n===== CONTINUAL LEARNING SUMMARY METRICS =====")
-    print(f"{'Metric':<20} {'CBP':<15} {'Adam':<15} {'AdamW':<15} {'CBP/Adam':<15} {'CBP/AdamW':<15}")
+    print(
+        f"{'Metric':<20} {'CBP':<15} {'Adam':<15} {'AdamW':<15} {'CBP/Adam':<15} {'CBP/AdamW':<15}"
+    )
     print("=" * 95)
     print(
         f"{'Average Loss':<20} {cbp_avg_loss:<15.6f} {adam_avg_loss:<15.6f} {adamw_avg_loss:<15.6f} "
@@ -655,6 +681,8 @@ if __name__ == "__main__":
     debug_mode = True
 
     if debug_mode:
+        # import bpdb
+        # bpdb.set_trace()
         # Debug settings for quick testing
         continual_sine_learning(
             num_phase_shifts=50,  # Reduced number of shifts for testing
@@ -671,9 +699,10 @@ if __name__ == "__main__":
             epochs_per_phase=100,  # Epochs to train on each phase
             batch_size=1,  # Batch size for training
             learning_rate=1e-3,  # Learning rate for optimizer
-            weight_decay=0.01,    # Weight decay for AdamW
+            weight_decay=0.01,  # Weight decay for AdamW
             phase_shift_step=0.1,  # Amount to shift the phase by each time
             eval_interval=100,  # How often to evaluate forgetting on previous tasks
             save_interval=1000,  # How often to save metrics
-            verbose=True  # Whether to print progress
+            verbose=True,  # Whether to print progress
         )
+
