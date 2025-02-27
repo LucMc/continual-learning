@@ -615,8 +615,8 @@ def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="resu
     final_chart = alt.vconcat(row1, row2, row3)
 
     # Save the chart
-    if not os.path.exists("./results"):
-        os.makedirs("results", exist_ok=True)
+    os.makedirs("results", exist_ok=True) # Create results dir if not exists
+
     final_chart.save("./results/" + f"{filename_prefix}.svg")
 
     # Return the chart for display in notebooks

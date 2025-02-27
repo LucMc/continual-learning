@@ -22,6 +22,8 @@ UTIL_TYPES = [
     "adaptable_contribution",
     "feature_by_input",
 ]
+
+
 def check_tree_shapes(tree1: PyTree, tree2: PyTree):
     ## assert tree shapes havn't changed
     old_tree_structure = jax.tree_util.tree_structure(tree1)
@@ -29,6 +31,7 @@ def check_tree_shapes(tree1: PyTree, tree2: PyTree):
     assert old_tree_structure == new_tree_structure, (
         f"Tree structure has changed from {old_tree_structure} to {new_tree_structure}"
     )
+
 
 class CBPTrainState(TrainState):
     cbp_state: optax.OptState = struct.field(pytree_node=True)
@@ -43,15 +46,14 @@ class CBPTrainState(TrainState):
         opt_state = tx.init(params)
         cbp_state = continual_backprop().init(params)
         return cls(
-          step=0,
-          apply_fn=apply_fn,
-          params=params,
-          tx=tx,
-          opt_state=opt_state,
-          cbp_state=cbp_state,
-          **kwargs,
+            step=0,
+            apply_fn=apply_fn,
+            params=params,
+            tx=tx,
+            opt_state=opt_state,
+            cbp_state=cbp_state,
+            **kwargs,
         )
-
 
     def apply_gradients(self, *, grads, features, **kwargs):
         """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
@@ -66,27 +68,32 @@ class CBPTrainState(TrainState):
             params_for_cbp,
             features=features["intermediates"]["activations"][0],
         )
-        
+
         check_tree_shapes(new_params, params_for_cbp)
 
         # Prepare for optax optimizer
         params_for_opt = {"params": new_params}
         grad_for_opt = {"params": grads}
-        
+
         # Get updates from optimizer
-        tx_updates, new_opt_state = self.tx.update(grad_for_opt, self.opt_state, params_for_opt)
+        tx_updates, new_opt_state = self.tx.update(
+            grad_for_opt, self.opt_state, params_for_opt
+        )
         new_params_with_opt = optax.apply_updates(params_for_opt, tx_updates)
-        
+
         # Extract the updated parameters from the nested structure
         final_params = new_params_with_opt["params"]
 
         return self.replace(
             step=self.step + 1,
-            params={"params": final_params},  # Make sure to maintain the 'params' structure
+            params={
+                "params": final_params
+            },  # Make sure to maintain the 'params' structure
             opt_state=new_opt_state,
             cbp_state=new_cbp_state[0],
             **kwargs,
         )
+
 
 @dataclass
 class CBPOptimState:
@@ -105,7 +112,8 @@ class CBPOptimState:
     accumulate: bool = False
     logs: dict = field(default_factory=dict)
 
-def get_layer_bound(layer_shape, init='kaiming', gain=1.0):
+
+def get_layer_bound(layer_shape, init="kaiming", gain=1.0):
     """Calculate initialization bounds similar to https://github.com/shibhansh/loss-of-plasticity/blob/main/lop/algos/cbp_linear.py"""
     if len(layer_shape) == 4:  # Conv layer
         in_channels = layer_shape[2]
@@ -115,12 +123,12 @@ def get_layer_bound(layer_shape, init='kaiming', gain=1.0):
     else:  # Linear layer
         in_features = layer_shape[0]
         out_features = layer_shape[1]
-        
-        if init == 'default':
+
+        if init == "default":
             bound = jnp.sqrt(1.0 / in_features)
-        elif init == 'xavier':
+        elif init == "xavier":
             bound = gain * jnp.sqrt(6.0 / (in_features + out_features))
-        elif init == 'lecun':
+        elif init == "lecun":
             bound = jnp.sqrt(3.0 / in_features)
         else:  # kaiming
             bound = gain * jnp.sqrt(3.0 / in_features)
@@ -216,7 +224,6 @@ def continual_backprop(
         params: optax.Params | None = None,
         features: PyTree | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
-
         def update_utility(
             layer_w: Float[Array, "#weights"],
             layer_b: Float[Array, "#neurons"],
@@ -252,15 +259,20 @@ def continual_backprop(
             k_masked_utility = get_bottom_k_mask(updated_utility, n_to_replace)
             # Why are exactly half the same?? How can I manage multiple utilities with the same value?
 
-            _layer_w = jnp.where(
-                k_masked_utility,
-                random.uniform(key, layer_w.shape[-1], float, -bound, bound),
+            random_weights = random.uniform(
+                key, layer_w.shape, float, -bound, bound
+            )  # Perhaps replace with init function
+
+            _layer_w = jnp.where(  # layer_w [inbound, #neurons]
+                k_masked_utility.reshape(1, -1),  # Reshape mask to (1, neurons) for explicit broadcasting
+                random_weights,
                 layer_w,
             )
+
             _ages = jnp.where(
                 k_masked_utility,
                 jnp.zeros(ages.shape),
-                ages+1,
+                ages + 1,
             )
             _layer_b = jnp.where(
                 k_masked_utility,
@@ -271,9 +283,11 @@ def continual_backprop(
                 "kernel": _layer_w,
                 "bias": _layer_b,
                 "ages": _ages,
-                "logs": {"nodes_reset": n_to_replace,
-                         "avg_age": jax.tree.reduce(jnp.mean, _ages),
-                         "n_mature": jnp.sum(maturity_mask)} # n_to_replace
+                "logs": {
+                    "nodes_reset": n_to_replace,
+                    "avg_age": jax.tree.reduce(jnp.mean, _ages),
+                    "n_mature": jnp.sum(maturity_mask),
+                },  # n_to_replace
             }
 
         def _continual_backprop(
@@ -324,11 +338,7 @@ def continual_backprop(
             # I actually think it's this layers weight sum since this layer weights connect to next
             # See """calculate feature utility""" because it looks a little different, certainly need features
 
-            new_state = state.replace(
-                ages=new_ages,
-                rng=new_rng,
-                logs=new_logs
-            )
+            new_state = state.replace(ages=new_ages, rng=new_rng, logs=new_logs)
             new_params.update(excluded)
 
             return new_params, (new_state,)  # For now
