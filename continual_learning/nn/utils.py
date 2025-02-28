@@ -88,3 +88,184 @@ def stability_plasticity_tradeoff(adaptation, forgetting):
         stability * adaptation
     )  # Good tradeoff means high adaptation with high stability
 
+
+def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="results"):
+    """Plot metrics from the continual learning experiment using Altair."""
+
+    # Prepare data for Altair
+    def prepare_data(metrics_list, algorithm_name):
+        data = []
+        for metric in metrics_list:
+            entry = {
+                "phase": metric["phase"],
+                "algorithm": algorithm_name,
+                "final_loss": metric["final_loss"],
+                "plasticity": metric["plasticity"],
+                "adaptation": metric["adaptation"],
+                "forgetting": metric["forgetting"],
+                "tradeoff": metric["tradeoff"],
+            }
+            data.append(entry)
+        return data
+
+    # Combine data from all algorithms
+    data = (
+        prepare_data(cbp_metrics, "CBP")
+        + prepare_data(adam_metrics, "Adam")
+        + prepare_data(adamw_metrics, "AdamW")
+    )
+    df = pl.DataFrame(data)
+
+    # Set some common properties for all charts
+    width = 300
+    height = 250
+
+    # Create individual charts
+
+    # Plot 1: Final loss
+    final_loss_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("final_loss:Q", title="MSE Loss"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "final_loss"],
+        )
+        .properties(width=width, height=height, title="Final Loss After Each Phase")
+    )
+
+    # Plot 2: Plasticity
+    plasticity_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("plasticity:Q", title="Plasticity"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "plasticity"],
+        )
+        .properties(
+            width=width, height=height, title="Neural Plasticity After Each Phase"
+        )
+    )
+
+    # Plot 3: Adaptation
+    adaptation_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("adaptation:Q", title="Improvement (Initial - Final Loss)"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "adaptation"],
+        )
+        .properties(width=width, height=height, title="Adaptation to New Tasks")
+    )
+
+    # Plot 4: Forgetting
+    forgetting_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("forgetting:Q", title="Forgetting"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "forgetting"],
+        )
+        .properties(width=width, height=height, title="Catastrophic Forgetting")
+    )
+
+    # Plot 5: Stability-Plasticity Tradeoff
+    tradeoff_chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("phase:Q", title="Phase"),
+            y=alt.Y("tradeoff:Q", title="Tradeoff Metric"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "tradeoff"],
+        )
+        .properties(width=width, height=height, title="Stability-Plasticity Tradeoff")
+    )
+
+    # Plot 6: Forgetting vs. Plasticity Scatterplot
+    scatter_chart = (
+        alt.Chart(df)
+        .mark_circle(size=60, opacity=0.7)
+        .encode(
+            x=alt.X("plasticity:Q", title="Plasticity"),
+            y=alt.Y("forgetting:Q", title="Forgetting"),
+            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+            tooltip=["phase", "algorithm", "plasticity", "forgetting"],
+        )
+        .properties(width=width, height=height, title="Plasticity vs. Forgetting")
+    )
+
+    # Combine charts into a grid layout
+    row1 = alt.hconcat(final_loss_chart, plasticity_chart)
+    row2 = alt.hconcat(adaptation_chart, forgetting_chart)
+    row3 = alt.hconcat(tradeoff_chart, scatter_chart)
+    final_chart = alt.vconcat(row1, row2, row3)
+
+    # Save the chart
+    os.makedirs("results", exist_ok=True) # Create results dir if not exists
+
+    final_chart.save("./results/" + f"{filename_prefix}.svg")
+
+    # Return the chart for display in notebooks
+    return final_chart
+
+
+def print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics):
+    """Print summary statistics for the continual learning experiment."""
+    # Calculate average metrics
+    cbp_avg_loss = np.mean([m["final_loss"] for m in cbp_metrics])
+    adam_avg_loss = np.mean([m["final_loss"] for m in adam_metrics])
+    adamw_avg_loss = np.mean([m["final_loss"] for m in adamw_metrics])
+
+    cbp_avg_plasticity = np.mean([m["plasticity"] for m in cbp_metrics])
+    adam_avg_plasticity = np.mean([m["plasticity"] for m in adam_metrics])
+    adamw_avg_plasticity = np.mean([m["plasticity"] for m in adamw_metrics])
+
+    cbp_avg_adaptation = np.mean([m["adaptation"] for m in cbp_metrics])
+    adam_avg_adaptation = np.mean([m["adaptation"] for m in adam_metrics])
+    adamw_avg_adaptation = np.mean([m["adaptation"] for m in adamw_metrics])
+
+    cbp_avg_forgetting = np.mean([m["forgetting"] for m in cbp_metrics])
+    adam_avg_forgetting = np.mean([m["forgetting"] for m in adam_metrics])
+    adamw_avg_forgetting = np.mean([m["forgetting"] for m in adamw_metrics])
+
+    cbp_avg_tradeoff = np.mean([m["tradeoff"] for m in cbp_metrics])
+    adam_avg_tradeoff = np.mean([m["tradeoff"] for m in adam_metrics])
+    adamw_avg_tradeoff = np.mean([m["tradeoff"] for m in adamw_metrics])
+
+    # Print summary table
+    print("\n===== CONTINUAL LEARNING SUMMARY METRICS =====")
+    print(
+        f"{'Metric':<20} {'CBP':<15} {'Adam':<15} {'AdamW':<15} {'CBP/Adam':<15} {'CBP/AdamW':<15}"
+    )
+    print("=" * 95)
+    print(
+        f"{'Average Loss':<20} {cbp_avg_loss:<15.6f} {adam_avg_loss:<15.6f} {adamw_avg_loss:<15.6f} "
+        f"{cbp_avg_loss / adam_avg_loss:<15.6f} {cbp_avg_loss / adamw_avg_loss:<15.6f}"
+    )
+    print(
+        f"{'Average Plasticity':<20} {cbp_avg_plasticity:<15.6f} {adam_avg_plasticity:<15.6f} {adamw_avg_plasticity:<15.6f} "
+        f"{cbp_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_avg_plasticity / adamw_avg_plasticity:<15.6f}"
+    )
+    print(
+        f"{'Average Adaptation':<20} {cbp_avg_adaptation:<15.6f} {adam_avg_adaptation:<15.6f} {adamw_avg_adaptation:<15.6f} "
+        f"{cbp_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_avg_adaptation / adamw_avg_adaptation:<15.6f}"
+    )
+    print(
+        f"{'Average Forgetting':<20} {cbp_avg_forgetting:<15.6f} {adam_avg_forgetting:<15.6f} {adamw_avg_forgetting:<15.6f} "
+        f"{cbp_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f}"
+    )
+    print(
+        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff:<15.6f} {adam_avg_tradeoff:<15.6f} {adamw_avg_tradeoff:<15.6f} "
+        f"{cbp_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f}"
+    )
+    print("=" * 95)
+
+
