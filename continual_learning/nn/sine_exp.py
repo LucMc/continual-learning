@@ -16,6 +16,7 @@ from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
 )
+import continual_learning.nn.utils as utils
 
 
 class SineNet(nn.Module):
@@ -59,87 +60,7 @@ def generate_sine_data(
     return x, y
 
 
-def compute_plasticity_metrics(old_params, new_params):
-    """Compute metrics related to neural plasticity."""
-    metrics = {}
 
-    # Calculate weight changes for each layer
-    total_abs_change = 0
-    total_weights = 0
-    layer_metrics = {}
-
-    for layer_name, layer_params in old_params.items():
-        if isinstance(layer_params, dict) and "kernel" in layer_params:
-            old_weights = layer_params["kernel"]
-            new_weights = new_params[layer_name]["kernel"]
-
-            # Calculate changes
-            abs_changes = jnp.abs(new_weights - old_weights)
-
-            # Per-layer metrics
-            layer_metrics[layer_name] = {
-                "mean_change": float(abs_changes.mean()),
-                "max_change": float(abs_changes.max()),
-                "positive_changes": float(
-                    (new_weights > old_weights).sum() / old_weights.size
-                ),
-                "negative_changes": float(
-                    (new_weights < old_weights).sum() / old_weights.size
-                ),
-            }
-
-            # Update totals
-            total_abs_change += jnp.sum(abs_changes)
-            total_weights += old_weights.size
-
-    # Overall metrics
-    metrics["total_plasticity"] = float(total_abs_change / max(total_weights, 1))
-    metrics["layer_metrics"] = layer_metrics
-
-    return metrics
-
-
-def compute_forgetting_metrics(current_losses, best_losses):
-    """
-    Compute metrics related to catastrophic forgetting.
-
-    Args:
-        current_losses: Dictionary mapping task IDs to current losses
-        best_losses: Dictionary mapping task IDs to best achieved losses
-    """
-    if not current_losses or not best_losses:
-        return {"avg_forgetting": 0.0, "max_forgetting": 0.0}
-
-    # Calculate forgetting for each task
-    forgetting_by_task = {}
-    total_forgetting = 0.0
-    max_forgetting = 0.0
-
-    for task_id, best_loss in best_losses.items():
-        if task_id in current_losses:
-            forgetting = max(
-                0.0, current_losses[task_id] - best_loss
-            )  # Only positive forgetting
-            forgetting_by_task[task_id] = forgetting
-            total_forgetting += forgetting
-            max_forgetting = max(max_forgetting, forgetting)
-
-    # Average forgetting
-    avg_forgetting = total_forgetting / max(len(forgetting_by_task), 1)
-
-    return {
-        "avg_forgetting": float(avg_forgetting),
-        "max_forgetting": float(max_forgetting),
-        "forgetting_by_task": forgetting_by_task,
-    }
-
-
-def stability_plasticity_tradeoff(adaptation, forgetting):
-    """Calculate the stability-plasticity tradeoff metric."""
-    stability = 1.0 / (1.0 + forgetting)  # Higher forgetting means lower stability
-    return (
-        stability * adaptation
-    )  # Good tradeoff means high adaptation with high stability
 
 
 def continual_sine_learning(
@@ -312,13 +233,13 @@ def continual_sine_learning(
         adamw_current_losses[task_id] = float(adamw_final_loss)
 
         # Compute plasticity metrics
-        cbp_plasticity = compute_plasticity_metrics(
+        cbp_plasticity = utils.compute_plasticity_metrics(
             cbp_initial_params, cbp_state.params["params"]
         )
-        adam_plasticity = compute_plasticity_metrics(
+        adam_plasticity = utils.compute_plasticity_metrics(
             adam_initial_params, adam_state.params["params"]
         )
-        adamw_plasticity = compute_plasticity_metrics(
+        adamw_plasticity = utils.compute_plasticity_metrics(
             adamw_initial_params, adamw_state.params["params"]
         )
 
@@ -362,24 +283,24 @@ def continual_sine_learning(
                 adamw_current_losses[task_id] = float(adamw_prev_loss)
 
             # Compute overall forgetting metrics
-            cbp_forgetting = compute_forgetting_metrics(
+            cbp_forgetting = utils.compute_forgetting_metrics(
                 cbp_current_losses, cbp_best_losses
             )
-            adam_forgetting = compute_forgetting_metrics(
+            adam_forgetting = utils.compute_forgetting_metrics(
                 adam_current_losses, adam_best_losses
             )
-            adamw_forgetting = compute_forgetting_metrics(
+            adamw_forgetting = utils.compute_forgetting_metrics(
                 adamw_current_losses, adamw_best_losses
             )
 
         # Calculate stability-plasticity tradeoff
-        cbp_tradeoff = stability_plasticity_tradeoff(
+        cbp_tradeoff = utils.stability_plasticity_tradeoff(
             cbp_adaptation, cbp_forgetting["avg_forgetting"]
         )
-        adam_tradeoff = stability_plasticity_tradeoff(
+        adam_tradeoff = utils.stability_plasticity_tradeoff(
             adam_adaptation, adam_forgetting["avg_forgetting"]
         )
-        adamw_tradeoff = stability_plasticity_tradeoff(
+        adamw_tradeoff = utils.stability_plasticity_tradeoff(
             adamw_adaptation, adamw_forgetting["avg_forgetting"]
         )
 
