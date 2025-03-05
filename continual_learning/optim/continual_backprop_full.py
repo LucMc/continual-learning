@@ -244,6 +244,10 @@ def continual_backprop(
             # print("key_tree,", key_tree)
 
             """
+            Notes:
+            > Slippery ant w/ fixerd friction at 1 seems to work but not cont
+            > Try Cont wrapper but min and max range basically ~1
+
             Plan:
             > Reproduce the half implementation but in 2 tree_map stages
             > for loop through reset mask to relect the masking
