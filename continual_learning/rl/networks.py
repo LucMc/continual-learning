@@ -5,14 +5,14 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from mtrl.config.networks import (
+from continual_learning.config.networks import (
     ContinuousActionPolicyConfig,
     QValueFunctionConfig,
     ValueFunctionConfig,
 )
-from mtrl.nn import get_nn_arch_for_config
-from mtrl.nn.distributions import TanhMultivariateNormalDiag
-from mtrl.nn.initializers import uniform
+from continual_learning.nn import get_nn_arch_for_config
+from continual_learning.nn.distributions import TanhMultivariateNormalDiag
+from continual_learning.nn.initializers import uniform
 
 
 class ContinuousActionPolicy(nn.Module):

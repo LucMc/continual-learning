@@ -4,7 +4,7 @@ from functools import cached_property
 
 import gymnasium as gym
 
-from mtrl.types import Agent
+from continual_learning.types import Agent
 
 
 @dataclass(frozen=True)

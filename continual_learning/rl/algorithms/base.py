@@ -9,16 +9,16 @@ import orbax.checkpoint as ocp
 import wandb
 from flax import struct
 
-from mtrl.checkpoint import get_checkpoint_save_args
-from mtrl.config.rl import (
+from continual_learning.checkpoint import get_checkpoint_save_args
+from continual_learning.config.rl import (
     AlgorithmConfig,
     OnPolicyTrainingConfig,
     OffPolicyTrainingConfig,
     TrainingConfig,
 )
-from mtrl.envs import EnvConfig
-from mtrl.rl.buffers import MultiTaskReplayBuffer, MultiTaskRolloutBuffer
-from mtrl.types import (
+from continual_learning.envs import EnvConfig
+from continual_learning.rl.buffers import MultiTaskReplayBuffer, MultiTaskRolloutBuffer
+from continual_learning.types import (
     Action,
     Agent,
     CheckpointMetadata,

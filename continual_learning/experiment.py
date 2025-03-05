@@ -9,22 +9,23 @@ import jax
 import numpy as np
 import orbax.checkpoint as ocp
 import wandb
+import gymnasium as gym
 
-from mtrl.checkpoint import (
+from continual_learning.checkpoint import (
     Checkpoint,
     get_checkpoint_restore_args,
     get_last_agent_checkpoint_save_args,
     get_metadata_only_restore_args,
     load_env_checkpoints,
 )
-from mtrl.config.rl import AlgorithmConfig, OffPolicyTrainingConfig, TrainingConfig
-from mtrl.envs import EnvConfig
-from mtrl.rl.algorithms import (
+from continual_learning.config.rl import OffPolicyTrainingConfig, TrainingConfig, AlgorithmConfig
+from continual_learning.envs import EnvConfig
+from continual_learning.rl.algorithms import (
     Algorithm,
     OffPolicyAlgorithm,
     get_algorithm_for_config,
 )
-from mtrl.types import CheckpointMetadata
+from continual_learning.types import CheckpointMetadata
 
 
 @dataclass
@@ -90,13 +91,17 @@ class Experiment:
             dir=str(self._get_data_dir()), id=run_id, name=self.exp_name, **wandb_kwargs
         )
 
-    def run(self) -> None:
-        if jax.device_count("gpu") < 1 and jax.device_count("tpu") < 1:
-            raise RuntimeError(
-                "No accelerator found, aborting. Devices: %s" % jax.devices()
-            )
+    def spawn(self, **kwargs): # Dummy for now
+        return gym.make_vec("LunarLanderContinuous-v3", num_envs=10)
 
-        envs = self.env.spawn(seed=self.seed)
+        
+    def run(self) -> None:
+        # if jax.device_count("gpu") < 1 and jax.device_count("tpu") < 1:
+        #     raise RuntimeWarning(
+        #         "No accelerator found, aborting. Devices: %s" % jax.devices()
+        #     )
+
+        envs = self.spawn(seed=self.seed)
 
         algorithm_cls = get_algorithm_for_config(self.algorithm)
         algorithm: Algorithm

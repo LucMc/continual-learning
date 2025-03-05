@@ -2,7 +2,7 @@ import chex
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from mtrl.types import Intermediates, LayerActivationsDict, LogDict
+from continual_learning.types import Intermediates, LayerActivationsDict, LogDict
 
 
 def compute_srank(

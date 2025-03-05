@@ -14,25 +14,9 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-UTIL_TYPES = [
-    "weight",
-    "contribution",
-    "adaptation",
-    "zero_contribution",
-    "adaptable_contribution",
-    "feature_by_input",
-]
+import continual_learning.optim.utils as utils
 
-
-def check_tree_shapes(tree1: PyTree, tree2: PyTree):
-    ## assert tree shapes havn't changed
-    old_tree_structure = jax.tree_util.tree_structure(tree1)
-    new_tree_structure = jax.tree_util.tree_structure(tree2)
-    assert old_tree_structure == new_tree_structure, (
-        f"Tree structure has changed from {old_tree_structure} to {new_tree_structure}"
-    )
-
-
+# Overall optimizer TrainState
 class CBPTrainState(TrainState):
     cbp_state: optax.OptState = struct.field(pytree_node=True)
 
@@ -69,7 +53,7 @@ class CBPTrainState(TrainState):
             features=features["intermediates"]["activations"][0],
         )
 
-        check_tree_shapes(new_params, params_for_cbp)
+        utils.check_tree_shapes(new_params, params_for_cbp)
 
         # Prepare for optax optimizer
         params_for_opt = {"params": new_params}
@@ -94,7 +78,7 @@ class CBPTrainState(TrainState):
             **kwargs,
         )
 
-
+# CBP Optimizer TrainState (input to overall optim cls above)
 @dataclass
 class CBPOptimState:
     # Things you shouldn't really mess with
@@ -111,28 +95,6 @@ class CBPOptimState:
     maturity_threshold: int = 2  # 100
     accumulate: bool = False
     logs: dict = field(default_factory=dict)
-
-
-def get_layer_bound(layer_shape, init="kaiming", gain=1.0):
-    """Calculate initialization bounds similar to https://github.com/shibhansh/loss-of-plasticity/blob/main/lop/algos/cbp_linear.py"""
-    if len(layer_shape) == 4:  # Conv layer
-        in_channels = layer_shape[2]
-        kernel_size = layer_shape[0] * layer_shape[1]
-        return jnp.sqrt(1.0 / (in_channels * kernel_size))
-
-    else:  # Linear layer
-        in_features = layer_shape[0]
-        out_features = layer_shape[1]
-
-        if init == "default":
-            bound = jnp.sqrt(1.0 / in_features)
-        elif init == "xavier":
-            bound = gain * jnp.sqrt(6.0 / (in_features + out_features))
-        elif init == "lecun":
-            bound = jnp.sqrt(3.0 / in_features)
-        else:  # kaiming
-            bound = gain * jnp.sqrt(3.0 / in_features)
-        return bound
 
 
 # Give this the ContinualBackpropState params
@@ -169,8 +131,8 @@ def continual_backprop(
         return weights, bias, excluded
 
     def init(params: optax.Params):
-        assert util_type in UTIL_TYPES, ValueError(
-            f"Invalid util type, select from ({'|'.join(UTIL_TYPES)})"
+        assert util_type in utils.UTIL_TYPES, ValueError(
+            f"Invalid util type, select from ({'|'.join(utils.UTIL_TYPES)})"
         )
         weights, bias, _ = process_params(params["params"])
 
@@ -180,7 +142,7 @@ def continual_backprop(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree_map(lambda x: jnp.zeros_like(x), bias),
-            util_type_id=UTIL_TYPES.index(
+            util_type_id=utils.UTIL_TYPES.index(
                 util_type
             ),  # Replace with util function directly?
             accumulated_features_to_replace=0,
@@ -188,34 +150,6 @@ def continual_backprop(
             **kwargs,
         )
 
-    def gen_key_tree(key: PRNGKeyArray, tree: PyTree):
-        """
-        Creates a PyTree of random keys such that is can be traversed in the tree map and have
-        a new key for each leaf.
-        """
-        leaves, treedef = jax.tree_flatten(tree)
-        subkeys = jax.random.split(key, len(leaves))
-        return jax.tree_unflatten(treedef, subkeys)
-
-    def get_bottom_k_mask(values, n_to_replace):
-        """Get mask for bottom k elements, JIT-compatible with no dynamic indexing."""
-        # Get array size
-        size = values.shape[-1]
-
-        # Create positions for tie-breaking
-        positions = jnp.arange(size)
-
-        # Compute ranks (smaller values → smaller ranks)
-        # Double argsort trick to get ranks with tie-breaking
-        eps = (
-            jnp.finfo(values.dtype).eps * 10.0
-        )  # Add small epsilon to avoid equal values
-        ranks = jnp.argsort(jnp.argsort(values + positions * eps))
-
-        # Create mask for values with rank < n_to_replace
-        mask = ranks < n_to_replace
-
-        return mask
 
     @jax.jit
     def update(
@@ -224,7 +158,7 @@ def continual_backprop(
         params: optax.Params | None = None,
         features: PyTree | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
-        def update_utility(
+        def get_reset_mask(
             layer_w: Float[Array, "#weights"],
             layer_b: Float[Array, "#neurons"],
             utility: Float[Array, "#neurons"],
@@ -255,10 +189,12 @@ def continual_backprop(
                 jnp.sum(maturity_mask) * state.replacement_rate
             )  # int
 
-            # Replace your problematic line with:
-            k_masked_utility = get_bottom_k_mask(updated_utility, n_to_replace)
+            k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)
             # Why are exactly half the same?? How can I manage multiple utilities with the same value?
 
+            return k_masked_utility
+
+        def update_params():
             random_weights = random.uniform(
                 key, layer_w.shape, float, -bound, bound
             )  # Perhaps replace with init function
@@ -279,16 +215,16 @@ def continual_backprop(
                 jnp.zeros(layer_b.shape),
                 layer_b,
             )
-            return {
-                "kernel": _layer_w,
-                "bias": _layer_b,
-                "ages": _ages,
-                "logs": {
-                    "nodes_reset": n_to_replace,
-                    "avg_age": jnp.mean(_ages),
-                    "n_mature": jnp.sum(maturity_mask),
-                },  # n_to_replace
-            }
+            # return {
+            #     "kernel": _layer_w,
+            #     "bias": _layer_b,
+            #     "ages": _ages,
+            #     "logs": {
+            #         "nodes_reset": n_to_replace,
+            #         "avg_age": jnp.mean(_ages),
+            #         "n_mature": jnp.sum(maturity_mask),
+            #     },  # n_to_replace
+            # }
 
         def _continual_backprop(
             updates: optax.Updates,
@@ -298,7 +234,7 @@ def continual_backprop(
             # because we need the next layers weight magnitude
             # _ages = jax.tree.map(lambda x: x + 1, state.ages)
             new_rng, util_key = random.split(state.rng)
-            key_tree = gen_key_tree(util_key, weights)
+            key_tree = utils.gen_key_tree(util_key, weights)
 
             ## DEBUG
             # print("state.ages:\n", state.ages["dense1"].shape)
@@ -307,16 +243,29 @@ def continual_backprop(
             # print("weights:\n", weights["dense1"].shape)
             # print("key_tree,", key_tree)
 
+            """
+            Plan:
+            > Reproduce the half implementation but in 2 tree_map stages
+            > for loop through reset mask to relect the masking
+            > Test full implementation vs half vs None
+            > Figure out smarter way, avoiding for loop
+            > Write tests for full implementation
+            > Swap to cleanRL PPO w/ custom network optims
+            > Results for: Sine regression, SlipperyAnt, ContinualDelays
+            > Done
+            """
             # update_utility
-            cbp_update = jax.tree.map(
-                update_utility,
+            reset_mask = jax.tree.map(
+                get_reset_mask(),
                 weights,
                 bias,
                 state.utilities,
                 state.ages,
                 features,
                 key_tree,
-            )  # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
+            )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
+
+            # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
             # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
 
             new_ages = {}

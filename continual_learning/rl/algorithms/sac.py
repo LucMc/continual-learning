@@ -17,17 +17,17 @@ from flax.core import FrozenDict
 from flax.training.train_state import TrainState
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from mtrl.config.networks import ContinuousActionPolicyConfig, QValueFunctionConfig
-from mtrl.config.optim import OptimizerConfig
-from mtrl.config.rl import AlgorithmConfig
-from mtrl.envs import EnvConfig
-from mtrl.monitoring.metrics import (
+from continual_learning.config.networks import ContinuousActionPolicyConfig, QValueFunctionConfig
+from continual_learning.config.optim import OptimizerConfig
+from continual_learning.config.rl import AlgorithmConfig
+from continual_learning.envs import EnvConfig
+from continual_learning.monitoring.metrics import (
     compute_srank,
     extract_activations,
     get_dormant_neuron_logs,
 )
-from mtrl.rl.networks import ContinuousActionPolicy, Ensemble, QValueFunction
-from mtrl.types import (
+from continual_learning.rl.networks import ContinuousActionPolicy, Ensemble, QValueFunction
+from continual_learning.types import (
     Action,
     Intermediates,
     LayerActivationsDict,

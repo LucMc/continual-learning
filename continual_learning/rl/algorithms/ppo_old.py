@@ -11,17 +11,17 @@ from flax import struct
 from flax.core import FrozenDict
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from mtrl.config.networks import ContinuousActionPolicyConfig, ValueFunctionConfig
-from mtrl.config.rl import AlgorithmConfig
-from mtrl.envs import EnvConfig
-from mtrl.monitoring.metrics import (
+from continual_learning.config.networks import ContinuousActionPolicyConfig, ValueFunctionConfig
+from continual_learning.config.rl import AlgorithmConfig
+from continual_learning.envs import EnvConfig
+from continual_learning.monitoring.metrics import (
     compute_srank,
     extract_activations,
     get_dormant_neuron_logs,
 )
-from mtrl.optim.pcgrad import PCGradState
-from mtrl.rl.networks import ContinuousActionPolicy, ValueFunction
-from mtrl.types import (
+from continual_learning.optim.pcgrad import PCGradState
+from continual_learning.rl.networks import ContinuousActionPolicy, ValueFunction
+from continual_learning.types import (
     Action,
     Intermediates,
     LogDict,
@@ -79,7 +79,8 @@ def _sample_action_dist_and_value(
 
 
 @dataclass(frozen=True)
-class MTPPOConfig(AlgorithmConfig):
+class PPOConfig:
+    gamma: float = 0.99
     policy_config: ContinuousActionPolicyConfig = ContinuousActionPolicyConfig()
     vf_config: ValueFunctionConfig = ValueFunctionConfig()
     clip_eps: float = 0.2
@@ -87,9 +88,11 @@ class MTPPOConfig(AlgorithmConfig):
     entropy_coefficient: float = 5e-3
     vf_coefficient: float = 0.001
     normalize_advantages: bool = True
+    num_tasks: int = 1
+    multi_task_optimizer = None
+    gamma: float = 0.99
 
-
-class MTPPO(OnPolicyAlgorithm[MTPPOConfig]):
+class PPO(OnPolicyAlgorithm[PPOConfig]):
     policy: TrainState
     value_function: TrainState
     key: PRNGKeyArray
@@ -105,8 +108,8 @@ class MTPPO(OnPolicyAlgorithm[MTPPOConfig]):
     @override
     @staticmethod
     def initialize(
-        config: MTPPOConfig, env_config: EnvConfig, seed: int = 1
-    ) -> "MTPPO":
+        config: PPOConfig, env_config: EnvConfig, seed: int = 1
+    ) -> "PPO":
         assert isinstance(env_config.action_space, gym.spaces.Box), (
             "Non-box spaces currently not supported."
         )
@@ -142,7 +145,7 @@ class MTPPO(OnPolicyAlgorithm[MTPPOConfig]):
         print("Vf Arch:", jax.tree_util.tree_map(jnp.shape, value_function.params))
         print("Vf Params:", sum(x.size for x in jax.tree.leaves(value_function.params)))
 
-        return MTPPO(
+        return PPO(
             num_tasks=config.num_tasks,
             policy=policy,
             value_function=value_function,
@@ -315,13 +318,13 @@ class MTPPO(OnPolicyAlgorithm[MTPPOConfig]):
     @override
     def update(self, data: ReplayBufferSamples | Rollout) -> tuple[Self, LogDict]:
         assert isinstance(data, Rollout), (
-            "MTPPO does not support replay buffer samples."
+            "PPO does not support replay buffer samples."
         )
         assert data.log_probs is not None, (
             "Rollout policy log probs must have been recorded."
         )
-        assert data.advantages is not None, "GAE must be enabled for MTPPO."
-        assert data.returns is not None, "Returns must be computed for MTPPO."
+        assert data.advantages is not None, "GAE must be enabled for PPO."
+        assert data.returns is not None, "Returns must be computed for PPO."
         return self._update_inner(data)
 
     @jax.jit

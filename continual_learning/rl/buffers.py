@@ -4,7 +4,7 @@ import gymnasium as gym
 import numpy as np
 import numpy.typing as npt
 
-from mtrl.types import (
+from continual_learning.types import (
     Action,
     Observation,
     ReplayBufferCheckpoint,

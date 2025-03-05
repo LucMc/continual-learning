@@ -5,18 +5,18 @@ import jax.numpy as jnp
 import jax.random as random
 import optax
 from flax.training.train_state import TrainState
-import altair as alt
-import polars as pl
 import numpy as np
 import time
 from typing import Dict, Any, Tuple, List
 
 # Import the continual backprop optimizer
-from continual_learning.optim.continual_backprop import (
+from continual_learning.optim.continual_backprop_full import (
     continual_backprop,
     CBPTrainState,
 )
 import continual_learning.nn.utils as utils
+
+import tyro
 
 
 class SineNet(nn.Module):
@@ -58,9 +58,6 @@ def generate_sine_data(
     noise = noise_level * random.normal(key2, (batch_size, 1))
     y = amplitude * jnp.sin(x + phase_shift) + noise
     return x, y
-
-
-
 
 
 def continual_sine_learning(
@@ -209,7 +206,6 @@ def continual_sine_learning(
             cbp_phase_losses.append(float(cbp_loss))
             adam_phase_losses.append(float(adam_loss))
             adamw_phase_losses.append(float(adamw_loss))
-
 
         # Evaluate final performance on this phase
         cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
@@ -394,13 +390,13 @@ def continual_sine_learning(
                 )
 
             # Extra logs
-            cbp_logs = cbp_state.cbp_state.logs # ["dense1", ..., "dense3"]
+            cbp_logs = cbp_state.cbp_state.logs  # ["dense1", ..., "dense3"]
             first_value = next(iter(cbp_logs.values()))
             extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
 
             for k, v in cbp_logs.items():
-                extra_logs["nodes_reset"] += v["nodes_reset"] 
-                extra_logs["n_mature"] += v["n_mature"]      
+                extra_logs["nodes_reset"] += v["nodes_reset"]
+                extra_logs["n_mature"] += v["n_mature"]
                 extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
 
             print(":: Extra Metrics ::")
@@ -451,4 +447,3 @@ if __name__ == "__main__":
             save_interval=1000,  # How often to save metrics
             verbose=True,  # Whether to print progress
         )
-

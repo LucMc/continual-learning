@@ -10,7 +10,7 @@ import numpy as np
 from mtrl.types import Agent
 
 from .base import EnvConfig
-from metaworld.evaluation import evaluation
+# from metaworld.evaluation import evaluation
 
 
 @dataclass(frozen=True)

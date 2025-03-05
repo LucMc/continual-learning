@@ -1,6 +1,11 @@
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import altair as alt
+import polars as pl
+import os
+import numpy as np
+
 
 def name_prefix(module: nn.Module) -> str:
     return module.name + "_" if module.name else ""

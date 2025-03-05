@@ -7,8 +7,8 @@ import numpy as np
 import orbax.checkpoint as ocp
 
 
-from mtrl.rl.buffers import MultiTaskReplayBuffer
-from mtrl.types import (
+from continual_learning.rl.buffers import MultiTaskReplayBuffer
+from continual_learning.types import (
     CheckpointMetadata,
     EnvCheckpoint,
     LogDict,
@@ -17,7 +17,7 @@ from mtrl.types import (
 )
 
 if TYPE_CHECKING:
-    from mtrl.rl.algorithms.base import Algorithm
+    from continual_learning.rl.algorithms.base import Algorithm
 
 
 class Checkpoint(TypedDict):

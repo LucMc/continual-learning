@@ -26,7 +26,7 @@ def get_nn_arch_for_config(
     #     return FiLMNetwork
     # elif type(config) is mtrl.config.nn.MOOREConfig:
     #     return MOORENetwork
-    if type(config) is mtrl.config.nn.VanillaNetworkConfig:
+    if type(config) is continual_learning.config.nn.VanillaNetworkConfig:
         return VanillaNetwork
     else:
         raise ValueError(f"Unknown config type: {type(config)}. (NeuralNetworkConfig by itself is not supported, use VanillaNeworkConfig)")
