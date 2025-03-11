@@ -1,12 +1,15 @@
 import gymnasium as gym
+from gymnasium.wrappers import TimeLimit, OrderEnforcing, PassiveEnvChecker
 
 from sbx import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
-from continual_learning.envs.slippery_ant_v5 import ContinualAnt, SlipperyAntEnv
+from continual_learning.envs.slippery_ant_v5 import ContinualAntEnv, SlipperyAntEnv
 from functools import partial
+from gymnasium.envs.mujoco.ant_v5 import AntEnv
 
-def test_friction(friction: float):
+def test_friction(friction: float, model=None):
+    assert model, "please provide model to test"
     configured_env = partial(SlipperyAntEnv, friction=friction, render_mode="human")
     vec_env = DummyVecEnv([configured_env for _ in range(1)])
     obs = vec_env.reset()
@@ -19,17 +22,24 @@ def test_friction(friction: float):
 
     vec_env.close()
 
+def make_env(base: gym.Env, env_spec, **kwargs):
+    return lambda: TimeLimit(OrderEnforcing(PassiveEnvChecker(base(**kwargs))), env_spec.max_episode_steps)
 
-def compare_friction():
-    ## Training
-    configured_env = partial(SlipperyAntEnv, friction=1)
-    env = VecMonitor(DummyVecEnv([configured_env for _ in range(4)])) # gym.make("Ant-v5", render_mode="human")
+def train_slippery_ant():
+    friction = 1
+    n_envs = 4
+    total_timesteps = 500_000 * n_envs
+    print("total_timesteps:\n", total_timesteps)
 
-    model = PPO("MlpPolicy", env, learning_rate=1e-4, tensorboard_log="sbx_logs/f_1")
-    model.learn(total_timesteps=2_000_000, progress_bar=True)
+    env_spec = gym.spec("Ant-v5") # Could be simpler to just pass in max steps rather than require the whole spec
+    env = VecMonitor(DummyVecEnv([make_env(SlipperyAntEnv, env_spec, friction=friction) for _ in range(4)])) # gym.make("Ant-v5", render_mode="human")
+
+    model = PPO("MlpPolicy", env, learning_rate=1e-4, tensorboard_log=f"sbx_logs/f_{friction}")
+    model.learn(total_timesteps=total_timesteps, progress_bar=True) # Remember n_envs impacts total and change every
 
     ## Testing in same friction
     print("Testing with same friction")
+    test_friction = partial(test_friction, model=model)
     test_friction(1)
 
     print("Testing with high friction")
@@ -40,22 +50,30 @@ def compare_friction():
     test_friction(0.1)
 
 def train_continual_ant():
-    total_time_steps = 5_000_000
-    change_friction_every = 500_000
     n_envs = 4
-    max_friction = 1.5
-    min_friction = 0.75
+    changes = 4
+    change_every = 200_000
+    total_timesteps = change_every * changes * n_envs
+    policy_kwargs = {"net_arch" : {"pi": [256, 256], "vf": [256, 256]}}
+    print("total_timesteps:\n", total_timesteps)
 
-    configured_env = partial(ContinualAnt,
-                             change_friction_every=change_friction_every//n_envs,
-                             max_friction=max_friction,
-                             min_friction=min_friction)
+    env_spec = gym.spec("Ant-v5") # Could be simpler to just pass in max steps rather than require the whole spec
+    env = VecMonitor(DummyVecEnv([make_env(ContinualAntEnv, env_spec, change_friction_every=change_every) for _ in range(4)])) # gym.make("Ant-v5", render_mode="human")
 
-    env = VecMonitor(DummyVecEnv([configured_env for _ in range(n_envs)])) 
+    model = PPO("MlpPolicy", env, learning_rate=1e-4, policy_kwargs=policy_kwargs, tensorboard_log=f"sbx_logs/n{n_envs}ce{change_every//100_000}")
+    model.learn(total_timesteps=total_timesteps, progress_bar=True) # Remember n_envs impacts total and change every
 
-    model = PPO("MlpPolicy", env, tensorboard_log="./sbx_logs")
-    model.learn(total_timesteps=total_time_steps, progress_bar=True)
+    ## Testing in same friction
+    print("Testing with same friction")
+    test = partial(test_friction, model=model)
+    test(1)
 
+    print("Testing with high friction")
+    test(4)
+
+    ## Testing in lower friction
+    print("Testing in low friction")
+    test(0.1)
 
 if __name__ == "__main__":
-    compare_friction()
+    train_continual_ant()
