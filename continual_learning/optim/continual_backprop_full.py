@@ -16,6 +16,7 @@ from dataclasses import field
 
 import continual_learning.optim.utils as utils
 
+
 # Overall optimizer TrainState
 class CBPTrainState(TrainState):
     cbp_state: optax.OptState = struct.field(pytree_node=True)
@@ -77,6 +78,7 @@ class CBPTrainState(TrainState):
             cbp_state=new_cbp_state[0],
             **kwargs,
         )
+
 
 # CBP Optimizer TrainState (input to overall optim cls above)
 @dataclass
@@ -150,7 +152,6 @@ def continual_backprop(
             **kwargs,
         )
 
-
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
@@ -204,38 +205,38 @@ def continual_backprop(
             key: PRNGKey,
             bound: float = 0.01,
         ):
-
-        ):
             random_weights = random.uniform(
                 key, layer_w.shape, float, -bound, bound
             )  # Perhaps replace with init function
 
             _layer_w = jnp.where(  # layer_w [inbound, #neurons]
-                k_masked_utility.reshape(1, -1),  # Reshape mask to (1, neurons) for explicit broadcasting
+                reset_mask.reshape(
+                    1, -1
+                ),  # Reshape mask to (1, neurons) for explicit broadcasting
                 random_weights,
                 layer_w,
             )
 
             _ages = jnp.where(
-                k_masked_utility,
+                reset_mask,
                 jnp.zeros(ages.shape),
                 ages + 1,
             )
             _layer_b = jnp.where(
-                k_masked_utility,
+                reset_mask,
                 jnp.zeros(layer_b.shape),
                 layer_b,
             )
-            # return {
-            #     "kernel": _layer_w,
-            #     "bias": _layer_b,
-            #     "ages": _ages,
-            #     "logs": {
-            #         "nodes_reset": n_to_replace,
-            #         "avg_age": jnp.mean(_ages),
-            #         "n_mature": jnp.sum(maturity_mask),
-            #     },  # n_to_replace
-            # }
+            return {
+                "kernel": _layer_w,
+                "bias": _layer_b,
+                "ages": _ages,
+                "logs": {
+                    "nodes_reset": 0,
+                    "avg_age": jnp.mean(_ages),
+                    "n_mature": 0,
+                },
+            }
 
         def _continual_backprop(
             updates: optax.Updates,
@@ -269,7 +270,7 @@ def continual_backprop(
             """
             # update_utility
             reset_mask = jax.tree.map(
-                get_reset_mask(),
+                get_reset_mask,
                 weights,
                 bias,
                 state.utilities,
@@ -278,6 +279,16 @@ def continual_backprop(
                 key_tree,
             )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
 
+            print("reset mask", reset_mask)
+            cbp_update = jax.tree.map(
+                reset_params,
+                reset_mask,
+                weights,
+                bias,
+                state.ages,
+                features,
+                key_tree,
+            )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
             # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
             # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
 

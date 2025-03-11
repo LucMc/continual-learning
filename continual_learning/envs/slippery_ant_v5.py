@@ -76,7 +76,6 @@ class ContinualAntEnv(SlipperyAntEnv):
         if (self.local_time_steps / self.change_friction_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
             self.env = SlipperyAntEnv(friction=self.gen_random_friction())
-            self.local_time_steps = 0
 
         return self.env.reset(*args, **kwargs)
 
