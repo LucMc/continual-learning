@@ -194,7 +194,18 @@ def continual_backprop(
 
             return k_masked_utility
 
-        def update_params():
+        @jax.jit
+        def reset_params(
+            reset_mask: Float[Array, "#neurons"],
+            layer_w: Float[Array, "#weights"],
+            layer_b: Float[Array, "#neurons"],
+            ages: Float[Array, "#neurons"],
+            features: Float[Array, "#neurons"],
+            key: PRNGKey,
+            bound: float = 0.01,
+        ):
+
+        ):
             random_weights = random.uniform(
                 key, layer_w.shape, float, -bound, bound
             )  # Perhaps replace with init function
@@ -245,8 +256,6 @@ def continual_backprop(
 
             """
             Notes:
-            > Slippery ant w/ fixerd friction at 1 seems to work but not cont
-            > Try Cont wrapper but min and max range basically ~1
 
             Plan:
             > Reproduce the half implementation but in 2 tree_map stages

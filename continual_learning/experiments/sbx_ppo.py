@@ -50,6 +50,8 @@ def train_slippery_ant():
     test_friction(0.1)
 
 def train_continual_ant():
+    min_f  =0.1
+    max_f = 4
     n_envs = 4
     changes = 4
     change_every = 200_000
@@ -58,7 +60,11 @@ def train_continual_ant():
     print("total_timesteps:\n", total_timesteps)
 
     env_spec = gym.spec("Ant-v5") # Could be simpler to just pass in max steps rather than require the whole spec
-    env = VecMonitor(DummyVecEnv([make_env(ContinualAntEnv, env_spec, change_friction_every=change_every) for _ in range(4)])) # gym.make("Ant-v5", render_mode="human")
+    env = VecMonitor(DummyVecEnv([make_env(ContinualAntEnv,
+                                           env_spec,
+                                           change_friction_every=change_every,
+                                           max_friction=max_f,
+                                           min_friction=min_f) for _ in range(4)]))
 
     model = PPO("MlpPolicy", env, learning_rate=1e-4, policy_kwargs=policy_kwargs, tensorboard_log=f"sbx_logs/n{n_envs}ce{change_every//100_000}")
     model.learn(total_timesteps=total_timesteps, progress_bar=True) # Remember n_envs impacts total and change every
