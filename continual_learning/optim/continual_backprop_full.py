@@ -195,7 +195,6 @@ def continual_backprop(
 
             return k_masked_utility
 
-        @jax.jit
         def reset_params(
             reset_mask: Float[Array, "#neurons"],
             layer_w: Float[Array, "#weights"],
@@ -238,6 +237,12 @@ def continual_backprop(
                 },
             }
 
+        def reflect_mask(mask: PyTree, weights):
+            """
+            Reflect the reset mask s.t. both incoming and outgoing nodes are reset
+            """
+            breakpoint()
+
         def _continual_backprop(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
@@ -259,7 +264,7 @@ def continual_backprop(
             Notes:
 
             Plan:
-            > Reproduce the half implementation but in 2 tree_map stages
+            > Reproduce the half implementation but in 2 tree_map stages [x]
             > for loop through reset mask to relect the masking
             > Test full implementation vs half vs None
             > Figure out smarter way, avoiding for loop
@@ -268,7 +273,6 @@ def continual_backprop(
             > Results for: Sine regression, SlipperyAnt, ContinualDelays
             > Done
             """
-            # update_utility
             reset_mask = jax.tree.map(
                 get_reset_mask,
                 weights,
@@ -279,7 +283,9 @@ def continual_backprop(
                 key_tree,
             )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
 
-            print("reset mask", reset_mask)
+            reflect_mask(reset_mask, weights)
+
+            # Ensure this optimiser is running
             cbp_update = jax.tree.map(
                 reset_params,
                 reset_mask,
