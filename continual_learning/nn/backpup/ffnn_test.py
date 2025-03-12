@@ -6,7 +6,7 @@ import optax
 from flax.training.train_state import TrainState
 
 # from continual_learning.nn.continual_dense import ContinualDense
-from continual_learning.optim.continual_backprop import (
+from continual_learning.optim.continual_backprop_full import (
     continual_backprop,
     CBPTrainState,
 )

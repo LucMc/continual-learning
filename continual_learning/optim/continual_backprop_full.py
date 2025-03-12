@@ -54,7 +54,7 @@ class CBPTrainState(TrainState):
             features=features["intermediates"]["activations"][0],
         )
 
-        utils.check_tree_shapes(new_params, params_for_cbp)
+        utils.check_tree_shapes(params_for_cbp, new_params)
 
         # Prepare for optax optimizer
         params_for_opt = {"params": new_params}
@@ -152,13 +152,14 @@ def continual_backprop(
             **kwargs,
         )
 
-    @jax.jit
+    # @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
         params: optax.Params | None = None,
         features: PyTree | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
+
         def get_reset_mask(
             layer_w: Float[Array, "#weights"],
             layer_b: Float[Array, "#neurons"],
@@ -192,8 +193,11 @@ def continual_backprop(
 
             k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)
             # Why are exactly half the same?? How can I manage multiple utilities with the same value?
+            zeros = jnp.zeros_like(k_masked_utility)
+            twos = jnp.ones_like(k_masked_utility) * 2
+            new_mask = jnp.where(k_masked_utility, twos, zeros) # 2=reset inp,1=reset out,0=Nothing
 
-            return k_masked_utility
+            return new_mask #k_masked_utility
 
         def reset_params(
             reset_mask: Float[Array, "#neurons"],
@@ -201,47 +205,75 @@ def continual_backprop(
             layer_b: Float[Array, "#neurons"],
             ages: Float[Array, "#neurons"],
             features: Float[Array, "#neurons"],
-            key: PRNGKey,
+            key_tree: PyTree,
             bound: float = 0.01,
         ):
-            random_weights = random.uniform(
-                key, layer_w.shape, float, -bound, bound
-            )  # Perhaps replace with init function
+            layer_names = list(reset_mask.keys())
+            out_dict = deepcopy(layer_w) # just for shape for now, probs more efficient way
 
-            _layer_w = jnp.where(  # layer_w [inbound, #neurons]
-                reset_mask.reshape(
-                    1, -1
-                ),  # Reshape mask to (1, neurons) for explicit broadcasting
-                random_weights,
-                layer_w,
-            )
+            for i in range(len(layer_names)-1):
+                in_layer = layer_names[i]
+                out_layer = layer_names[i+1]
+                
+                # Generate random weights for resets
+                random_in_weights = random.uniform(
+                    key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
+                )
+                random_out_weights = random.uniform(
+                    key_tree[out_layer], layer_w[out_layer].shape, float, -bound, bound
+                )
+                
+                # 1. Reset input weights (when mask == 2)
+                # These are connections coming into neurons in the out_layer
+                # We need to reset columns in the weight matrix connecting in_layer to out_layer
+                in_reset_mask = (reset_mask[in_layer] == 2).reshape(1, -1)  # [1, out_size]
+                _in_layer_w = jnp.where(
+                    in_reset_mask,
+                    random_in_weights, 
+                    layer_w[in_layer]
+                )
+                
+                # 2. Reset output weights (when mask == 1)
+                # These are connections going out from neurons in the in_layer
+                # We need to reset rows in the weight matrix
+                out_reset_mask = (reset_mask[in_layer] == 2).reshape(-1, 1)  # [in_size, 1]
+                _out_layer_w = jnp.where(
+                    out_reset_mask,
+                    random_out_weights,  # Reuse the same random weights or generate new ones if needed
+                    layer_w[out_layer]
+                )
+                # breakpoint() # Now set the weights
+                layer_w[in_layer] = _in_layer_w
+                layer_w[out_layer] = _out_layer_w
 
-            _ages = jnp.where(
-                reset_mask,
-                jnp.zeros(ages.shape),
-                ages + 1,
-            )
-            _layer_b = jnp.where(
-                reset_mask,
-                jnp.zeros(layer_b.shape),
-                layer_b,
-            )
-            return {
-                "kernel": _layer_w,
-                "bias": _layer_b,
-                "ages": _ages,
-                "logs": {
-                    "nodes_reset": 0,
-                    "avg_age": jnp.mean(_ages),
-                    "n_mature": 0,
-                },
-            }
+                # _ages = jnp.where(
+                #     in_reset_mask == 1,
+                #     jnp.zeros(ages.shape),
+                #     ages + 1,
+                # )
+                # _layer_b = jnp.where(
+                #     k_masked_utility,
+                #     jnp.zeros(layer_b.shape),
+                #     layer_b,
+                # )
+            return layer_w
+            # {
+            #     "kernel": _layer_w,
+            #     "bias": _layer_b,
+            #     "ages": _ages,
+            #     "logs": {
+            #         "nodes_reset": 0,
+            #         "avg_age": jnp.mean(_ages),
+            #         "n_mature": 0,
+            #     },
+            # }
+            #
+        # def reflect_mask(mask: PyTree, weights: PyTree):
+        #     """
+        #     Reflect the reset mask s.t. both incoming and outgoing nodes are reset
+        #     """
+        #     for layer_name in mask.keys():
 
-        def reflect_mask(mask: PyTree, weights):
-            """
-            Reflect the reset mask s.t. both incoming and outgoing nodes are reset
-            """
-            breakpoint()
 
         def _continual_backprop(
             updates: optax.Updates,
@@ -262,6 +294,12 @@ def continual_backprop(
 
             """
             Notes:
+            Okay, so currently it's a bit of a mess and doesn't really do anything. But the weights are in theory getting the double reset.
+            Next steps are:
+            * Update the params to see the weight resets impact on performance. [Wednesday]
+            * Update the ages and bias naively [Thursday]
+            * Compare against half and write tests to ensure everything is as expected [Thursday]
+            * Jit everything [Friday]
 
             Plan:
             > Reproduce the half implementation but in 2 tree_map stages [x]
@@ -283,24 +321,31 @@ def continual_backprop(
                 key_tree,
             )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
 
-            reflect_mask(reset_mask, weights)
+            # reflect_mask(reset_mask, weights)
+            # next_layer_mask = jnp.roll(reset_mask, shift=1)
 
             # Ensure this optimiser is running
-            cbp_update = jax.tree.map(
-                reset_params,
-                reset_mask,
-                weights,
-                bias,
-                state.ages,
-                features,
-                key_tree,
-            )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
+            # cbp_update = reset_params(reset_mask, weights, bias, state.ages, features, key_tree)
+            weights = reset_params(reset_mask, weights, bias, state.ages, features, key_tree)
+
+            # cbp_update = jax.tree.map(
+            #     reset_params,
+            #     reset_mask,
+            #     weights,
+            #     bias,
+            #     state.ages,
+            #     features,
+            #     key_tree,
+            # )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
             # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
             # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
 
             new_ages = {}
             new_params = {}
             new_logs = {}
+            
+            for layer_name in bias.keys():
+                new_params[layer_name] = {"kernel" : weights[layer_name], "bias" : bias[layer_name]}
 
             # TODO: Replace with vmap/treemap
             def split_data(layer):
@@ -308,8 +353,8 @@ def continual_backprop(
                 logs = layer.pop("logs")
                 return layer, ages, logs
 
-            for key, value in cbp_update.items():
-                new_params[key], new_ages[key], new_logs[key] = split_data(value)
+            # for key, value in cbp_update.items():
+            #     new_params[key], new_ages[key], new_logs[key] = split_data(value)
 
             # IDEA: Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
             # num_new_features_to_replace = state.replacement_rate * eligable_features_to_replace
@@ -317,8 +362,10 @@ def continual_backprop(
             # I actually think it's this layers weight sum since this layer weights connect to next
             # See """calculate feature utility""" because it looks a little different, certainly need features
 
-            new_state = state.replace(ages=new_ages, rng=new_rng, logs=new_logs)
+            # new_state = state.replace(ages=new_ages, rng=new_rng, logs=new_logs)
+            new_state = state.replace(ages=state.ages, rng=new_rng, logs=new_logs)
             new_params.update(excluded)
+            new_params = params
 
             return new_params, (new_state,)  # For now
 
