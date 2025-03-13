@@ -419,14 +419,14 @@ def continual_sine_learning(
 
 @dataclass
 class Args:
-    debug_mode: bool = True
+    debug: bool = True
 
 if __name__ == "__main__":
     # Use reasonable defaults for quick testing
     # For the full 20,000 shifts experiment, set debug_mode = False
     args = tyro.cli(Args)
 
-    if args.debug_mode:
+    if args.debug:
         # import bpdb
         # bpdb.set_trace()
         # Debug settings for quick testing
