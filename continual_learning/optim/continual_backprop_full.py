@@ -361,9 +361,10 @@ def continual_backprop(
             # new_accumulated_features_to_replace += features_to_replace
             # I actually think it's this layers weight sum since this layer weights connect to next
             # See """calculate feature utility""" because it looks a little different, certainly need features
+            new_ages = jax.tree.map(lambda x: x+1, state.ages)
+            print("new_ages:\n", new_ages)
 
-            # new_state = state.replace(ages=new_ages, rng=new_rng, logs=new_logs)
-            new_state = state.replace(ages=state.ages, rng=new_rng, logs=new_logs)
+            new_state = state.replace(ages=new_ages, rng=new_rng, logs=new_logs)
             new_params.update(excluded)
             new_params = params
 
