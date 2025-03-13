@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, PRNGKeyArray, PyTree
+from jax import tree_util
 
 UTIL_TYPES = [
     "weight",
@@ -10,6 +11,29 @@ UTIL_TYPES = [
     "adaptable_contribution",
     "feature_by_input",
 ]
+
+def are_pytrees_equal(tree1, tree2):
+    """Check if two pytrees have the same structure and equal leaves."""
+    try:
+        # Check if trees have the same structure
+        tree_util.tree_structure(tree1) == tree_util.tree_structure(tree2)
+        
+        # Check if all leaves are equal
+        leaves1 = tree_util.tree_leaves(tree1)
+        leaves2 = tree_util.tree_leaves(tree2)
+        
+        if len(leaves1) != len(leaves2):
+            return False
+        
+        # Compare each pair of leaves
+        for leaf1, leaf2 in zip(leaves1, leaves2):
+            if not jnp.array_equal(leaf1, leaf2):
+                return False
+        
+        return True
+    except:
+        return False
+
 
 def check_tree_shapes(tree1: PyTree, tree2: PyTree):
     ## assert tree shapes havn't changed

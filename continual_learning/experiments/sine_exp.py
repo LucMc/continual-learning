@@ -391,21 +391,22 @@ def continual_sine_learning(
                 )
 
             # Extra logs
-            # cbp_logs = cbp_state.cbp_state.logs  # ["dense1", ..., "dense3"]
-            # first_value = next(iter(cbp_logs.values()))
-            # extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
-            #
-            # for k, v in cbp_logs.items():
-            #     extra_logs["nodes_reset"] += v["nodes_reset"]
-            #     extra_logs["n_mature"] += v["n_mature"]
-            #     extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
-            #
-            # print(":: Extra Metrics ::")
-            # print("nodes reset", extra_logs["nodes_reset"])
-            # print("avg node age", jnp.mean(extra_logs["avg_age"]))
-            # print("n_mature", jnp.mean(extra_logs["n_mature"]))
-            #
-            # print("---")
+            cbp_logs = cbp_state.cbp_state.logs  # ["dense1", ..., "dense3"]
+            
+            first_value = next(iter(cbp_logs.values()))
+            extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
+
+            for k, v in cbp_logs.items(): # Loop over layers
+                extra_logs["nodes_reset"] += v["nodes_reset"]
+                extra_logs["n_mature"] += v["n_mature"]
+                extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
+
+            print(":: Extra Metrics ::")
+            print("nodes reset", extra_logs["nodes_reset"])
+            print("avg node age", jnp.mean(extra_logs["avg_age"]))
+            print("n_mature", jnp.mean(extra_logs["n_mature"]))
+
+            print("---")
         # Save and plot results periodically
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
             utils.plot_results(
