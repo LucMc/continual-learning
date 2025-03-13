@@ -8,6 +8,7 @@ from flax.training.train_state import TrainState
 import numpy as np
 import time
 from typing import Dict, Any, Tuple, List
+from dataclasses import dataclass
 
 # Import the continual backprop optimizer
 from continual_learning.optim.continual_backprop_full import (
@@ -416,13 +417,16 @@ def continual_sine_learning(
 
     return cbp_metrics, adam_metrics, adamw_metrics
 
+@dataclass
+class Args:
+    debug_mode: bool = True
 
 if __name__ == "__main__":
     # Use reasonable defaults for quick testing
     # For the full 20,000 shifts experiment, set debug_mode = False
-    debug_mode = True
+    args = tyro.cli(Args)
 
-    if debug_mode:
+    if args.debug_mode:
         # import bpdb
         # bpdb.set_trace()
         # Debug settings for quick testing
