@@ -104,7 +104,7 @@ def continual_sine_learning(
 
     # Create train states
     cbp_state = CBPTrainState.create(
-        apply_fn=net.predict, params=params, tx=cbp_adam_tx, **cbp_kwargs
+        apply_fn=net.predict, params=params, tx=cbp_adam_tx
     )
     adam_state = TrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
     adamw_state = TrainState.create(apply_fn=net.predict, params=params, tx=adamw_tx)
@@ -118,8 +118,8 @@ def continual_sine_learning(
     # Gradient function
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
-    #  JIT-compiled training steps
-    @jax.jit
+    # JIT-compiled training steps
+    # @jax.jit
     def train_cbp_step(state, inputs, targets):
         (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
         new_state = state.apply_gradients(grads=grads, features=features)
@@ -433,7 +433,7 @@ if __name__ == "__main__":
         # bpdb.set_trace()
         # Debug settings for quick testing
         cbp_kwargs = {
-            "maturity_threshold": 3
+            # "maturity_threshold": 3
         }
         continual_sine_learning(
             num_phase_shifts=50,  # Reduced number of shifts for testing
@@ -446,7 +446,7 @@ if __name__ == "__main__":
         )
     else:
         cbp_kwargs = {
-            "maturity_threshold": 100
+            # "maturity_threshold": 100
         }
         # Full experiment with 20,000 phase shifts
         continual_sine_learning(
@@ -461,3 +461,4 @@ if __name__ == "__main__":
             verbose=True,  # Whether to print progress
             cbp_kwargs=cbp_kwargs
         )
+

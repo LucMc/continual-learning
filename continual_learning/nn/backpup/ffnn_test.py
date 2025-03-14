@@ -30,12 +30,13 @@ class FFNN(nn.Module):
             x = nn.relu(x)
             intermediates[layers[i]] = x
 
+        # Output layer
+        x = nn.Dense(features=10, name="out_layer")(x)
+        intermediates["out_layer"] = x
+
         self.sow(
             "intermediates", "activations", intermediates
         )  # Only really want to reset layers after an activation
-
-        # Output layer
-        x = nn.Dense(features=10, name="out_layer")(x)
 
         return x
 
