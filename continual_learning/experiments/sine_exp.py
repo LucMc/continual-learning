@@ -433,7 +433,8 @@ if __name__ == "__main__":
         # bpdb.set_trace()
         # Debug settings for quick testing
         cbp_kwargs = {
-            "maturity_threshold": 3
+            "maturity_threshold": 3,
+            # "replacement_rate": 0.1
         }
         continual_sine_learning(
             num_phase_shifts=50,  # Reduced number of shifts for testing

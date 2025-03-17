@@ -2,7 +2,7 @@ from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
-from jaxtyping import Array, Float, PRNGKeyArray, PyTree
+from jaxtyping import Array, Float, Bool, PRNGKeyArray, PyTree
 from flax.training.train_state import TrainState
 from typing import Tuple
 from chex import dataclass
@@ -17,24 +17,12 @@ from dataclasses import field
 import continual_learning.optim.utils as utils
 
 """
-TODO Friday:
-It's all about checking this works as expected basically, I know the plasticity looks nice,
-but now is the time to do some testing and experiments before working on my own implementation stuff.
-
- - Check performance plots and run with reasonable hyperparams, eg age at 100
-
-Notes:
-Okay, so currently it's a bit of a mess and doesn't really do anything. But the weights are in theory getting the double reset.
-Next steps are:
-* Update the ages and bias naively [Thursday]
-* Compare against half and write tests to ensure everything is as expected [Thursday]
-* Jit everything [Friday]
-
-[x] Update the params to see the weight resets impact on performance. [Wednesday]
+TODO Monday (See claude):
+- Make sure utility is being used with the mask and we arn't forgetting to pass it as input or something
+- Fix utility function
+- Test col-row resetting propperly
 
 Plan:
-> Reproduce the half implementation but in 2 tree_map stages [x]
-> for loop through reset mask to relect the masking
 > Test full implementation vs half vs None
 > Figure out smarter way, avoiding for loop
 > Write tests for full implementation
@@ -142,9 +130,10 @@ def reset_weights(
         random_in_weights = random.uniform(
             key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
         )
-        random_out_weights = random.uniform(
-            key_tree[out_layer], layer_w[out_layer].shape, float, -bound, bound
-        )
+        # random_out_weights = random.uniform(
+        #     key_tree[out_layer], layer_w[out_layer].shape, float, -bound, bound
+        # )
+        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
 
         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
 
@@ -155,7 +144,7 @@ def reset_weights(
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
         _out_layer_w = jnp.where(
             out_reset_mask,
-            random_out_weights,  # Reuse the same random weights or generate new ones if needed
+            zero_out_weights,  # Reuse the same random weights or generate new ones if needed
             layer_w[out_layer],
         )
         n_reset = reset_mask[in_layer].sum()
@@ -167,32 +156,38 @@ def reset_weights(
     logs[out_layer] =  {"nodes_reset": 0}
     return layer_w, logs
 
+# def get_out_weights_mag(weights):
+#     w_mags = jax.tree.map(lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights) # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of ou_layer but should be eqivalent
+#     leaves, tree_def = jax.tree_flatten(w_mags)
+#
+#     breakpoint()
+#     return 0
+    
 
 def get_reset_mask(
     layer_w: Float[Array, "#weights"],
-    layer_b: Float[Array, "#neurons"],
+    # layer_b: Float[Array, "#neurons"],
     utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
     features: Float[Array, "#neurons"],
-    key: PRNGKey,
-    bound: float = 0.01,
+    # key: PRNGKey,
+    # bound: float = 0.01,
     decay_rate: float = 0.9,
     maturity_threshold: float = 100,
     replacement_rate=0.01, 
-):
-    # Maybe have a dictionary of the different util func transformations and then call the index in a cond
-    new_param = layer_w * decay_rate
+) -> Bool[Array, "#neurons"]:
 
+    # Maybe have a dictionary of the different util func transformations and then call the index in a cond
     updated_utility = (
         (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features) * jnp.sum(layer_w)
     ).flatten()  # Arr[#neurons]
 
     # get nodes over maturity threshold
-    maturity_mask = ages > maturity_threshold  ##
+    maturity_mask = ages > maturity_threshold  # Boolean
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
 
     k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)  # bool
-    assert k_masked_utility.dtype == bool, "Mask type isn't bool"
+    # assert k_masked_utility.dtype == bool, "Mask type isn't bool"
 
     return k_masked_utility
 
@@ -238,7 +233,7 @@ def continual_backprop(
             **kwargs,
         )
 
-    # @jax.jit
+    @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
@@ -254,14 +249,16 @@ def continual_backprop(
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
+            # out_w_mag = get_out_weights_mag(weights)
+
             reset_mask = jax.tree.map(
                 get_reset_mask,
                 weights,
-                bias,
+                # bias,
                 state.utilities,
                 state.ages,
                 features,
-                key_tree,
+                # key_tree,
             )
 
             # reset weights given mask
@@ -272,7 +269,7 @@ def continual_backprop(
 
             # Update ages
             _ages = jax.tree.map(
-                lambda a, m: jnp.where(m, jnp.zeros_like(a), a + 1),
+                lambda a, m: jnp.where(m, jnp.zeros_like(a), a + 1), # Clip to stop huge ages unnessesarily
                 state.ages,
                 reset_mask,
             )
