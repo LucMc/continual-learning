@@ -40,7 +40,7 @@ class SineNet(nn.Module):
 
         # Single output for regression
         x = nn.Dense(features=1, name="out_layer")(x)
-        intermediates["out_layer"] = x
+        # intermediates["out_layer"] = x
 
         self.sow("intermediates", "activations", intermediates)
         return x

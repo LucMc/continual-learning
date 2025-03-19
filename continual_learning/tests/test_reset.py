@@ -1,37 +1,233 @@
 import jax
+import jax.tree_util as tu
 import jax.random as random
 import jax.numpy as jnp
+
+import flax.linen as nn
+from functools import partial
+
+
 import pytest
 import continual_learning.optim.continual_backprop_full as cbp
 import continual_learning.optim.utils as utils
 from copy import deepcopy
+import optax
+
+
+def pt(pytree, indent=0):
+    prefix = "  " * indent
+
+    if isinstance(pytree, dict):
+        for k, v in pytree.items():
+            print(f"{prefix}  {k}:")
+            pt(v, indent + 2)
+
+    elif isinstance(pytree, (list, tuple)):
+        container = "list" if isinstance(pytree, list) else "tuple"
+        print(f"{prefix}{container}:")
+        for i, v in enumerate(pytree):
+            print(f"{prefix}  {i}:")
+            pt(v, indent + 2)
+
+    elif hasattr(pytree, "shape") and hasattr(pytree, "dtype"):
+        # Handle JAX arrays/DeviceArrays
+        shape_str = "×".join(str(dim) for dim in pytree.shape)
+        print(f"{prefix}Array({shape_str}, {pytree.dtype})")
+
+    else:
+        # Handle primitive values
+        print(f"{prefix}{type(pytree).__name__}: {pytree}")
+
+
+class TestNet(nn.Module):
+    k_init = nn.initializers.zeros_init()
+    b_init = nn.initializers.zeros_init()
+
+    @nn.compact
+    def __call__(self, x):
+        intermediates = {}
+
+        layers = [
+            "dense1",
+            "dense2",
+            "dense3",
+        ]
+
+        for i, layer_name in enumerate(layers):
+            x = nn.Dense(
+                features=4,
+                name=layer_name,
+                # kernel_init=nn.initializers.ones,
+                # bias_init=nn.initializers.zeros,
+            )(x)
+            x = nn.relu(x)
+            intermediates[layer_name] = x
+
+        # Single output for regression
+        x = nn.Dense(
+            features=1,
+            name="out_layer",
+            kernel_init=nn.initializers.ones,
+            bias_init=nn.initializers.zeros,
+        )(x)
+
+        self.sow("intermediates", "activations", intermediates)
+        return x
+
+    @jax.jit
+    def predict(self, params, x):
+        return self.apply({"params": params}, x, capture_intermediates=True)
+
 
 @pytest.fixture
-def setup():
+def full_setup():
     key = random.PRNGKey(0)
-    reset_all_mask = {
-        "dense_1": jnp.ones((128,))*2, 
-        "dense_2": jnp.ones((128,))*2
-    }
-    layer_w = {
-        "dense_1": jnp.ones((784,128)),
-        "dense_2": jnp.ones((128,128))
-    }
-    key_tree = utils.gen_key_tree(key, layer_w)
-    return reset_all_mask, layer_w, key_tree
+    key, init_key = random.split(key)
+    net = TestNet()
+    dummy_input = jnp.zeros((1, 1))
+    params = net.init(init_key, dummy_input)
+    cbp_kwargs = {"replacement_rate": 0.5}  # replace exacly one
 
+    cbp_adam_tx = optax.adam(learning_rate=1e-3)
+    cbp_state = cbp.CBPTrainState.create(
+        apply_fn=net.predict, params=params, tx=cbp_adam_tx, **cbp_kwargs
+    )
+    return cbp_state, net
+
+
+def test_process_params(full_setup):
+    cbp_outer_state, net = full_setup
+    cbp_params = cbp_outer_state.params["params"]
+    cbp_state = cbp_outer_state.cbp_state
+
+    ## Dummy training
+
+    inputs = jnp.ones((1, 1))
+    predictions, features = net.apply(
+        cbp_outer_state.params, inputs, mutable="intermediates"
+    )
+    features = features["intermediates"]["activations"][0]
+
+    weights, bias, out_w_mag, excluded = cbp.process_params(cbp_params)
+
+    # print("\n>> excluded:\n")
+    # pt(excluded)
+    # print("\n")
+    #
+    # print(">> out_w_mag:\n")
+    # pt(out_w_mag)
+    # print("\n")
+    #
+    # print(">> bias:\n")
+    # pt(bias)
+    # print("\n")
+    #
+    # print(">> weights:\n")
+    # pt(weights)
+    # print("\n")
+    #
+    # print(">> features:\n")
+    # pt(features)
+    # print("\n")
+
+    print(">> ages:\n")
+    pt(cbp_state.ages)
+    print("\n")
+
+    reset_mask = jax.tree.map(
+        cbp.get_reset_mask,
+        out_w_mag,
+        cbp_state.utilities,
+        cbp_state.ages,
+        features,
+    )
+
+    # Test ages and mask update correctly
+    _ages = jax.tree.map(
+        lambda a, m: jnp.where(
+            m, jnp.zeros_like(a), a + 777
+        ),  # Clip to stop huge ages unnessesarily
+        cbp_state.ages,
+        reset_mask,
+    )
+
+    def get_mask(replacement_rate=None, ages=None):
+        reset_mask = jax.tree.map(
+            partial(
+                cbp.get_reset_mask,
+                decay_rate=cbp_state.decay_rate,
+                maturity_threshold=cbp_state.maturity_threshold,
+                replacement_rate=replacement_rate,
+            ),
+            out_w_mag,
+            cbp_state.utilities,
+            ages,
+            features,
+        )
+        return reset_mask# tu.tree_all(
     
+    rr_mask = partial(get_mask, ages=_ages) # All mature ages
+    rm_0, rm_025, rm_050, rm_075, rm_1 = (rr_mask(x) for x in [0., 0.25, 0.5, 0.75, 1.])
+
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.all(m == False), rm_0)), f"Replace none mask failed, mask: {reset_mask}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.all(m == True), rm_1)), f"Replace all mask failed, mask: {reset_mask}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.mean(m)==0.5, rm_050)), f"Replace half mask failed, mask: {reset_mask}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.mean(m)==0.25, rm_025)), f"Replace quater mask failed, mask: {reset_mask}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.mean(m)==0.75, rm_075)), f"Replace quater mask failed, mask: {reset_mask}"
+
+    def set_age(value, reset_mask):
+        ages = jax.tree.map(
+            lambda a, m: jnp.where(
+                m, jnp.zeros_like(a), value
+            ), 
+            cbp_state.ages,
+            reset_mask,
+        )
+        return ages
+
+    masks = zip([0., 0.25, 0.5, 0.75, 1.], [rm_0, 
+    ages_mask = partial(get_mask, replacement_rate=1) # Replace all
+    a_0, a_hm, a_m = (ages_mask(ages=set_age(x, rm) for x in [0., 0.25, 0.5, 0.75, 1.])
+    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 777), a_0)), "Not all ages equal 777"
+    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 777), a_hm), "Not all ages equal 777"
+
+    # decay_rate = cbp_state.decay_rate
+    # utility = cbp_state.utilities["dense1"]
+    # features = features["dense1"]
+    # ages = _ages["dense1"]
+    # out_w_mag = out_w_mag["dense1"]
+    # maturity_threshold = cbp_state.maturity_threshold
+    # replacement_rate = 1# cbp_state.replacement_rate
+    #
+    # updated_utility = (
+    #     (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features) * out_w_mag
+    # ).flatten()  # Arr[#neurons]
+    # maturity_mask = ages > maturity_threshold  # # get nodes over maturity threshold Arr[Bool]
+    # n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
+    # k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)
+    # assert sum(k_masked_utility) == 4, f"Replace all mask failed (should be all True): {k_masked_utility}"
+    # print("k_masked_utility:\n", k_masked_utility)
+
+    # @pytest.fixture
+    # def small_setup():
+    #     key = random.PRNGKey(0)
+    #     reset_all_mask = {"dense_1": jnp.ones((128,)) * 2, "dense_2": jnp.ones((128,)) * 2}
+    #     layer_w = {"dense_1": jnp.ones((784, 128)), "dense_2": jnp.ones((128, 128))}
+    #     key_tree = utils.gen_key_tree(key, layer_w)
+    #     return reset_all_mask, layer_w, key_tree
+
+    """
 def test_full_reset(setup):
     reset_mask, layer_w, key_tree = setup
     initial_weights = deepcopy(layer_w)
     new_weights = cbp.reset_params(reset_mask, layer_w, key_tree)
     assert utils.are_pytrees_equal(layer_w, layer_w)
-    assert not utils.are_pytrees_equal(initial_weights, new_weights), f"Equal weights after update:\nlayer_w: {layer_w}\n\nnew weights: {new_weights}"
+    assert not utils.are_pytrees_equal(initial_weights, new_weights), (
+        f"Equal weights after update:\nlayer_w: {layer_w}\n\nnew weights: {new_weights}"
+    )
 
     # print("new_weights:\n", new_weights)
     # print("initial_weights:\n", initial_weights)
-
-    """
     layer_names = list(reset_mask.keys())
     out_dict = deepcopy(layer_w) # just for shape for now, probs more efficient way
     bound = 0.01

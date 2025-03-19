@@ -9,3 +9,6 @@ __pycache__/
 results/
 logs*/
 backup/
+node_modules/
+package-lock.json
+package.json
