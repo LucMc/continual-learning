@@ -28,6 +28,7 @@ Count = 15
   * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
 
 :: Implementation ::
+  * Implement accumulated nodes to reset for inexact division by replacement rate
   * Make out_w_mag general
   * Additional logging
   * Implement online norm
