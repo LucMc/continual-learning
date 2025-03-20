@@ -96,11 +96,22 @@ def full_setup():
 
 
 def test_process_params(full_setup):
+    '''
+    To Test:
+      Mask:
+       - Replacement rate [x]
+       - Ages [x]
+       - features 
+       - utilities (getting correct bottom n)
+       - out_w_mag values are correct
+      Reset:
+       - Bias (corresponding to mask)
+       - Weights (corresponding to mask, i.e. col/row correct)
+    '''
+
     cbp_outer_state, net = full_setup
     cbp_params = cbp_outer_state.params["params"]
     cbp_state = cbp_outer_state.cbp_state
-
-    ## Dummy training
 
     inputs = jnp.ones((1, 1))
     predictions, features = net.apply(
@@ -109,26 +120,6 @@ def test_process_params(full_setup):
     features = features["intermediates"]["activations"][0]
 
     weights, bias, out_w_mag, excluded = cbp.process_params(cbp_params)
-
-    # print("\n>> excluded:\n")
-    # pt(excluded)
-    # print("\n")
-    #
-    # print(">> out_w_mag:\n")
-    # pt(out_w_mag)
-    # print("\n")
-    #
-    # print(">> bias:\n")
-    # pt(bias)
-    # print("\n")
-    #
-    # print(">> weights:\n")
-    # pt(weights)
-    # print("\n")
-    #
-    # print(">> features:\n")
-    # pt(features)
-    # print("\n")
 
     print(">> ages:\n")
     pt(cbp_state.ages)
@@ -151,12 +142,12 @@ def test_process_params(full_setup):
         reset_mask,
     )
 
-    def get_mask(replacement_rate=None, ages=None):
+    def get_mask(replacement_rate=1, ages=cbp_state.maturity_threshold, maturity_threshold=-1):
         reset_mask = jax.tree.map(
             partial(
                 cbp.get_reset_mask,
                 decay_rate=cbp_state.decay_rate,
-                maturity_threshold=cbp_state.maturity_threshold,
+                maturity_threshold=maturity_threshold,
                 replacement_rate=replacement_rate,
             ),
             out_w_mag,
@@ -166,7 +157,8 @@ def test_process_params(full_setup):
         )
         return reset_mask# tu.tree_all(
     
-    rr_mask = partial(get_mask, ages=_ages) # All mature ages
+    ## Test mask based on replacement rate
+    rr_mask = partial(get_mask, ages=_ages, maturity_threshold=1) # All mature ages
     rm_0, rm_025, rm_050, rm_075, rm_1 = (rr_mask(x) for x in [0., 0.25, 0.5, 0.75, 1.])
 
     assert tu.tree_all(tu.tree_map(lambda m: jnp.all(m == False), rm_0)), f"Replace none mask failed, mask: {reset_mask}"
@@ -185,11 +177,18 @@ def test_process_params(full_setup):
         )
         return ages
 
-    masks = zip([0., 0.25, 0.5, 0.75, 1.], [rm_0, 
-    ages_mask = partial(get_mask, replacement_rate=1) # Replace all
-    a_0, a_hm, a_m = (ages_mask(ages=set_age(x, rm) for x in [0., 0.25, 0.5, 0.75, 1.])
-    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 777), a_0)), "Not all ages equal 777"
-    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 777), a_hm), "Not all ages equal 777"
+    ## Test mask based on ages
+    ages_mask = partial(get_mask, maturity_threshold=10) # Replace all
+    a_0, a_m = (set_age(x, rm_0) for x in [0, 11]) # None staged for resetting
+    am_0, am_m = (ages_mask(ages=ages, replacement_rate=1) for ages in [a_0, a_m])
+    ah_0, ah_m = (ages_mask(ages=ages, replacement_rate=0.5) for ages in [a_0, a_m])
+
+    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 0), a_0)), f"Not all ages equal 0: {a_0}"
+    assert tu.tree_all(tu.tree_map(lambda a: jnp.all(a == 11), a_m)), f"Not all ages equal 11: {a_m}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.all(m == False), am_0)), f"Mask not false when ages 0: {am_0}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.all(m == True), am_m)), f"Mask not ture when ages over maturity threshold: {am_m}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.mean(m) == 0, ah_0)), f"Half mask not false when ages 0: {ah_0}"
+    assert tu.tree_all(tu.tree_map(lambda m: jnp.mean(m) == 0.5, ah_m)), f"Half mask not ture when ages over maturity threshold: {ah_m}"
 
     # decay_rate = cbp_state.decay_rate
     # utility = cbp_state.utilities["dense1"]

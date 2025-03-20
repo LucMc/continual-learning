@@ -17,22 +17,32 @@ from dataclasses import field
 import continual_learning.optim.utils as utils
 
 """
-TODO Monday (See claude):
-- So think carefully and make sure the weights and utilities correspond with the w_mag,
-  remember we want the utility shape to be equal to the inlayer of the current layer_w[in, out]
-- Test col-row resetting propperly
+Count = 15
 
-Plan:
-> Test full implementation vs half vs None
-> Figure out smarter way, avoiding for loop
-> Write tests for full implementation
-> Swap to cleanRL PPO w/ custom network optims
-> Results for: Sine regression, SlipperyAnt, ContinualDelays
-> Done
+:: Testing ::
+  * See testing list in test_reset.py
+
+:: Experiments ::
+  * Create simple regression for complex function NOT continual to guage single task performance
+  * Test the ppo continual env more/ guage performance of base agent in comparison to lop results
+  * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
+
+:: Implementation ::
+  * Make out_w_mag general
+  * Additional logging
+  * Implement online norm
+  * Implement layer norm
+  * Implement Dtanh (meta recent paper)
+  * Link with continual time-delays
+  * Implement my own PPO to show it's not some random trick in SBX
+
+:: Errors ::
+  * Replacement rate of 0 gives worse loss than adam, should be equal
+  * Assert statements throughout, check mask is always false when replacement rate is 0 and n_to_replace is also always zero etc same with maturity_threshold
+
 """
 
 
-# CBP Optimizer TrainState (input to overall optim cls above)
 @dataclass
 class CBPOptimState:
     # Things you shouldn't really mess with
@@ -75,38 +85,35 @@ class CBPTrainState(TrainState):
 
     def apply_gradients(self, *, grads, features, **kwargs):
         """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
-        # Extract the params we want to optimize
-        grads = grads["params"]
-        params_for_cbp = self.params["params"]
-
-        # Update with continual backprop
-        new_params, new_cbp_state = continual_backprop().update(
-            grads,
-            self.cbp_state,
-            params_for_cbp,
-            features=features["intermediates"]["activations"][0],
-        )
-
-        utils.check_tree_shapes(params_for_cbp, new_params)
-
-        # Prepare for optax optimizer
-        params_for_opt = {"params": new_params}
-        grad_for_opt = {"params": grads}
 
         # Get updates from optimizer
         tx_updates, new_opt_state = self.tx.update(
-            grad_for_opt, self.opt_state, params_for_opt
-        )
-        new_params_with_opt = optax.apply_updates(params_for_opt, tx_updates)
+            grads, self.opt_state, self.params
+        ) # tx first then reset so we don't change reset params based on old grads
+        new_params_from_tx = optax.apply_updates(self.params, tx_updates)
 
-        # Extract the updated parameters from the nested structure
-        final_params = new_params_with_opt["params"]
+        # Update with continual backprop
+        new_params_after_cbp, new_cbp_state = continual_backprop().update(
+            grads["params"],
+            self.cbp_state,
+            new_params_from_tx["params"],
+            features=features["intermediates"]["activations"][0],
+        )
+        # new_params_after_cbp = new_params_from_tx # THIS MAKES IT EQUAL ADAM THEREFORE NEWPARAMS ARNT THE SAME?
+
+        ## debug -- Add to testing, only with --no-jit
+        if self.cbp_state.replacement_rate == 0:
+            assert jax.tree.map(lambda p1, p2: jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
+        #
+        # elif self.cbp_state.maturity_threshold == 0:
+        #     assert jax.tree.map(lambda p1, p2: not jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
+
+        utils.check_tree_shapes(new_params_from_tx, new_params_after_cbp)
+        utils.check_tree_shapes(self.params, new_params_after_cbp)
 
         return self.replace(
             step=self.step + 1,
-            params={
-                "params": final_params
-            },  # Make sure to maintain the 'params' structure
+            params=new_params_after_cbp,
             opt_state=new_opt_state,
             cbp_state=new_cbp_state[0],
             **kwargs,
@@ -263,15 +270,6 @@ def continual_backprop(
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            # out_w_mag = get_out_weights_mag(weights)
-
-            # print("weights", weights.keys())
-            # print("out_w_mag", out_w_mag.keys())
-            # print("features:\n", features.keys())
-            # print("ages:\n", state.ages.keys())
-            # print("utilities:\n",state.utilities.keys())
-            # print("weights:\n", weights.keys())
-
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
@@ -323,7 +321,7 @@ def continual_backprop(
             new_state = state.replace(ages=_ages, rng=new_rng, logs=_logs)
             new_params.update(excluded)  # TODO
 
-            return new_params, (new_state,)  # For now
+            return {"params": new_params}, (new_state,)  # For now
 
         return _continual_backprop(updates)  # updates, ContinualBackpropState()
 

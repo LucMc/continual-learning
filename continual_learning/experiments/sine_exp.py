@@ -168,13 +168,13 @@ def continual_sine_learning(
         phase_shift = phase_shift_step * shift_idx
 
         # Save initial parameters for plasticity metrics
-        cbp_initial_params = jax.tree_map(
+        cbp_initial_params = jax.tree.map(
             lambda x: x.copy(), cbp_state.params["params"]
         )
-        adam_initial_params = jax.tree_map(
+        adam_initial_params = jax.tree.map(
             lambda x: x.copy(), adam_state.params["params"]
         )
-        adamw_initial_params = jax.tree_map(
+        adamw_initial_params = jax.tree.map(
             lambda x: x.copy(), adamw_state.params["params"]
         )
 
@@ -422,6 +422,13 @@ def continual_sine_learning(
 @dataclass
 class Args:
     debug: bool = True
+    shifts: int = 50
+    epochs: int = 10
+    save_interval: int = np.inf
+    eval_interval: int = 5
+    jit: bool = True
+    replacement_rate: float = 0.1
+    maturity_threshold: int = 3
 
 if __name__ == "__main__":
     # Use reasonable defaults for quick testing
@@ -429,22 +436,24 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
 
     if args.debug:
+        from contextlib import nullcontext
         # import bpdb
         # bpdb.set_trace()
         # Debug settings for quick testing
         cbp_kwargs = {
-            "maturity_threshold": 3,
-            # "replacement_rate": 0.1
+            "maturity_threshold": args.maturity_threshold,
+            "replacement_rate": args.replacement_rate
         }
-        continual_sine_learning(
-            num_phase_shifts=50,  # Reduced number of shifts for testing
-            epochs_per_phase=10,  # Fewer epochs per phase
-            batch_size=1,
-            eval_interval=5,
-            save_interval=10,
-            verbose=True,
-            cbp_kwargs=cbp_kwargs
-        )
+        with jax.disable_jit() if not args.jit else nullcontext():
+            continual_sine_learning(
+                num_phase_shifts=args.shifts,  # Reduced number of shifts for testing
+                epochs_per_phase=args.epochs,  # Fewer epochs per phase
+                batch_size=1,
+                eval_interval=args.eval_interval,
+                save_interval=args.save_interval,
+                verbose=True,
+                cbp_kwargs=cbp_kwargs
+            )
     else:
         cbp_kwargs = {
             "maturity_threshold": 100
