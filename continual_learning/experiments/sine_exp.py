@@ -11,7 +11,7 @@ from typing import Dict, Any, Tuple, List
 from dataclasses import dataclass
 
 # Import the continual backprop optimizer
-from continual_learning.optim.continual_backprop_full import (
+from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
 )
