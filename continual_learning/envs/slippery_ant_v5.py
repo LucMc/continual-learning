@@ -42,7 +42,7 @@ class SlipperyAntEnv(AntEnv):
         print("XML:", root[3][1].attrib["friction"])
 
 
-class ContinualAntEnv(SlipperyAntEnv):
+class ContinualAntEnv(gym.Env):
     def __init__(
         self,
         min_friction: float = 0.1,
@@ -58,7 +58,9 @@ class ContinualAntEnv(SlipperyAntEnv):
         self.seed = random.PRNGKey(seed) if type(seed) == int else seed
         self.local_time_steps = 0
         self.env = SlipperyAntEnv(friction=self.gen_random_friction()) # Defined in first reset
-        super().__init__(xml_file=xml_file, **kwargs)
+        super().__init__()
+        self.observation_space = self.env.observation_space
+        self.action_space = self.env.action_space
 
     def gen_random_friction(self):
         self.seed, f_key = random.split(self.seed)

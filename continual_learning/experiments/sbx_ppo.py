@@ -1,4 +1,5 @@
 import gymnasium as gym
+import os
 from gymnasium.wrappers import TimeLimit, OrderEnforcing, PassiveEnvChecker
 
 from sbx import PPO
@@ -64,9 +65,13 @@ def train_continual_ant():
                                            env_spec,
                                            change_friction_every=change_every,
                                            max_friction=max_f,
-                                           min_friction=min_f) for _ in range(4)]))
+                                           min_friction=min_f) for _ in range(n_envs)]))
 
-    model = PPO("MlpPolicy", env, learning_rate=1e-4, policy_kwargs=policy_kwargs, tensorboard_log=f"sbx_logs/n{n_envs}ce{change_every//100_000}")
+    logdir = f"sbx_logs/n{n_envs}ce{(change_every*n_envs)//100_000}"
+    run_name = f"PPO_{len(os.listdir(logdir)) if os.path.isdir(logdir) else 1}"
+    print(f"logdir: {logdir} run {run_name}")
+
+    model = PPO("MlpPolicy", env, learning_rate=1e-4, policy_kwargs=policy_kwargs, tensorboard_log=logdir)
     model.learn(total_timesteps=total_timesteps, progress_bar=True) # Remember n_envs impacts total and change every
 
     ## Testing in same friction
