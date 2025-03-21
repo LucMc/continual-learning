@@ -10,7 +10,6 @@ import time
 from typing import Dict, Any, Tuple, List
 from dataclasses import dataclass
 
-# Import the continual backprop optimizer
 from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
@@ -42,7 +41,7 @@ def continual_sine_learning(
     eval_interval=100,  # How often to evaluate forgetting on previous tasks
     save_interval=1000,  # How often to save metrics
     verbose=True,  # Whether to print progress
-    cbp_kwargs={}
+    cbp_kwargs={},
 ):
     """
     Run a continual learning experiment with a sine wave regression task.
@@ -52,9 +51,7 @@ def continual_sine_learning(
     previously learned phases.
     """
     if verbose:
-        print(
-            f"Starting continual learning experiment with {num_phase_shifts} phase shifts"
-        )
+        print(f"Starting continual learning with {num_phase_shifts} phase shifts")
         print(f"Training for {epochs_per_phase} epochs per phase")
 
     # Initialize random key
@@ -86,10 +83,8 @@ def continual_sine_learning(
         loss = jnp.mean((predictions - targets) ** 2)  # MSE loss
         return loss, (predictions, features)
 
-    # Gradient function
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
-    #  JIT-compiled training steps
     @jax.jit
     def train_cbp_step(state, inputs, targets):
         (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
@@ -98,12 +93,6 @@ def continual_sine_learning(
 
     @jax.jit
     def train_adam_step(state, inputs, targets):
-        (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
-        new_state = state.apply_gradients(grads=grads)
-        return new_state, loss
-
-    @jax.jit
-    def train_adamw_step(state, inputs, targets):
         (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss
@@ -173,7 +162,7 @@ def continual_sine_learning(
             # Perform training steps
             cbp_state, cbp_loss = train_cbp_step(cbp_state, inputs, targets)
             adam_state, adam_loss = train_adam_step(adam_state, inputs, targets)
-            adamw_state, adamw_loss = train_adamw_step(adamw_state, inputs, targets)
+            adamw_state, adamw_loss = train_adam_step(adamw_state, inputs, targets)
 
             # Store losses
             cbp_phase_losses.append(float(cbp_loss))
@@ -364,11 +353,11 @@ def continual_sine_learning(
 
             # Extra logs
             cbp_logs = cbp_state.cbp_state.logs  # ["dense1", ..., "dense3"]
-            
+
             first_value = next(iter(cbp_logs.values()))
             extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
 
-            for k, v in cbp_logs.items(): # Loop over layers
+            for k, v in cbp_logs.items():  # Loop over layers
                 extra_logs["nodes_reset"] += v["nodes_reset"]
                 # extra_logs["n_mature"] += v["n_mature"]
                 extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
@@ -390,6 +379,7 @@ def continual_sine_learning(
 
     return cbp_metrics, adam_metrics, adamw_metrics
 
+
 @dataclass
 class Args:
     debug: bool = True
@@ -401,6 +391,7 @@ class Args:
     replacement_rate: float = 0.1
     maturity_threshold: int = 3
 
+
 if __name__ == "__main__":
     # Use reasonable defaults for quick testing
     # For the full 20,000 shifts experiment, set debug_mode = False
@@ -408,12 +399,11 @@ if __name__ == "__main__":
 
     if args.debug:
         from contextlib import nullcontext
-        # import bpdb
-        # bpdb.set_trace()
-        # Debug settings for quick testing
+
+        # import bpdb; bpdb.set_trace()
         cbp_kwargs = {
             "maturity_threshold": args.maturity_threshold,
-            "replacement_rate": args.replacement_rate
+            "replacement_rate": args.replacement_rate,
         }
         with jax.disable_jit() if not args.jit else nullcontext():
             continual_sine_learning(
@@ -423,12 +413,10 @@ if __name__ == "__main__":
                 eval_interval=args.eval_interval,
                 save_interval=args.save_interval,
                 verbose=True,
-                cbp_kwargs=cbp_kwargs
+                cbp_kwargs=cbp_kwargs,
             )
     else:
-        cbp_kwargs = {
-            "maturity_threshold": 100
-        }
+        cbp_kwargs = {"maturity_threshold": 100}
         # Full experiment with 20,000 phase shifts
         continual_sine_learning(
             num_phase_shifts=20000,  # Total number of phase shifts to perform
@@ -440,5 +428,5 @@ if __name__ == "__main__":
             eval_interval=100,  # How often to evaluate forgetting on previous tasks
             save_interval=1000,  # How often to save metrics
             verbose=True,  # Whether to print progress
-            cbp_kwargs=cbp_kwargs
+            cbp_kwargs=cbp_kwargs,
         )

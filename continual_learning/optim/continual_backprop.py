@@ -91,30 +91,35 @@ class CBPTrainState(TrainState):
         tx_updates, new_opt_state = self.tx.update(
             grads, self.opt_state, self.params
         ) # tx first then reset so we don't change reset params based on old grads
-        new_params_from_tx = optax.apply_updates(self.params, tx_updates)
+        params_after_tx = optax.apply_updates(self.params, tx_updates)
 
         # Update with continual backprop
-        new_params_after_cbp, new_cbp_state = continual_backprop().update(
+        params_after_cbp, new_cbp_state = continual_backprop().update(
             grads["params"],
             self.cbp_state,
-            new_params_from_tx["params"],
+            params_after_tx["params"],
             features=features["intermediates"]["activations"][0],
         )
         # new_params_after_cbp = new_params_from_tx # THIS MAKES IT EQUAL ADAM THEREFORE NEWPARAMS ARNT THE SAME?
 
         ## debug -- Add to testing, only with --no-jit
         # if self.cbp_state.replacement_rate == 0:
-        #     assert jax.tree.map(lambda p1, p2: jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
+        # equal_leaves = jax.tree_util.tree_map(lambda x, y: jnp.array_equal(x, y), params_after_tx, params_after_cbp)
+        # flat, _ = jax.tree_flatten(equal_leaves)
+        # assert jnp.all(jnp.array(flat)), f"Tree has changed: {breakpoint()}"
+
+        # assert jax.tree_util.tree_structure(params_after_tx) == jax.tree_util.tree_structure(params_after_cbp)
+        # assert jax.tree.map(lambda p1, p2: jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
         #
         # elif self.cbp_state.maturity_threshold == 0:
         #     assert jax.tree.map(lambda p1, p2: not jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
 
-        utils.check_tree_shapes(new_params_from_tx, new_params_after_cbp)
-        utils.check_tree_shapes(self.params, new_params_after_cbp)
+        utils.check_tree_shapes(params_after_tx, params_after_cbp)
+        utils.check_tree_shapes(self.params, params_after_cbp)
 
         return self.replace(
             step=self.step + 1,
-            params=new_params_after_cbp,
+            params=params_after_cbp,
             opt_state=new_opt_state,
             cbp_state=new_cbp_state[0],
             **kwargs,
@@ -291,8 +296,9 @@ def continual_backprop(
             _weights, reset_logs = reset_weights(reset_mask, weights, key_tree)
 
             # reset bias given mask
+            # breakpoint()
             _bias = jax.tree.map(
-                lambda b, m: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
                 reset_mask,
                 bias,
             )
