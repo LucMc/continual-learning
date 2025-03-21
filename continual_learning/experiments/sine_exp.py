@@ -16,38 +16,9 @@ from continual_learning.optim.continual_backprop import (
     CBPTrainState,
 )
 import continual_learning.nn.utils as utils
+from continual_learning.nn import networks
 
 import tyro
-
-
-class SineNet(nn.Module):
-    """Simple Flax neural network for sine wave regression"""
-
-    @nn.compact
-    def __call__(self, x):
-        intermediates = {}
-
-        layers = [
-            "dense1",
-            "dense2",
-            "dense3",
-        ]
-
-        for i, layer_name in enumerate(layers):
-            x = nn.Dense(features=128, name=layer_name)(x)
-            x = nn.relu(x)
-            intermediates[layer_name] = x
-
-        # Single output for regression
-        x = nn.Dense(features=1, name="out_layer")(x)
-        # intermediates["out_layer"] = x
-
-        self.sow("intermediates", "activations", intermediates)
-        return x
-
-    @jax.jit
-    def predict(self, params, x):
-        return self.apply({"params": params}, x, capture_intermediates=True)
 
 
 def generate_sine_data(
@@ -91,7 +62,7 @@ def continual_sine_learning(
 
     # Initialize network
     key, init_key = random.split(key)
-    net = SineNet()
+    net = networks.SimpleNet(n_out=1, h_size=128)
 
     # Create dummy input for initialization
     dummy_input = jnp.zeros((1, 1))
