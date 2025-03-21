@@ -69,10 +69,14 @@ def continual_sine_learning(
     adam_tx = optax.adam(learning_rate)
     cbp_adam_tx = optax.adam(learning_rate)
     adamw_tx = optax.adamw(learning_rate, weight_decay=weight_decay)
+    cbp_adamw_tx = optax.adamw(learning_rate, weight_decay=weight_decay)
 
     # Create train states
     cbp_state = CBPTrainState.create(
         apply_fn=net.predict, params=params, tx=cbp_adam_tx, **cbp_kwargs
+    )
+    cbp_adamw_state = CBPTrainState.create(
+        apply_fn=net.predict, params=params, tx=cbp_adamw_tx, **cbp_kwargs
     )
     adam_state = TrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
     adamw_state = TrainState.create(apply_fn=net.predict, params=params, tx=adamw_tx)
@@ -105,16 +109,19 @@ def continual_sine_learning(
 
     # Storage for metrics
     cbp_metrics = []
+    cbp_adamw_metrics = []
     adam_metrics = []
     adamw_metrics = []
 
     # Storage for best performance on each task
     cbp_best_losses = {}
+    cbp_adamw_best_losses = {}
     adam_best_losses = {}
     adamw_best_losses = {}
 
     # Current performance on each task
     cbp_current_losses = {}
+    cbp_adamw_current_losses = {}
     adam_current_losses = {}
     adamw_current_losses = {}
 
@@ -131,6 +138,9 @@ def continual_sine_learning(
         cbp_initial_params = jax.tree.map(
             lambda x: x.copy(), cbp_state.params["params"]
         )
+        cbp_adamw_initial_params = jax.tree.map(
+            lambda x: x.copy(), cbp_adamw_state.params["params"]
+        )
         adam_initial_params = jax.tree.map(
             lambda x: x.copy(), adam_state.params["params"]
         )
@@ -140,6 +150,7 @@ def continual_sine_learning(
 
         # Track losses during training
         cbp_phase_losses = []
+        cbp_adamw_phase_losses = []
         adam_phase_losses = []
         adamw_phase_losses = []
 
@@ -149,6 +160,7 @@ def continual_sine_learning(
 
         # Evaluate initial performance on this phase
         cbp_initial_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
+        cbp_adamw_initial_loss = evaluate(cbp_adamw_state.params, eval_inputs, eval_targets)
         adam_initial_loss = evaluate(adam_state.params, eval_inputs, eval_targets)
         adamw_initial_loss = evaluate(adamw_state.params, eval_inputs, eval_targets)
 
@@ -161,16 +173,19 @@ def continual_sine_learning(
 
             # Perform training steps
             cbp_state, cbp_loss = train_cbp_step(cbp_state, inputs, targets)
+            cbp_adamw_state, cbp_adamw_loss = train_cbp_step(cbp_adamw_state, inputs, targets)
             adam_state, adam_loss = train_adam_step(adam_state, inputs, targets)
             adamw_state, adamw_loss = train_adam_step(adamw_state, inputs, targets)
 
             # Store losses
             cbp_phase_losses.append(float(cbp_loss))
+            cbp_adamw_phase_losses.append(float(cbp_adamw_loss))
             adam_phase_losses.append(float(adam_loss))
             adamw_phase_losses.append(float(adamw_loss))
 
         # Evaluate final performance on this phase
         cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
+        cbp_adamw_final_loss = evaluate(cbp_adamw_state.params, eval_inputs, eval_targets)
         adam_final_loss = evaluate(adam_state.params, eval_inputs, eval_targets)
         adamw_final_loss = evaluate(adamw_state.params, eval_inputs, eval_targets)
 
@@ -178,6 +193,9 @@ def continual_sine_learning(
         task_id = float(phase_shift)
         cbp_best_losses[task_id] = min(
             cbp_best_losses.get(task_id, float("inf")), float(cbp_final_loss)
+        )
+        cbp_adamw_best_losses[task_id] = min(
+            cbp_adamw_best_losses.get(task_id, float("inf")), float(cbp_adamw_final_loss)
         )
         adam_best_losses[task_id] = min(
             adam_best_losses.get(task_id, float("inf")), float(adam_final_loss)
@@ -187,12 +205,16 @@ def continual_sine_learning(
         )
 
         cbp_current_losses[task_id] = float(cbp_final_loss)
+        cbp_adamw_current_losses[task_id] = float(cbp_adamw_final_loss)
         adam_current_losses[task_id] = float(adam_final_loss)
         adamw_current_losses[task_id] = float(adamw_final_loss)
 
         # Compute plasticity metrics
         cbp_plasticity = utils.compute_plasticity_metrics(
             cbp_initial_params, cbp_state.params["params"]
+        )
+        cbp_adamw_plasticity = utils.compute_plasticity_metrics(
+            cbp_adamw_initial_params, cbp_adamw_state.params["params"]
         )
         adam_plasticity = utils.compute_plasticity_metrics(
             adam_initial_params, adam_state.params["params"]
@@ -203,11 +225,13 @@ def continual_sine_learning(
 
         # Compute adaptation metrics
         cbp_adaptation = float(cbp_initial_loss - cbp_final_loss)
+        cbp_adamw_adaptation = float(cbp_adamw_initial_loss - cbp_adamw_final_loss)
         adam_adaptation = float(adam_initial_loss - adam_final_loss)
         adamw_adaptation = float(adamw_initial_loss - adamw_final_loss)
 
         # Initialize forgetting metrics
         cbp_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
+        cbp_adamw_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
         adam_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
         adamw_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
 
@@ -229,6 +253,7 @@ def continual_sine_learning(
 
                 # Evaluate on previous task
                 cbp_prev_loss = evaluate(cbp_state.params, prev_inputs, prev_targets)
+                cbp_adamw_prev_loss = evaluate(cbp_adamw_state.params, prev_inputs, prev_targets)
                 adam_prev_loss = evaluate(adam_state.params, prev_inputs, prev_targets)
                 adamw_prev_loss = evaluate(
                     adamw_state.params, prev_inputs, prev_targets
@@ -237,12 +262,16 @@ def continual_sine_learning(
                 # Update current losses
                 task_id = float(prev_shift)
                 cbp_current_losses[task_id] = float(cbp_prev_loss)
+                cbp_adamw_current_losses[task_id] = float(cbp_adamw_prev_loss)
                 adam_current_losses[task_id] = float(adam_prev_loss)
                 adamw_current_losses[task_id] = float(adamw_prev_loss)
 
             # Compute overall forgetting metrics
             cbp_forgetting = utils.compute_forgetting_metrics(
                 cbp_current_losses, cbp_best_losses
+            )
+            cbp_adamw_forgetting = utils.compute_forgetting_metrics(
+                cbp_adamw_current_losses, cbp_adamw_best_losses
             )
             adam_forgetting = utils.compute_forgetting_metrics(
                 adam_current_losses, adam_best_losses
@@ -254,6 +283,9 @@ def continual_sine_learning(
         # Calculate stability-plasticity tradeoff
         cbp_tradeoff = utils.stability_plasticity_tradeoff(
             cbp_adaptation, cbp_forgetting["avg_forgetting"]
+        )
+        cbp_adamw_tradeoff = utils.stability_plasticity_tradeoff(
+            cbp_adamw_adaptation, cbp_adamw_forgetting["avg_forgetting"]
         )
         adam_tradeoff = utils.stability_plasticity_tradeoff(
             adam_adaptation, adam_forgetting["avg_forgetting"]
@@ -268,20 +300,26 @@ def continual_sine_learning(
             "phase_shift": phase_shift,
             "cbp_initial_loss": float(cbp_initial_loss),
             "cbp_final_loss": float(cbp_final_loss),
+            "cbp_adamw_initial_loss": float(cbp_adamw_initial_loss),
+            "cbp_adamw_final_loss": float(cbp_adamw_final_loss),
             "adam_initial_loss": float(adam_initial_loss),
             "adam_final_loss": float(adam_final_loss),
             "adamw_initial_loss": float(adamw_initial_loss),
             "adamw_final_loss": float(adamw_final_loss),
             "cbp_plasticity": cbp_plasticity["total_plasticity"],
+            "cbp_adamw_plasticity": cbp_adamw_plasticity["total_plasticity"],
             "adam_plasticity": adam_plasticity["total_plasticity"],
             "adamw_plasticity": adamw_plasticity["total_plasticity"],
             "cbp_adaptation": cbp_adaptation,
+            "cbp_adamw_adaptation": cbp_adamw_adaptation,
             "adam_adaptation": adam_adaptation,
             "adamw_adaptation": adamw_adaptation,
             "cbp_forgetting": cbp_forgetting["avg_forgetting"],
+            "cbp_adamw_forgetting": cbp_adamw_forgetting["avg_forgetting"],
             "adam_forgetting": adam_forgetting["avg_forgetting"],
             "adamw_forgetting": adamw_forgetting["avg_forgetting"],
             "cbp_tradeoff": cbp_tradeoff,
+            "cbp_adamw_tradeoff": cbp_adamw_tradeoff,
             "adam_tradeoff": adam_tradeoff,
             "adamw_tradeoff": adamw_tradeoff,
         }
@@ -296,6 +334,18 @@ def continual_sine_learning(
                 "adaptation": cbp_adaptation,
                 "forgetting": cbp_forgetting["avg_forgetting"],
                 "tradeoff": cbp_tradeoff,
+            }
+        )
+        
+        cbp_adamw_metrics.append(
+            {
+                "phase": shift_idx,
+                "phase_shift": phase_shift,
+                "final_loss": float(cbp_adamw_final_loss),
+                "plasticity": cbp_adamw_plasticity["total_plasticity"],
+                "adaptation": cbp_adamw_adaptation,
+                "forgetting": cbp_adamw_forgetting["avg_forgetting"],
+                "tradeoff": cbp_adamw_tradeoff,
             }
         )
 
@@ -331,18 +381,24 @@ def continual_sine_learning(
                 f"Phase {shift_idx}/{num_phase_shifts}, Shift: {phase_shift:.2f}, Time: {elapsed:.1f}s"
             )
             print(
-                f"  CBP:    Loss: {cbp_final_loss:.6f}, Plasticity: {cbp_plasticity['total_plasticity']:.6f}"
+                f"  CBP:       Loss: {cbp_final_loss:.6f}, Plasticity: {cbp_plasticity['total_plasticity']:.6f}"
             )
             print(
-                f"  Adam:   Loss: {adam_final_loss:.6f}, Plasticity: {adam_plasticity['total_plasticity']:.6f}"
+                f"  CBP+AdamW: Loss: {cbp_adamw_final_loss:.6f}, Plasticity: {cbp_adamw_plasticity['total_plasticity']:.6f}"
             )
             print(
-                f"  AdamW:  Loss: {adamw_final_loss:.6f}, Plasticity: {adamw_plasticity['total_plasticity']:.6f}"
+                f"  Adam:      Loss: {adam_final_loss:.6f}, Plasticity: {adam_plasticity['total_plasticity']:.6f}"
+            )
+            print(
+                f"  AdamW:     Loss: {adamw_final_loss:.6f}, Plasticity: {adamw_plasticity['total_plasticity']:.6f}"
             )
 
             if shift_idx > 0 and shift_idx % eval_interval == 0:
                 print(
                     f"  CBP Forgetting: {cbp_forgetting['avg_forgetting']:.6f}, Tradeoff: {cbp_tradeoff:.6f}"
+                )
+                print(
+                    f"  CBP+AdamW Forgetting: {cbp_adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {cbp_adamw_tradeoff:.6f}"
                 )
                 print(
                     f"  Adam Forgetting: {adam_forgetting['avg_forgetting']:.6f}, Tradeoff: {adam_tradeoff:.6f}"
@@ -371,13 +427,13 @@ def continual_sine_learning(
         # Save and plot results periodically
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
             utils.plot_results(
-                cbp_metrics, adam_metrics, adamw_metrics, f"results_{shift_idx}"
+                cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, f"results_{shift_idx}"
             )
 
     # Final analysis
-    utils.print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics)
+    utils.print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics)
 
-    return cbp_metrics, adam_metrics, adamw_metrics
+    return cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics
 
 
 @dataclass

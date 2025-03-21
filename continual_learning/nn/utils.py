@@ -94,7 +94,7 @@ def stability_plasticity_tradeoff(adaptation, forgetting):
     )  # Good tradeoff means high adaptation with high stability
 
 
-def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="results"):
+def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, filename_prefix="results"):
     """Plot metrics from the continual learning experiment using Altair."""
 
     # Prepare data for Altair
@@ -116,6 +116,7 @@ def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="resu
     # Combine data from all algorithms
     data = (
         prepare_data(cbp_metrics, "CBP")
+        + prepare_data(cbp_adamw_metrics, "CBP+AdamW")
         + prepare_data(adam_metrics, "Adam")
         + prepare_data(adamw_metrics, "AdamW")
     )
@@ -222,55 +223,82 @@ def plot_results(cbp_metrics, adam_metrics, adamw_metrics, filename_prefix="resu
     return final_chart
 
 
-def print_summary_metrics(cbp_metrics, adam_metrics, adamw_metrics):
+def print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics):
     """Print summary statistics for the continual learning experiment."""
     # Calculate average metrics
     cbp_avg_loss = np.mean([m["final_loss"] for m in cbp_metrics])
+    cbp_adamw_avg_loss = np.mean([m["final_loss"] for m in cbp_adamw_metrics])
     adam_avg_loss = np.mean([m["final_loss"] for m in adam_metrics])
     adamw_avg_loss = np.mean([m["final_loss"] for m in adamw_metrics])
 
     cbp_avg_plasticity = np.mean([m["plasticity"] for m in cbp_metrics])
+    cbp_adamw_avg_plasticity = np.mean([m["plasticity"] for m in cbp_adamw_metrics])
     adam_avg_plasticity = np.mean([m["plasticity"] for m in adam_metrics])
     adamw_avg_plasticity = np.mean([m["plasticity"] for m in adamw_metrics])
 
     cbp_avg_adaptation = np.mean([m["adaptation"] for m in cbp_metrics])
+    cbp_adamw_avg_adaptation = np.mean([m["adaptation"] for m in cbp_adamw_metrics])
     adam_avg_adaptation = np.mean([m["adaptation"] for m in adam_metrics])
     adamw_avg_adaptation = np.mean([m["adaptation"] for m in adamw_metrics])
 
     cbp_avg_forgetting = np.mean([m["forgetting"] for m in cbp_metrics])
+    cbp_adamw_avg_forgetting = np.mean([m["forgetting"] for m in cbp_adamw_metrics])
     adam_avg_forgetting = np.mean([m["forgetting"] for m in adam_metrics])
     adamw_avg_forgetting = np.mean([m["forgetting"] for m in adamw_metrics])
 
     cbp_avg_tradeoff = np.mean([m["tradeoff"] for m in cbp_metrics])
+    cbp_adamw_avg_tradeoff = np.mean([m["tradeoff"] for m in cbp_adamw_metrics])
     adam_avg_tradeoff = np.mean([m["tradeoff"] for m in adam_metrics])
     adamw_avg_tradeoff = np.mean([m["tradeoff"] for m in adamw_metrics])
 
     # Print summary table
     print("\n===== CONTINUAL LEARNING SUMMARY METRICS =====")
     print(
-        f"{'Metric':<20} {'CBP':<15} {'Adam':<15} {'AdamW':<15} {'CBP/Adam':<15} {'CBP/AdamW':<15}"
+        f"{'Metric':<20} {'CBP':<15} {'CBP+AdamW':<15} {'Adam':<15} {'AdamW':<15}"
     )
-    print("=" * 95)
+    print("=" * 80)
     print(
-        f"{'Average Loss':<20} {cbp_avg_loss:<15.6f} {adam_avg_loss:<15.6f} {adamw_avg_loss:<15.6f} "
-        f"{cbp_avg_loss / adam_avg_loss:<15.6f} {cbp_avg_loss / adamw_avg_loss:<15.6f}"
-    )
-    print(
-        f"{'Average Plasticity':<20} {cbp_avg_plasticity:<15.6f} {adam_avg_plasticity:<15.6f} {adamw_avg_plasticity:<15.6f} "
-        f"{cbp_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_avg_plasticity / adamw_avg_plasticity:<15.6f}"
+        f"{'Average Loss':<20} {cbp_avg_loss:<15.6f} {cbp_adamw_avg_loss:<15.6f} {adam_avg_loss:<15.6f} {adamw_avg_loss:<15.6f}"
     )
     print(
-        f"{'Average Adaptation':<20} {cbp_avg_adaptation:<15.6f} {adam_avg_adaptation:<15.6f} {adamw_avg_adaptation:<15.6f} "
-        f"{cbp_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_avg_adaptation / adamw_avg_adaptation:<15.6f}"
+        f"{'Average Plasticity':<20} {cbp_avg_plasticity:<15.6f} {cbp_adamw_avg_plasticity:<15.6f} {adam_avg_plasticity:<15.6f} {adamw_avg_plasticity:<15.6f}"
     )
     print(
-        f"{'Average Forgetting':<20} {cbp_avg_forgetting:<15.6f} {adam_avg_forgetting:<15.6f} {adamw_avg_forgetting:<15.6f} "
-        f"{cbp_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f}"
+        f"{'Average Adaptation':<20} {cbp_avg_adaptation:<15.6f} {cbp_adamw_avg_adaptation:<15.6f} {adam_avg_adaptation:<15.6f} {adamw_avg_adaptation:<15.6f}"
     )
     print(
-        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff:<15.6f} {adam_avg_tradeoff:<15.6f} {adamw_avg_tradeoff:<15.6f} "
-        f"{cbp_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f}"
+        f"{'Average Forgetting':<20} {cbp_avg_forgetting:<15.6f} {cbp_adamw_avg_forgetting:<15.6f} {adam_avg_forgetting:<15.6f} {adamw_avg_forgetting:<15.6f}"
     )
-    print("=" * 95)
+    print(
+        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff:<15.6f} {cbp_adamw_avg_tradeoff:<15.6f} {adam_avg_tradeoff:<15.6f} {adamw_avg_tradeoff:<15.6f}"
+    )
+    
+    # Print relative comparisons
+    print("\n===== RELATIVE COMPARISONS =====")
+    print(
+        f"{'Metric':<20} {'CBP/Adam':<15} {'CBP/AdamW':<15} {'CBP+AdamW/Adam':<15} {'CBP+AdamW/AdamW':<15}"
+    )
+    print("=" * 80)
+    print(
+        f"{'Average Loss':<20} {cbp_avg_loss / adam_avg_loss:<15.6f} {cbp_avg_loss / adamw_avg_loss:<15.6f} "
+        f"{cbp_adamw_avg_loss / adam_avg_loss:<15.6f} {cbp_adamw_avg_loss / adamw_avg_loss:<15.6f}"
+    )
+    print(
+        f"{'Average Plasticity':<20} {cbp_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_avg_plasticity / adamw_avg_plasticity:<15.6f} "
+        f"{cbp_adamw_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_adamw_avg_plasticity / adamw_avg_plasticity:<15.6f}"
+    )
+    print(
+        f"{'Average Adaptation':<20} {cbp_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_avg_adaptation / adamw_avg_adaptation:<15.6f} "
+        f"{cbp_adamw_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_adamw_avg_adaptation / adamw_avg_adaptation:<15.6f}"
+    )
+    print(
+        f"{'Average Forgetting':<20} {cbp_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f} "
+        f"{cbp_adamw_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_adamw_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f}"
+    )
+    print(
+        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f} "
+        f"{cbp_adamw_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_adamw_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f}"
+    )
+    print("=" * 80)
 
 
