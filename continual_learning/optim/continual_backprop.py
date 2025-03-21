@@ -23,7 +23,7 @@ Count = 15
   * See testing list in test_reset.py
 
 :: Experiments ::
-  * Create simple regression for complex function NOT continual to guage single task performance
+  * Implement SGDW as for some reason it's not in https://optax.readthedocs.io/en/latest/api/optimizers.html
   * Test the ppo continual env more/ guage performance of base agent in comparison to lop results
   * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
 
