@@ -8,6 +8,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 from continual_learning.envs.slippery_ant_v5 import ContinualAntEnv, SlipperyAntEnv
 from functools import partial
 from gymnasium.envs.mujoco.ant_v5 import AntEnv
+import jax.random as random
 
 def test_friction(friction: float, model=None):
     assert model, "please provide model to test"
@@ -51,25 +52,27 @@ def train_slippery_ant():
     test_friction(0.1)
 
 def train_continual_ant():
-    min_f  =0.1
+    min_f = 0.1
     max_f = 4
     n_envs = 4
-    changes = 4
-    change_every = 200_000
+    changes = 8
+    change_every = 150_000
     total_timesteps = change_every * changes * n_envs
     policy_kwargs = {"net_arch" : {"pi": [256, 256], "vf": [256, 256]}}
+    logdir = f"sbx_logs/n{n_envs}ce{(change_every*n_envs)//100_000}"
+    run_name = f"PPO_{len(os.listdir(logdir)) if os.path.isdir(logdir) else 1}"
+
     print("total_timesteps:\n", total_timesteps)
+    print(f"logdir: {logdir} run {run_name}")
 
     env_spec = gym.spec("Ant-v5") # Could be simpler to just pass in max steps rather than require the whole spec
     env = VecMonitor(DummyVecEnv([make_env(ContinualAntEnv,
                                            env_spec,
+                                           seed=random.PRNGKey(11),
                                            change_friction_every=change_every,
                                            max_friction=max_f,
                                            min_friction=min_f) for _ in range(n_envs)]))
 
-    logdir = f"sbx_logs/n{n_envs}ce{(change_every*n_envs)//100_000}"
-    run_name = f"PPO_{len(os.listdir(logdir)) if os.path.isdir(logdir) else 1}"
-    print(f"logdir: {logdir} run {run_name}")
 
     model = PPO("MlpPolicy", env, learning_rate=1e-4, policy_kwargs=policy_kwargs, tensorboard_log=logdir)
     model.learn(total_timesteps=total_timesteps, progress_bar=True) # Remember n_envs impacts total and change every
@@ -80,11 +83,11 @@ def train_continual_ant():
     test(1)
 
     print("Testing with high friction")
-    test(4)
+    test(max_f)
 
     ## Testing in lower friction
     print("Testing in low friction")
-    test(0.1)
+    test(min_f)
 
 if __name__ == "__main__":
     train_continual_ant()

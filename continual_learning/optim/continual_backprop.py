@@ -24,6 +24,7 @@ Count = 15
 
 :: Experiments ::
   * Implement SGDW as for some reason it's not in https://optax.readthedocs.io/en/latest/api/optimizers.html
+  * Make continual task sequence sequential i.e. [1,2,3] instead of random [1,3,2] (SlipperyAnt and sine exp)
   * Test the ppo continual env more/ guage performance of base agent in comparison to lop results
   * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
 

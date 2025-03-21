@@ -33,7 +33,7 @@ class SlipperyAntEnv(AntEnv):
         **kwargs,
     ):
         self.xml_file = xml_file
-        gen_xml_file(friction, xml_file)  # May be redundant
+        gen_xml_file(friction, xml_file)
         super().__init__(**kwargs, xml_file=xml_file)
         self.print_friction()
 
@@ -57,15 +57,17 @@ class ContinualAntEnv(gym.Env):
         self.change_friction_every = change_friction_every
         self.seed = random.PRNGKey(seed) if type(seed) == int else seed
         self.local_time_steps = 0
-        self.env = SlipperyAntEnv(friction=self.gen_random_friction()) # Defined in first reset
+        self.env = SlipperyAntEnv(
+            friction=self.gen_random_friction()
+        )
         super().__init__()
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
     def gen_random_friction(self):
         self.seed, f_key = random.split(self.seed)
-        friction = random.uniform(
-            f_key, minval=self.min_friction, maxval=self.max_friction
+        friction = float(
+            random.uniform(f_key, minval=self.min_friction, maxval=self.max_friction)
         )
         print("friction", friction)
         return friction
@@ -78,7 +80,9 @@ class ContinualAntEnv(gym.Env):
         if (self.local_time_steps / self.change_friction_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
             self.env = SlipperyAntEnv(friction=self.gen_random_friction())
-            self.local_time_steps = 0 # Figure out how to not do this as to keep incrementing for stats
+            self.local_time_steps = (
+                0  # Figure out how to not do this as to keep incrementing for stats
+            )
 
         return self.env.reset(*args, **kwargs)
 
