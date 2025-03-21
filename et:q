@@ -1,0 +1,51 @@
+[33mad2b6d2[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Added CBP+adamw to sine experiments
+[33m6047c3d[m Updated at 2025-03-21 11:45:24
+[33mebbfe5b[m Fixed bias mask bug
+[33m6f190c8[m Updated at 2025-03-21 09:53:01
+[33m704f1ec[m Updated at 2025-03-21 09:51:16
+[33ma007d77[m Abstracted network from sine exp
+[33me956dbe[m Updated README.md
+[33mc0fd4da[m Updated at 2025-03-20 17:06:05
+[33m61e8896[m renaming cbp_full to cbp
+[33m86b558f[m Clean up
+[33m4c4b078[m Updated at 2025-03-20 16:47:03
+[33m3bd1015[m Updated at 2025-03-19 16:27:50
+[33m4ccf1d9[m Updated at 2025-03-17 15:08:05
+[33maa0dbbd[m Updated at 2025-03-14 16:07:59
+[33m587c3c7[m Updated at 2025-03-13 16:31:40
+[33mbabd6bc[m Updated at 2025-03-13 11:02:46
+[33m0dfaef5[m Updated at 2025-03-13 11:00:27
+[33m6d3947b[m Updated at 2025-03-13 10:54:30
+[33m8a56767[m Updated at 2025-03-12 17:38:15
+[33m4403049[m Updated at 2025-03-11 15:34:42
+[33m31b7d5f[m Updated at 2025-03-11 15:09:54
+[33m5a37451[m Updated at 2025-03-11 14:28:39
+[33me76d9a0[m Updated at 2025-03-11 13:51:58
+[33mec277ed[m Updated at 2025-03-11 13:51:12
+[33m66acd16[m Updated at 2025-03-05 17:23:09
+[33m47af3ae[m Updated at 2025-03-05 17:01:49
+[33m6b1ba78[m Updated at 2025-02-28 11:28:34
+[33m284f69e[m Updated at 2025-02-28 11:24:10
+[33m74a6c24[m Updated at 2025-02-27 16:41:21
+[33m468f1ac[m Updated at 2025-02-27 16:03:31
+[33mdeceb9f[m Updated at 2025-02-27 15:56:52
+[33md47f282[m Updated at 2025-02-27 15:55:26
+[33ma3aee73[m Updated at 2025-02-27 14:38:15
+[33m7c3fb40[m Updated at 2025-02-26 17:07:36
+[33maeba43e[m Updated at 2025-02-26 15:24:33
+[33meb50e1a[m Updated at 2025-02-26 15:19:58
+[33mb4b7213[m Updated at 2025-02-26 13:36:49
+[33m79ee220[m Updated at 2025-02-25 16:33:25
+[33m175eeb5[m Updated at 2025-02-24 16:41:53
+[33m88e6170[m Updated at 2025-02-12 16:50:34
+[33m4be7087[m removed redundant files
+[33m4920cad[m Updated scrap with new jax version in scrap2 and backprop_jax
+[33m623dee3[m Updated at 2025-01-27 11:10:10
+[33m078c50c[m Updated at 2025-01-24 17:21:28
+[33m96d4f07[m Updated at 2025-01-23 16:44:16
+[33mc48a00d[m Renamed to 'continual-rl' -> 'continual-learning'
+[33m90a094d[m Updated .gitignore
+[33m1aeb684[m Updated README.md
+[33ma93c203[m Removed unnessesary experiments
+[33m9b12211[m Initial template
+[33m2859c03[m first commit
