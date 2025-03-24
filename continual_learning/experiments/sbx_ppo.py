@@ -15,14 +15,17 @@ def test_friction(friction: float, model=None):
     configured_env = partial(SlipperyAntEnv, friction=friction, render_mode="human")
     vec_env = DummyVecEnv([configured_env for _ in range(1)])
     obs = vec_env.reset()
+    rewards = 0
 
     print("Testing with friction", friction)
     for _ in range(1000):
         vec_env.render()
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, done, info = vec_env.step(action)
+        rewards += reward
 
     vec_env.close()
+    print(f"Friction: {friction} reward: {rewards}")
 
 def make_env(base: gym.Env, env_spec, **kwargs):
     return lambda: TimeLimit(OrderEnforcing(PassiveEnvChecker(base(**kwargs))), env_spec.max_episode_steps)
@@ -53,10 +56,11 @@ def train_slippery_ant():
 
 def train_continual_ant():
     min_f = 0.1
-    max_f = 4
-    n_envs = 4
-    changes = 8
-    change_every = 150_000
+    max_f = 2
+    n_envs = 6
+    changes = 6
+    change_every = 320_000 # In unvecced timesteps
+
     total_timesteps = change_every * changes * n_envs
     policy_kwargs = {"net_arch" : {"pi": [256, 256], "vf": [256, 256]}}
     logdir = f"sbx_logs/n{n_envs}ce{(change_every*n_envs)//100_000}"
