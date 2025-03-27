@@ -7,8 +7,8 @@ import optax
 from flax.training.train_state import TrainState
 import numpy as np
 import time
-from typing import Dict, Any, Tuple, List
-from dataclasses import dataclass
+from typing import Dict, Any, Tuple, List, Callable, Literal
+from dataclasses import dataclass, field
 
 from continual_learning.optim.continual_backprop import (
     continual_backprop,
@@ -19,7 +19,7 @@ from continual_learning.nn import networks
 
 import tyro
 
-
+# --- Data Generation ---
 def generate_sine_data(
     key, batch_size, phase_shift=0.0, amplitude=1.0, noise_level=0.0
 ):
@@ -31,24 +31,31 @@ def generate_sine_data(
     return x, y
 
 
+# --- Define a configuration structure for each method ---
+@dataclass
+class MethodConfig:
+    name: str
+    optimizer_fn: Callable
+    optimizer_kwargs: Dict[str, Any]
+    state_class: Callable
+    state_kwargs: Dict[str, Any]
+    train_step_fn: Callable
+
+
 def continual_sine_learning(
-    num_phase_shifts=20000,  # Total number of phase shifts to perform
-    epochs_per_phase=100,  # Epochs to train on each phase
-    batch_size=64,  # Batch size for training
-    learning_rate=1e-3,  # Learning rate for optimizer
-    weight_decay=0.01,  # Weight decay for AdamW
-    phase_shift_step=0.1,  # Amount to shift the phase by each time
-    eval_interval=100,  # How often to evaluate forgetting on previous tasks
-    save_interval=1000,  # How often to save metrics
-    verbose=True,  # Whether to print progress
+    num_phase_shifts=20000,
+    epochs_per_phase=100,
+    batch_size=64,
+    learning_rate=1e-3,
+    weight_decay=0.01,
+    phase_shift_step=0.1,
+    eval_interval=100,
+    save_interval=1000,
+    verbose=True,
     cbp_kwargs={},
 ):
     """
     Run a continual learning experiment with a sine wave regression task.
-
-    The task involves learning a sine wave, then gradually shifting the phase and
-    continuing to learn, measuring how well the model adapts and whether it forgets
-    previously learned phases.
     """
     if verbose:
         print(f"Starting continual learning with {num_phase_shifts} phase shifts")
@@ -60,28 +67,10 @@ def continual_sine_learning(
     # Initialize network
     key, init_key = random.split(key)
     net = networks.SimpleNet(n_out=1, h_size=128)
-
-    # Create dummy input for initialization
     dummy_input = jnp.zeros((1, 1))
-    params = net.init(init_key, dummy_input)
+    base_params = net.init(init_key, dummy_input) # Use the same initial params for all
 
-    # Initialize optimizers
-    adam_tx = optax.adam(learning_rate)
-    cbp_adam_tx = optax.adam(learning_rate)
-    adamw_tx = optax.adamw(learning_rate, weight_decay=weight_decay)
-    cbp_adamw_tx = optax.adamw(learning_rate, weight_decay=weight_decay)
-
-    # Create train states
-    cbp_state = CBPTrainState.create(
-        apply_fn=net.predict, params=params, tx=cbp_adam_tx, **cbp_kwargs
-    )
-    cbp_adamw_state = CBPTrainState.create(
-        apply_fn=net.predict, params=params, tx=cbp_adamw_tx, **cbp_kwargs
-    )
-    adam_state = TrainState.create(apply_fn=net.predict, params=params, tx=adam_tx)
-    adamw_state = TrainState.create(apply_fn=net.predict, params=params, tx=adamw_tx)
-
-    # Define loss function
+    # --- Define Loss and Grad Functions ---
     def loss_fn(params, inputs, targets):
         predictions, features = net.apply(params, inputs, mutable="intermediates")
         loss = jnp.mean((predictions - targets) ** 2)  # MSE loss
@@ -89,400 +78,333 @@ def continual_sine_learning(
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
+    # --- Define Train Step Functions ---
+    # Note: features are needed by CBP's apply_gradients
     @jax.jit
-    def train_cbp_step(state, inputs, targets):
-        (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
+    def cbp_train_step(state, inputs, targets, grad_fn_local=grad_fn):
+        (loss, (preds, features)), grads = grad_fn_local(state.params, inputs, targets)
+        # Extract features from the specific layer CBP operates on if needed,
+        # or pass the whole features dictionary if CBPTrainState handles it.
+        # Assuming CBPTrainState.apply_gradients expects the 'features' dict from loss_fn aux
         new_state = state.apply_gradients(grads=grads, features=features)
         return new_state, loss
 
     @jax.jit
-    def train_adam_step(state, inputs, targets):
-        (loss, (preds, features)), grads = grad_fn(state.params, inputs, targets)
+    def standard_train_step(state, inputs, targets, grad_fn_local=grad_fn):
+        (loss, aux), grads = grad_fn_local(state.params, inputs, targets)
+        # Standard TrainState doesn't need features for apply_gradients
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss
 
     @jax.jit
     def evaluate(params, inputs, targets):
+        # Assuming mutable="intermediates" might still be needed if apply_fn internally uses it
+        # If not, you can simplify net.apply call here.
         predictions, _ = net.apply(params, inputs, mutable="intermediates")
         loss = jnp.mean((predictions - targets) ** 2)
         return loss
 
-    # Storage for metrics
-    cbp_metrics = []
-    cbp_adamw_metrics = []
-    adam_metrics = []
-    adamw_metrics = []
+    # --- Define Method Configurations ---
+    method_configs = [
+        MethodConfig(
+            name='CBP',
+            optimizer_fn=optax.adam,
+            optimizer_kwargs={'learning_rate': learning_rate},
+            state_class=CBPTrainState,
+            state_kwargs=cbp_kwargs,
+            train_step_fn=cbp_train_step,
+        ),
+        MethodConfig(
+            name='CBP_AdamW',
+            optimizer_fn=optax.adamw,
+            optimizer_kwargs={'learning_rate': learning_rate, 'weight_decay': weight_decay},
+            state_class=CBPTrainState,
+            state_kwargs=cbp_kwargs,
+            train_step_fn=cbp_train_step,
+        ),
+        MethodConfig(
+            name='Adam',
+            optimizer_fn=optax.adam,
+            optimizer_kwargs={'learning_rate': learning_rate},
+            state_class=TrainState,
+            state_kwargs={},
+            train_step_fn=standard_train_step,
+        ),
+        MethodConfig(
+            name='SGD',
+            optimizer_fn=optax.sgd,
+            optimizer_kwargs={'learning_rate': learning_rate},
+            state_class=TrainState,
+            state_kwargs={},
+            train_step_fn=standard_train_step,
+        ),
+        MethodConfig(
+            name='AdamW',
+            optimizer_fn=optax.adamw,
+            optimizer_kwargs={'learning_rate': learning_rate, 'weight_decay': weight_decay},
+            state_class=TrainState,
+            state_kwargs={},
+            train_step_fn=standard_train_step,
+        ),
+    ]
 
-    # Storage for best performance on each task
-    cbp_best_losses = {}
-    cbp_adamw_best_losses = {}
-    adam_best_losses = {}
-    adamw_best_losses = {}
+    # --- Initialize States and Metric Storage using Dictionaries ---
+    train_states = {}
+    all_metrics = {config.name: [] for config in method_configs}
+    all_best_losses = {config.name: {} for config in method_configs}
+    all_current_losses = {config.name: {} for config in method_configs}
 
-    # Current performance on each task
-    cbp_current_losses = {}
-    cbp_adamw_current_losses = {}
-    adam_current_losses = {}
-    adamw_current_losses = {}
+    for config in method_configs:
+        tx = config.optimizer_fn(**config.optimizer_kwargs)
+        # Use tree_map to ensure each state starts with an independent copy of params
+        initial_params_copy = jax.tree_util.tree_map(lambda x: x.copy(), base_params)
+        train_states[config.name] = config.state_class.create(
+            apply_fn=net.predict, # Or net.apply if predict doesn't exist / mutable needed
+            params=initial_params_copy,
+            tx=tx,
+            **config.state_kwargs
+        )
 
-    # print weight sizes
-    for name, param in cbp_state.params["params"].items():
-        print(name, param["kernel"].shape)
+    method_names = [config.name for config in method_configs]
 
-    # Main training loop for each phase shift
+    # print weight sizes (only need to do once)
+    print("Model Parameter Shapes:")
+    for name, param in base_params["params"].items():
+        print(f"  {name}: {param.get('kernel', param.get('embedding', 'N/A')).shape}") # Handle different param types
+
+    # --- Main Training Loop ---
     start_time = time.time()
     for shift_idx in range(num_phase_shifts):
         phase_shift = phase_shift_step * shift_idx
+        task_id = float(phase_shift) # Use consistent task identifier
 
-        # Save initial parameters for plasticity metrics
-        cbp_initial_params = jax.tree.map(
-            lambda x: x.copy(), cbp_state.params["params"]
-        )
-        cbp_adamw_initial_params = jax.tree.map(
-            lambda x: x.copy(), cbp_adamw_state.params["params"]
-        )
-        adam_initial_params = jax.tree.map(
-            lambda x: x.copy(), adam_state.params["params"]
-        )
-        adamw_initial_params = jax.tree.map(
-            lambda x: x.copy(), adamw_state.params["params"]
-        )
+        # --- Per-Phase Initialization ---
+        initial_params = {}
+        initial_losses = {}
+        phase_losses = {name: [] for name in method_names}
 
-        # Track losses during training
-        cbp_phase_losses = []
-        cbp_adamw_phase_losses = []
-        adam_phase_losses = []
-        adamw_phase_losses = []
-
-        # Generate evaluation data for this phase
         key, eval_key = random.split(key)
         eval_inputs, eval_targets = generate_sine_data(eval_key, 1000, phase_shift)
 
-        # Evaluate initial performance on this phase
-        cbp_initial_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
-        cbp_adamw_initial_loss = evaluate(cbp_adamw_state.params, eval_inputs, eval_targets)
-        adam_initial_loss = evaluate(adam_state.params, eval_inputs, eval_targets)
-        adamw_initial_loss = evaluate(adamw_state.params, eval_inputs, eval_targets)
+        for name in method_names:
+            # Store initial parameters for plasticity
+            current_params = train_states[name].params
+            param_dict = current_params.get('params', current_params) if isinstance(current_params, dict) else current_params
+            initial_params[name] = jax.tree_util.tree_map(lambda x: x.copy(), param_dict)
 
-        # Train for multiple epochs on this phase
+            # Evaluate initial performance
+            initial_losses[name] = evaluate(train_states[name].params, eval_inputs, eval_targets)
+
+
+        # --- Epoch Loop ---
         for epoch in range(epochs_per_phase):
             key, data_key = random.split(key)
-
-            # Generate a batch of data for this phase
             inputs, targets = generate_sine_data(data_key, batch_size, phase_shift)
 
-            # Perform training steps
-            cbp_state, cbp_loss = train_cbp_step(cbp_state, inputs, targets)
-            cbp_adamw_state, cbp_adamw_loss = train_cbp_step(cbp_adamw_state, inputs, targets)
-            adam_state, adam_loss = train_adam_step(adam_state, inputs, targets)
-            adamw_state, adamw_loss = train_adam_step(adamw_state, inputs, targets)
+            for config in method_configs:
+                name = config.name
+                state = train_states[name]
+                # Perform training step using the configured function
+                new_state, loss = config.train_step_fn(state, inputs, targets)
+                train_states[name] = new_state
+                phase_losses[name].append(float(loss))
 
-            # Store losses
-            cbp_phase_losses.append(float(cbp_loss))
-            cbp_adamw_phase_losses.append(float(cbp_adamw_loss))
-            adam_phase_losses.append(float(adam_loss))
-            adamw_phase_losses.append(float(adamw_loss))
+        # --- Post-Phase Evaluation and Metrics ---
+        final_losses = {}
+        plasticity_metrics = {}
+        adaptation_metrics = {}
+        forgetting_metrics = {name: {"avg_forgetting": 0.0, "max_forgetting": 0.0} for name in method_names}
+        tradeoff_metrics = {}
+        current_params_dict = {}
 
-        # Evaluate final performance on this phase
-        cbp_final_loss = evaluate(cbp_state.params, eval_inputs, eval_targets)
-        cbp_adamw_final_loss = evaluate(cbp_adamw_state.params, eval_inputs, eval_targets)
-        adam_final_loss = evaluate(adam_state.params, eval_inputs, eval_targets)
-        adamw_final_loss = evaluate(adamw_state.params, eval_inputs, eval_targets)
+        for name in method_names:
+            # Evaluate final performance
+            state = train_states[name]
+            final_losses[name] = evaluate(state.params, eval_inputs, eval_targets)
 
-        # Store best and current losses for this task
-        task_id = float(phase_shift)
-        cbp_best_losses[task_id] = min(
-            cbp_best_losses.get(task_id, float("inf")), float(cbp_final_loss)
-        )
-        cbp_adamw_best_losses[task_id] = min(
-            cbp_adamw_best_losses.get(task_id, float("inf")), float(cbp_adamw_final_loss)
-        )
-        adam_best_losses[task_id] = min(
-            adam_best_losses.get(task_id, float("inf")), float(adam_final_loss)
-        )
-        adamw_best_losses[task_id] = min(
-            adamw_best_losses.get(task_id, float("inf")), float(adamw_final_loss)
-        )
+            # Update best/current losses
+            all_best_losses[name][task_id] = min(
+                all_best_losses[name].get(task_id, float("inf")), float(final_losses[name])
+            )
+            all_current_losses[name][task_id] = float(final_losses[name])
 
-        cbp_current_losses[task_id] = float(cbp_final_loss)
-        cbp_adamw_current_losses[task_id] = float(cbp_adamw_final_loss)
-        adam_current_losses[task_id] = float(adam_final_loss)
-        adamw_current_losses[task_id] = float(adamw_final_loss)
+            # Compute plasticity
+            current_params = state.params
+            param_dict = current_params.get('params', current_params) if isinstance(current_params, dict) else current_params
+            current_params_dict[name] = param_dict # Store for potential reuse
+            plasticity_metrics[name] = utils.compute_plasticity_metrics(
+                initial_params[name], param_dict
+            )
 
-        # Compute plasticity metrics
-        cbp_plasticity = utils.compute_plasticity_metrics(
-            cbp_initial_params, cbp_state.params["params"]
-        )
-        cbp_adamw_plasticity = utils.compute_plasticity_metrics(
-            cbp_adamw_initial_params, cbp_adamw_state.params["params"]
-        )
-        adam_plasticity = utils.compute_plasticity_metrics(
-            adam_initial_params, adam_state.params["params"]
-        )
-        adamw_plasticity = utils.compute_plasticity_metrics(
-            adamw_initial_params, adamw_state.params["params"]
-        )
+            # Compute adaptation
+            adaptation_metrics[name] = float(initial_losses[name] - final_losses[name])
 
-        # Compute adaptation metrics
-        cbp_adaptation = float(cbp_initial_loss - cbp_final_loss)
-        cbp_adamw_adaptation = float(cbp_adamw_initial_loss - cbp_adamw_final_loss)
-        adam_adaptation = float(adam_initial_loss - adam_final_loss)
-        adamw_adaptation = float(adamw_initial_loss - adamw_final_loss)
-
-        # Initialize forgetting metrics
-        cbp_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
-        cbp_adamw_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
-        adam_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
-        adamw_forgetting = {"avg_forgetting": 0.0, "max_forgetting": 0.0}
-
-        # Evaluate forgetting on previous tasks periodically
+        # --- Forgetting Evaluation (Periodically) ---
         if shift_idx > 0 and (
             shift_idx % eval_interval == 0 or shift_idx == num_phase_shifts - 1
         ):
-            # Sample previous phases to evaluate
             previous_task_ids = [
-                phase_shift_step * i for i in range(0, shift_idx, eval_interval)
-            ]
+                float(phase_shift_step * i) for i in range(0, shift_idx, eval_interval)
+            ] # Ensure float keys
 
-            # Evaluate on each previous task
-            for prev_shift in previous_task_ids:
+            for prev_task_id in previous_task_ids:
                 key, prev_key = random.split(key)
                 prev_inputs, prev_targets = generate_sine_data(
-                    prev_key, 1000, prev_shift
+                    prev_key, 1000, prev_task_id # Use task_id (float) for phase shift
                 )
 
-                # Evaluate on previous task
-                cbp_prev_loss = evaluate(cbp_state.params, prev_inputs, prev_targets)
-                cbp_adamw_prev_loss = evaluate(cbp_adamw_state.params, prev_inputs, prev_targets)
-                adam_prev_loss = evaluate(adam_state.params, prev_inputs, prev_targets)
-                adamw_prev_loss = evaluate(
-                    adamw_state.params, prev_inputs, prev_targets
-                )
-
-                # Update current losses
-                task_id = float(prev_shift)
-                cbp_current_losses[task_id] = float(cbp_prev_loss)
-                cbp_adamw_current_losses[task_id] = float(cbp_adamw_prev_loss)
-                adam_current_losses[task_id] = float(adam_prev_loss)
-                adamw_current_losses[task_id] = float(adamw_prev_loss)
+                for name in method_names:
+                    state = train_states[name]
+                    prev_loss = evaluate(state.params, prev_inputs, prev_targets)
+                    all_current_losses[name][prev_task_id] = float(prev_loss)
 
             # Compute overall forgetting metrics
-            cbp_forgetting = utils.compute_forgetting_metrics(
-                cbp_current_losses, cbp_best_losses
-            )
-            cbp_adamw_forgetting = utils.compute_forgetting_metrics(
-                cbp_adamw_current_losses, cbp_adamw_best_losses
-            )
-            adam_forgetting = utils.compute_forgetting_metrics(
-                adam_current_losses, adam_best_losses
-            )
-            adamw_forgetting = utils.compute_forgetting_metrics(
-                adamw_current_losses, adamw_best_losses
+            for name in method_names:
+                 forgetting_metrics[name] = utils.compute_forgetting_metrics(
+                    all_current_losses[name], all_best_losses[name]
+                )
+
+        # --- Compute Tradeoff and Store Metrics ---
+        for name in method_names:
+            tradeoff_metrics[name] = utils.stability_plasticity_tradeoff(
+                adaptation_metrics[name], forgetting_metrics[name]["avg_forgetting"]
             )
 
-        # Calculate stability-plasticity tradeoff
-        cbp_tradeoff = utils.stability_plasticity_tradeoff(
-            cbp_adaptation, cbp_forgetting["avg_forgetting"]
-        )
-        cbp_adamw_tradeoff = utils.stability_plasticity_tradeoff(
-            cbp_adamw_adaptation, cbp_adamw_forgetting["avg_forgetting"]
-        )
-        adam_tradeoff = utils.stability_plasticity_tradeoff(
-            adam_adaptation, adam_forgetting["avg_forgetting"]
-        )
-        adamw_tradeoff = utils.stability_plasticity_tradeoff(
-            adamw_adaptation, adamw_forgetting["avg_forgetting"]
-        )
+            # Append metrics for this phase
+            all_metrics[name].append(
+                {
+                    "phase": shift_idx,
+                    "phase_shift": phase_shift,
+                    "initial_loss": float(initial_losses[name]),
+                    "final_loss": float(final_losses[name]),
+                    "plasticity": plasticity_metrics[name]["total_plasticity"],
+                    "adaptation": adaptation_metrics[name],
+                    "forgetting": forgetting_metrics[name]["avg_forgetting"],
+                    "tradeoff": tradeoff_metrics[name],
+                }
+            )
 
-        # Store metrics for this phase
-        phase_metrics = {
-            "phase": shift_idx,
-            "phase_shift": phase_shift,
-            "cbp_initial_loss": float(cbp_initial_loss),
-            "cbp_final_loss": float(cbp_final_loss),
-            "cbp_adamw_initial_loss": float(cbp_adamw_initial_loss),
-            "cbp_adamw_final_loss": float(cbp_adamw_final_loss),
-            "adam_initial_loss": float(adam_initial_loss),
-            "adam_final_loss": float(adam_final_loss),
-            "adamw_initial_loss": float(adamw_initial_loss),
-            "adamw_final_loss": float(adamw_final_loss),
-            "cbp_plasticity": cbp_plasticity["total_plasticity"],
-            "cbp_adamw_plasticity": cbp_adamw_plasticity["total_plasticity"],
-            "adam_plasticity": adam_plasticity["total_plasticity"],
-            "adamw_plasticity": adamw_plasticity["total_plasticity"],
-            "cbp_adaptation": cbp_adaptation,
-            "cbp_adamw_adaptation": cbp_adamw_adaptation,
-            "adam_adaptation": adam_adaptation,
-            "adamw_adaptation": adamw_adaptation,
-            "cbp_forgetting": cbp_forgetting["avg_forgetting"],
-            "cbp_adamw_forgetting": cbp_adamw_forgetting["avg_forgetting"],
-            "adam_forgetting": adam_forgetting["avg_forgetting"],
-            "adamw_forgetting": adamw_forgetting["avg_forgetting"],
-            "cbp_tradeoff": cbp_tradeoff,
-            "cbp_adamw_tradeoff": cbp_adamw_tradeoff,
-            "adam_tradeoff": adam_tradeoff,
-            "adamw_tradeoff": adamw_tradeoff,
-        }
-
-        # Add to metrics lists for plotting
-        cbp_metrics.append(
-            {
-                "phase": shift_idx,
-                "phase_shift": phase_shift,
-                "final_loss": float(cbp_final_loss),
-                "plasticity": cbp_plasticity["total_plasticity"],
-                "adaptation": cbp_adaptation,
-                "forgetting": cbp_forgetting["avg_forgetting"],
-                "tradeoff": cbp_tradeoff,
-            }
-        )
-        
-        cbp_adamw_metrics.append(
-            {
-                "phase": shift_idx,
-                "phase_shift": phase_shift,
-                "final_loss": float(cbp_adamw_final_loss),
-                "plasticity": cbp_adamw_plasticity["total_plasticity"],
-                "adaptation": cbp_adamw_adaptation,
-                "forgetting": cbp_adamw_forgetting["avg_forgetting"],
-                "tradeoff": cbp_adamw_tradeoff,
-            }
-        )
-
-        adam_metrics.append(
-            {
-                "phase": shift_idx,
-                "phase_shift": phase_shift,
-                "final_loss": float(adam_final_loss),
-                "plasticity": adam_plasticity["total_plasticity"],
-                "adaptation": adam_adaptation,
-                "forgetting": adam_forgetting["avg_forgetting"],
-                "tradeoff": adam_tradeoff,
-            }
-        )
-
-        adamw_metrics.append(
-            {
-                "phase": shift_idx,
-                "phase_shift": phase_shift,
-                "final_loss": float(adamw_final_loss),
-                "plasticity": adamw_plasticity["total_plasticity"],
-                "adaptation": adamw_adaptation,
-                "forgetting": adamw_forgetting["avg_forgetting"],
-                "tradeoff": adamw_tradeoff,
-            }
-        )
-
-        # Print progress
+        # --- Print Progress ---
         if verbose and (shift_idx % 10 == 0 or shift_idx == num_phase_shifts - 1):
             elapsed = time.time() - start_time
-            print(":: Optimiser metrics ::")
-            print(
-                f"Phase {shift_idx}/{num_phase_shifts}, Shift: {phase_shift:.2f}, Time: {elapsed:.1f}s"
-            )
-            print(
-                f"  CBP:       Loss: {cbp_final_loss:.6f}, Plasticity: {cbp_plasticity['total_plasticity']:.6f}"
-            )
-            print(
-                f"  CBP+AdamW: Loss: {cbp_adamw_final_loss:.6f}, Plasticity: {cbp_adamw_plasticity['total_plasticity']:.6f}"
-            )
-            print(
-                f"  Adam:      Loss: {adam_final_loss:.6f}, Plasticity: {adam_plasticity['total_plasticity']:.6f}"
-            )
-            print(
-                f"  AdamW:     Loss: {adamw_final_loss:.6f}, Plasticity: {adamw_plasticity['total_plasticity']:.6f}"
-            )
-
-            if shift_idx > 0 and shift_idx % eval_interval == 0:
+            print(f"\n--- Phase {shift_idx}/{num_phase_shifts}, Shift: {phase_shift:.2f}, Time: {elapsed:.1f}s ---")
+            print(":: Optimizer Metrics ::")
+            for name in method_names:
                 print(
-                    f"  CBP Forgetting: {cbp_forgetting['avg_forgetting']:.6f}, Tradeoff: {cbp_tradeoff:.6f}"
-                )
-                print(
-                    f"  CBP+AdamW Forgetting: {cbp_adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {cbp_adamw_tradeoff:.6f}"
-                )
-                print(
-                    f"  Adam Forgetting: {adam_forgetting['avg_forgetting']:.6f}, Tradeoff: {adam_tradeoff:.6f}"
-                )
-                print(
-                    f"  AdamW Forgetting: {adamw_forgetting['avg_forgetting']:.6f}, Tradeoff: {adamw_tradeoff:.6f}"
+                    f"  {name:<10}: Loss: {final_losses[name]:.6f}, "
+                    f"Plasticity: {plasticity_metrics[name]['total_plasticity']:.6f}"
                 )
 
-            # Extra logs
-            cbp_logs = cbp_state.cbp_state.logs  # ["dense1", ..., "dense3"]
+            if shift_idx > 0 and (shift_idx % eval_interval == 0 or shift_idx == num_phase_shifts -1):
+                 print(":: Forgetting & Tradeoff ::")
+                 for name in method_names:
+                    print(
+                        f"  {name:<10}: Avg Forgetting: {forgetting_metrics[name]['avg_forgetting']:.6f}, "
+                        f"Tradeoff: {tradeoff_metrics[name]:.6f}"
+                    )
 
-            first_value = next(iter(cbp_logs.values()))
-            extra_logs = {k: 0 for k in first_value.keys()}  # initialise metrics
+            # --- Extra CBP Logs (Handle specifically if needed) ---
+            if 'CBP' in train_states: # Check if CBP methods are included
+                print(":: Extra CBP Metrics ::")
+                for name in method_names:
+                    if isinstance(train_states[name], CBPTrainState):
+                        try:
+                            cbp_logs = train_states[name].cbp_state.logs
+                            # Aggregate logs across layers if structure allows
+                            nodes_reset = sum(v.get("nodes_reset", 0) for v in cbp_logs.values())
+                            avg_age_sum = sum(v.get("avg_age", 0) for v in cbp_logs.values())
+                            num_layers = len(cbp_logs) if cbp_logs else 1 # Avoid division by zero
+                            avg_age = avg_age_sum / num_layers
 
-            for k, v in cbp_logs.items():  # Loop over layers
-                extra_logs["nodes_reset"] += v["nodes_reset"]
-                # extra_logs["n_mature"] += v["n_mature"]
-                extra_logs["avg_age"] += v["avg_age"] / len(cbp_logs)
+                            print(f"  {name:<10}: Nodes Reset: {nodes_reset}, Avg Node Age: {avg_age:.2f}")
+                        except AttributeError:
+                            print(f"  {name:<10}: Could not retrieve CBP logs.")
 
-            print(":: Extra Metrics ::")
-            print("nodes reset", extra_logs["nodes_reset"])
-            print("avg node age", jnp.mean(extra_logs["avg_age"]))
-            # print("n_mature", jnp.mean(extra_logs["n_mature"]))
 
-            print("---")
-        # Save and plot results periodically
+            print("-" * (30 + len(f"Phase {shift_idx}/{num_phase_shifts}...")),"\n") # Dynamic separator
+
+        # --- Save and Plot Results Periodically ---
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
+            # Unpack the metrics dictionary for the plotting function
             utils.plot_results(
-                cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, f"results_{shift_idx}"
+                *[all_metrics[name] for name in method_names], # Pass lists in order
+                method_names=method_names, # Pass names for labels
+                filename_prefix=f"results_{shift_idx}",
+                avg_window=20,
             )
+            # Note: You might need to modify plot_results to accept method_names
+            # or ensure the order matches what plot_results expects.
 
-    # Final analysis
-    utils.print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics)
+    # --- Final Analysis ---
+    utils.print_summary_metrics(
+        *[all_metrics[name] for name in method_names],
+        method_names=method_names # Also pass names here
+    )
 
-    return cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics
+    return all_metrics # Return the consolidated dictionary
 
 
+AllowedOptimizers = Literal["cbp", "cbp", "cbp_adam", "sgd", "adam", "adamw", "all"]
+
+# --- Main Execution Block ---
 @dataclass
 class Args:
+    methods: List[AllowedOptimizers] = field(default_factory=lambda: ["all"])
     debug: bool = True
     shifts: int = 50
     epochs: int = 10
-    save_interval: int = np.inf
+    batch_size: int = 1 # Added batch size arg
+    lr: float = 1e-3      # Added learning rate arg
+    wd: float = 0.01      # Added weight decay arg
+    save_interval: int = 1000 # Changed default to save less often in debug
     eval_interval: int = 5
     jit: bool = True
     replacement_rate: float = 0.1
     maturity_threshold: int = 3
 
-
 if __name__ == "__main__":
-    # Use reasonable defaults for quick testing
-    # For the full 20,000 shifts experiment, set debug_mode = False
     args = tyro.cli(Args)
+
+    # Common settings
+    common_kwargs = {
+        "learning_rate": args.lr,
+        "weight_decay": args.wd,
+        "batch_size": args.batch_size,
+        "phase_shift_step": 0.1,
+        "verbose": True,
+    }
+
+    # CBP specific settings
+    cbp_kwargs = {
+        "maturity_threshold": args.maturity_threshold,
+        "replacement_rate": args.replacement_rate,
+    }
+    print(f"--- Running: {', '.join(args.methods)} ---")
 
     if args.debug:
         from contextlib import nullcontext
-
-        # import bpdb; bpdb.set_trace()
-        cbp_kwargs = {
-            "maturity_threshold": args.maturity_threshold,
-            "replacement_rate": args.replacement_rate,
-        }
+        print("--- Running in DEBUG mode ---")
+        # Example: import bpdb; bpdb.set_trace()
         with jax.disable_jit() if not args.jit else nullcontext():
-            continual_sine_learning(
-                num_phase_shifts=args.shifts,  # Reduced number of shifts for testing
-                epochs_per_phase=args.epochs,  # Fewer epochs per phase
-                batch_size=1,
+            metrics = continual_sine_learning(
+                num_phase_shifts=args.shifts,
+                epochs_per_phase=args.epochs,
                 eval_interval=args.eval_interval,
-                save_interval=args.save_interval,
-                verbose=True,
+                save_interval=args.save_interval if args.save_interval != 0 else float('inf'), # Handle 0 save interval
                 cbp_kwargs=cbp_kwargs,
+                **common_kwargs
             )
     else:
-        cbp_kwargs = {"maturity_threshold": 100}
-        # Full experiment with 20,000 phase shifts
-        continual_sine_learning(
-            num_phase_shifts=20000,  # Total number of phase shifts to perform
-            epochs_per_phase=100,  # Epochs to train on each phase
-            batch_size=1,  # Batch size for training
-            learning_rate=1e-3,  # Learning rate for optimizer
-            weight_decay=0.01,  # Weight decay for AdamW
-            phase_shift_step=0.1,  # Amount to shift the phase by each time
-            eval_interval=100,  # How often to evaluate forgetting on previous tasks
-            save_interval=1000,  # How often to save metrics
-            verbose=True,  # Whether to print progress
-            cbp_kwargs=cbp_kwargs,
+        print("--- Running in FULL experiment mode ---")
+        # Adjust CBP kwargs for full run if needed
+        # cbp_kwargs_full = {"maturity_threshold": 100, "replacement_rate": 0.01} # Example
+        metrics = continual_sine_learning(
+            num_phase_shifts=20000,
+            epochs_per_phase=100,
+            eval_interval=100,
+            save_interval=1000,
+            cbp_kwargs=cbp_kwargs, # Or use cbp_kwargs_full
+            **common_kwargs
         )
+
+    print("\n--- Experiment Finished ---")

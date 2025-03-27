@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import altair as alt
 import polars as pl
+import pandas as pd
 import os
 import numpy as np
 
@@ -94,23 +95,36 @@ def stability_plasticity_tradeoff(adaptation, forgetting):
     )  # Good tradeoff means high adaptation with high stability
 
 
-def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, filename_prefix="results"):
-    """Plot metrics from the continual learning experiment using Altair."""
+def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adamw_metrics, method_names, filename_prefix="results", avg_window=3):
+    """
+    Plot metrics from the continual learning experiment using Altair with moving averages.
 
-    # Prepare data for Altair
+    Parameters:
+    -----------
+    cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics : list
+        Lists of metric dictionaries for each algorithm
+    filename_prefix : str
+        Prefix for the output file
+    avg_window : int
+        Size of the moving average window to smooth the plots
+    """
+
     def prepare_data(metrics_list, algorithm_name):
         data = []
         for metric in metrics_list:
-            entry = {
-                "phase": metric["phase"],
-                "algorithm": algorithm_name,
-                "final_loss": metric["final_loss"],
-                "plasticity": metric["plasticity"],
-                "adaptation": metric["adaptation"],
-                "forgetting": metric["forgetting"],
-                "tradeoff": metric["tradeoff"],
-            }
-            data.append(entry)
+            # Ensure 'phase' is present and handled correctly if missing
+            phase = metric.get("phase", None)
+            if phase is not None:
+                 entry = {
+                    "phase": phase,
+                    "algorithm": algorithm_name,
+                    "final_loss": metric.get("final_loss"), 
+                    "plasticity": metric.get("plasticity"),
+                    "adaptation": metric.get("adaptation"),
+                    "forgetting": metric.get("forgetting"),
+                    "tradeoff": metric.get("tradeoff"),
+                }
+                 data.append(entry)
         return data
 
     # Combine data from all algorithms
@@ -118,27 +132,49 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, fi
         prepare_data(cbp_metrics, "CBP")
         + prepare_data(cbp_adamw_metrics, "CBP+AdamW")
         + prepare_data(adam_metrics, "Adam")
+        + prepare_data(sgd_metrics, "SGD")
         + prepare_data(adamw_metrics, "AdamW")
     )
+
+    # --- Polars Section ---
+    # Convert list of dictionaries directly to Polars DataFrame
     df = pl.DataFrame(data)
 
-    # Set some common properties for all charts
-    width = 300
-    height = 250
+    # Filter out any rows where phase might be None, if prepare_data allowed them
+    df = df.filter(pl.col("phase").is_not_null())
 
-    # Create individual charts
+    # Define the metric columns for which to calculate moving averages
+    metric_cols = ['final_loss', 'plasticity', 'adaptation', 'forgetting', 'tradeoff']
+
+    # Calculate moving averages using Polars window functions
+    # 1. Sort by algorithm and phase to ensure correct windowing order within groups
+    # 2. Use `with_columns` to add new moving average columns
+    # 3. Use `rolling_mean` within an `over` clause to apply per algorithm
+    df = df.sort("algorithm", "phase").with_columns(
+        [
+            pl.col(col)
+            .rolling_mean(window_size=avg_window, min_periods=1) # Calculate rolling mean
+            .over("algorithm") # Partition by algorithm
+            .alias(f"{col}_ma") # Name the new column
+            for col in metric_cols if col in df.columns # Check if column exists
+        ]
+    )
+
+    # ---  Generate Plots ---
+    width = 400
+    height = 450
 
     # Plot 1: Final loss
     final_loss_chart = (
-        alt.Chart(df)
+        alt.Chart(df) # Altair directly uses the Polars DataFrame
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("final_loss:Q", title="MSE Loss"),
+            y=alt.Y("final_loss_ma:Q", title="MSE Loss (Moving Avg)"),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "final_loss"],
+            tooltip=["phase", "algorithm", "final_loss", "final_loss_ma"],
         )
-        .properties(width=width, height=height, title="Final Loss After Each Phase")
+        .properties(width=width, height=height, title=f"Final Loss After Each Phase (MA{avg_window})")
     )
 
     # Plot 2: Plasticity
@@ -147,12 +183,13 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, fi
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("plasticity:Q", title="Plasticity"),
+            y=alt.Y("plasticity_ma:Q", title="Plasticity (Moving Avg)",
+                    scale=alt.Scale(domain=[0.0, 0.0006], clamp=True)),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "plasticity"],
+            tooltip=["phase", "algorithm", "plasticity", "plasticity_ma"],
         )
         .properties(
-            width=width, height=height, title="Neural Plasticity After Each Phase"
+            width=width, height=height, title=f"Neural Plasticity After Each Phase (MA{avg_window})"
         )
     )
 
@@ -162,11 +199,12 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, fi
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("adaptation:Q", title="Improvement (Initial - Final Loss)"),
+            y=alt.Y("adaptation_ma:Q", title="Improvement (Initial - Final Loss) (Moving Avg)",
+                    scale=alt.Scale(domain=[-0.1, 0.1], clamp=True)),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "adaptation"],
+            tooltip=["phase", "algorithm", "adaptation", "adaptation_ma"],
         )
-        .properties(width=width, height=height, title="Adaptation to New Tasks")
+        .properties(width=width, height=height, title=f"Adaptation to New Tasks (MA{avg_window})")
     )
 
     # Plot 4: Forgetting
@@ -175,52 +213,32 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics, fi
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("forgetting:Q", title="Forgetting"),
+            y=alt.Y("forgetting_ma:Q", title="Forgetting (Moving Avg)"),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "forgetting"],
+            tooltip=["phase", "algorithm", "forgetting", "forgetting_ma"],
         )
-        .properties(width=width, height=height, title="Catastrophic Forgetting")
+        .properties(width=width, height=height, title=f"Catastrophic Forgetting (MA{avg_window})")
     )
 
-    # Plot 5: Stability-Plasticity Tradeoff
-    tradeoff_chart = (
-        alt.Chart(df)
-        .mark_line()
-        .encode(
-            x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("tradeoff:Q", title="Tradeoff Metric"),
-            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "tradeoff"],
-        )
-        .properties(width=width, height=height, title="Stability-Plasticity Tradeoff")
-    )
-
-    # Plot 6: Forgetting vs. Plasticity Scatterplot
-    scatter_chart = (
-        alt.Chart(df)
-        .mark_circle(size=60, opacity=0.7)
-        .encode(
-            x=alt.X("plasticity:Q", title="Plasticity"),
-            y=alt.Y("forgetting:Q", title="Forgetting"),
-            color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "plasticity", "forgetting"],
-        )
-        .properties(width=width, height=height, title="Plasticity vs. Forgetting")
-    )
 
     # Combine charts into a grid layout
     row1 = alt.hconcat(final_loss_chart, plasticity_chart)
     row2 = alt.hconcat(adaptation_chart, forgetting_chart)
-    row3 = alt.hconcat(tradeoff_chart, scatter_chart)
-    final_chart = alt.vconcat(row1, row2, row3)
+    # row3 = alt.hconcat(tradeoff_chart, scatter_chart) # Assuming tradeoff_chart might exist
+    final_chart = alt.vconcat(row1, row2) # , row3)
 
     # Save the chart
-    os.makedirs("results", exist_ok=True) # Create results dir if not exists
-
-    final_chart.save("./results/" + f"{filename_prefix}.svg")
+    os.makedirs("results", exist_ok=True)  # Create results dir if not exists
+    save_path = f"./results/{filename_prefix}_ma{avg_window}.png" # svg for paper? Use .png for broad compatibility
+    print(f"Saving chart to: {save_path}") # Add print statement for confirmation
+    try:
+        final_chart.save(save_path)
+    except Exception as e:
+        print(f"Error saving chart: {e}")
 
     # Return the chart for display in notebooks
     return final_chart
+
 
 
 def print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics):
@@ -302,3 +320,44 @@ def print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_me
     print("=" * 80)
 
 
+    """
+
+    # Plot 5: Stability-Plasticity Tradeoff
+    # tradeoff_chart = (
+    #     alt.Chart(df)
+    #     .mark_line()
+    #     .encode(
+    #         x=alt.X("phase:Q", title="Phase"),
+    #         y=alt.Y("tradeoff_ma:Q", title="Tradeoff Metric (Moving Avg)"),
+    #         color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+    #         tooltip=["phase", "algorithm", "tradeoff", "tradeoff_ma"],
+    #     )
+    #     .properties(width=width, height=height, title=f"Stability-Plasticity Tradeoff (MA{window_size})")
+    # )
+    #
+    # tradeoff_points = (
+    #     alt.Chart(df)
+    #     .mark_point(opacity=0.3, size=30)
+    #     .encode(
+    #         x="phase:Q",
+    #         y="tradeoff:Q",
+    #         color="algorithm:N",
+    #     )
+    # )
+    #
+    # tradeoff_chart = tradeoff_chart + tradeoff_points
+    #
+    # # Plot 6: Forgetting vs. Plasticity Scatterplot
+    # # We'll use the moving average data for the scatter plot
+    # scatter_chart = (
+    #     alt.Chart(df)
+    #     .mark_circle(size=60, opacity=0.7)
+    #     .encode(
+    #         x=alt.X("plasticity_ma:Q", title="Plasticity (Moving Avg)"),
+    #         y=alt.Y("forgetting_ma:Q", title="Forgetting (Moving Avg)"),
+    #         color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
+    #         tooltip=["phase", "algorithm", "plasticity_ma", "forgetting_ma"],
+    #     )
+    #     .properties(width=width, height=height, title=f"Plasticity vs. Forgetting (MA{window_size})")
+    # )
+    """

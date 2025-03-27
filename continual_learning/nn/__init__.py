@@ -1,3 +1,5 @@
+from .networks import *
+
 # import flax.linen as nn
 #
 # import continual_learning.config.nn

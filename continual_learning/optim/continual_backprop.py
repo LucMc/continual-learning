@@ -32,7 +32,7 @@ Count = 15
   * Implement accumulated nodes to reset for inexact division by replacement rate
   * Make out_w_mag general
   * Additional logging
-  * Implement online norm
+  * Implement online norm: https://github.com/Cerebras/online-normalization/blob/master/online-norm/numpy_on/online_norm_1d.py
   * Implement layer norm
   * Implement Dtanh (meta recent paper)
   * Link with continual time-delays
