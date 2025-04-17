@@ -12,3 +12,8 @@ backup/
 node_modules/
 package-lock.json
 package.json
+videos/
+wandb/
+.nvim*
+continual_learning.egg-info/
+.pytest_cache/

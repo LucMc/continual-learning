@@ -95,7 +95,7 @@ def stability_plasticity_tradeoff(adaptation, forgetting):
     )  # Good tradeoff means high adaptation with high stability
 
 
-def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adamw_metrics, method_names, filename_prefix="results", avg_window=3):
+def plot_results(all_metrics, filename_prefix="results", avg_window=3):
     """
     Plot metrics from the continual learning experiment using Altair with moving averages.
 
@@ -128,16 +128,10 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
         return data
 
     # Combine data from all algorithms
-    data = (
-        prepare_data(cbp_metrics, "CBP")
-        + prepare_data(cbp_adamw_metrics, "CBP+AdamW")
-        + prepare_data(adam_metrics, "Adam")
-        + prepare_data(sgd_metrics, "SGD")
-        + prepare_data(adamw_metrics, "AdamW")
-    )
+    data = []
+    for name, metric in all_metrics.items(): data += prepare_data(metric, name)
 
     # --- Polars Section ---
-    # Convert list of dictionaries directly to Polars DataFrame
     df = pl.DataFrame(data)
 
     # Filter out any rows where phase might be None, if prepare_data allowed them
@@ -147,10 +141,7 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
     metric_cols = ['final_loss', 'plasticity', 'adaptation', 'forgetting', 'tradeoff']
 
     # Calculate moving averages using Polars window functions
-    # 1. Sort by algorithm and phase to ensure correct windowing order within groups
-    # 2. Use `with_columns` to add new moving average columns
-    # 3. Use `rolling_mean` within an `over` clause to apply per algorithm
-    df = df.sort("algorithm", "phase").with_columns(
+    df_avg = df.sort("algorithm", "phase").with_columns(
         [
             pl.col(col)
             .rolling_mean(window_size=avg_window, min_periods=1) # Calculate rolling mean
@@ -161,12 +152,12 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
     )
 
     # ---  Generate Plots ---
-    width = 400
+    width = 600
     height = 450
 
     # Plot 1: Final loss
     final_loss_chart = (
-        alt.Chart(df) # Altair directly uses the Polars DataFrame
+        alt.Chart(df_avg)
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
@@ -179,7 +170,7 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
 
     # Plot 2: Plasticity
     plasticity_chart = (
-        alt.Chart(df)
+        alt.Chart(df_avg)
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
@@ -195,7 +186,7 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
 
     # Plot 3: Adaptation
     adaptation_chart = (
-        alt.Chart(df)
+        alt.Chart(df_avg)
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
@@ -208,14 +199,16 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
     )
 
     # Plot 4: Forgetting
+    # TODO: Change forgetting to bar chart as only tested at eval intervals
+    df_filtered_forgetting_pl = df.filter(pl.col('forgetting') > 0) # Assuming forgetting is non-negative
     forgetting_chart = (
-        alt.Chart(df)
-        .mark_line()
+        alt.Chart(df_filtered_forgetting_pl)
+        .mark_line(strokeWidth=12)
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y("forgetting_ma:Q", title="Forgetting (Moving Avg)"),
+            y=alt.Y("forgetting:Q", title="Forgetting (Moving Avg)"),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
-            tooltip=["phase", "algorithm", "forgetting", "forgetting_ma"],
+            tooltip=["phase", "algorithm", "forgetting"],
         )
         .properties(width=width, height=height, title=f"Catastrophic Forgetting (MA{avg_window})")
     )
@@ -225,7 +218,7 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
     row1 = alt.hconcat(final_loss_chart, plasticity_chart)
     row2 = alt.hconcat(adaptation_chart, forgetting_chart)
     # row3 = alt.hconcat(tradeoff_chart, scatter_chart) # Assuming tradeoff_chart might exist
-    final_chart = alt.vconcat(row1, row2) # , row3)
+    final_chart = alt.vconcat(row1, row2).properties(title=filename_prefix) # , row3)
 
     # Save the chart
     os.makedirs("results", exist_ok=True)  # Create results dir if not exists
@@ -236,90 +229,109 @@ def plot_results(cbp_metrics, cbp_adamw_metrics, adam_metrics, sgd_metrics, adam
     except Exception as e:
         print(f"Error saving chart: {e}")
 
-    # Return the chart for display in notebooks
     return final_chart
 
 
 
-def print_summary_metrics(cbp_metrics, cbp_adamw_metrics, adam_metrics, adamw_metrics):
-    """Print summary statistics for the continual learning experiment."""
-    # Calculate average metrics
-    cbp_avg_loss = np.mean([m["final_loss"] for m in cbp_metrics])
-    cbp_adamw_avg_loss = np.mean([m["final_loss"] for m in cbp_adamw_metrics])
-    adam_avg_loss = np.mean([m["final_loss"] for m in adam_metrics])
-    adamw_avg_loss = np.mean([m["final_loss"] for m in adamw_metrics])
+def print_summary_metrics(all_metrics, comparison_pairs=None):
+    """
+    Print adaptive, minimal summary statistics using only all_metrics.
+    Derives methods and metrics directly from the input dictionary.
 
-    cbp_avg_plasticity = np.mean([m["plasticity"] for m in cbp_metrics])
-    cbp_adamw_avg_plasticity = np.mean([m["plasticity"] for m in cbp_adamw_metrics])
-    adam_avg_plasticity = np.mean([m["plasticity"] for m in adam_metrics])
-    adamw_avg_plasticity = np.mean([m["plasticity"] for m in adamw_metrics])
-
-    cbp_avg_adaptation = np.mean([m["adaptation"] for m in cbp_metrics])
-    cbp_adamw_avg_adaptation = np.mean([m["adaptation"] for m in cbp_adamw_metrics])
-    adam_avg_adaptation = np.mean([m["adaptation"] for m in adam_metrics])
-    adamw_avg_adaptation = np.mean([m["adaptation"] for m in adamw_metrics])
-
-    cbp_avg_forgetting = np.mean([m["forgetting"] for m in cbp_metrics])
-    cbp_adamw_avg_forgetting = np.mean([m["forgetting"] for m in cbp_adamw_metrics])
-    adam_avg_forgetting = np.mean([m["forgetting"] for m in adam_metrics])
-    adamw_avg_forgetting = np.mean([m["forgetting"] for m in adamw_metrics])
-
-    cbp_avg_tradeoff = np.mean([m["tradeoff"] for m in cbp_metrics])
-    cbp_adamw_avg_tradeoff = np.mean([m["tradeoff"] for m in cbp_adamw_metrics])
-    adam_avg_tradeoff = np.mean([m["tradeoff"] for m in adam_metrics])
-    adamw_avg_tradeoff = np.mean([m["tradeoff"] for m in adamw_metrics])
-
+    Args:
+        all_metrics: A dictionary where keys are method names (str)
+                    and values are lists of dictionaries, each containing metrics
+                    for a single phase/task (e.g., {'final_loss': ..., 'plasticity': ...}).
+        comparison_pairs: Optional list of tuples defining which methods to compare in the
+                         relative comparisons section. Each tuple is (method1, method2)
+                         for comparing method1/method2. If None, a default set of pairs will be used.
+    """
+    import numpy as np
+    
+    # Extract method names
+    methods = list(all_metrics.keys())
+    
+    # Define prettier display names for metrics
+    metric_display = {
+        "final_loss": "Average Loss",
+        "plasticity": "Average Plasticity",
+        "adaptation": "Average Adaptation",
+        "forgetting": "Average Forgetting",
+        "tradeoff": "S-P Tradeoff"
+    }
+    
+    # Calculate average metrics for each method
+    avg_metrics = {}
+    # Determine metric names from the first entry of the first method
+    if methods and all_metrics[methods[0]]:
+        # Get metrics from first item of first method
+        sample_metrics = all_metrics[methods[0]][0]
+        metric_names = [m for m in sample_metrics.keys() if m in metric_display]
+    else:
+        metric_names = []
+    
+    for method in methods:
+        avg_metrics[method] = {}
+        for metric in metric_names:
+            # Calculate average for each metric
+            avg_metrics[method][metric] = np.mean([m[metric] for m in all_metrics[method]])
+    
     # Print summary table
     print("\n===== CONTINUAL LEARNING SUMMARY METRICS =====")
-    print(
-        f"{'Metric':<20} {'CBP':<15} {'CBP+AdamW':<15} {'Adam':<15} {'AdamW':<15}"
-    )
-    print("=" * 80)
-    print(
-        f"{'Average Loss':<20} {cbp_avg_loss:<15.6f} {cbp_adamw_avg_loss:<15.6f} {adam_avg_loss:<15.6f} {adamw_avg_loss:<15.6f}"
-    )
-    print(
-        f"{'Average Plasticity':<20} {cbp_avg_plasticity:<15.6f} {cbp_adamw_avg_plasticity:<15.6f} {adam_avg_plasticity:<15.6f} {adamw_avg_plasticity:<15.6f}"
-    )
-    print(
-        f"{'Average Adaptation':<20} {cbp_avg_adaptation:<15.6f} {cbp_adamw_avg_adaptation:<15.6f} {adam_avg_adaptation:<15.6f} {adamw_avg_adaptation:<15.6f}"
-    )
-    print(
-        f"{'Average Forgetting':<20} {cbp_avg_forgetting:<15.6f} {cbp_adamw_avg_forgetting:<15.6f} {adam_avg_forgetting:<15.6f} {adamw_avg_forgetting:<15.6f}"
-    )
-    print(
-        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff:<15.6f} {cbp_adamw_avg_tradeoff:<15.6f} {adam_avg_tradeoff:<15.6f} {adamw_avg_tradeoff:<15.6f}"
-    )
+    header = f"{'Metric':<20}"
+    for method in methods:
+        header += f" {method:<15}"
+
+    print(header)
+    print("=" * (20 + 15 * len(methods)))
     
-    # Print relative comparisons
-    print("\n===== RELATIVE COMPARISONS =====")
-    print(
-        f"{'Metric':<20} {'CBP/Adam':<15} {'CBP/AdamW':<15} {'CBP+AdamW/Adam':<15} {'CBP+AdamW/AdamW':<15}"
-    )
-    print("=" * 80)
-    print(
-        f"{'Average Loss':<20} {cbp_avg_loss / adam_avg_loss:<15.6f} {cbp_avg_loss / adamw_avg_loss:<15.6f} "
-        f"{cbp_adamw_avg_loss / adam_avg_loss:<15.6f} {cbp_adamw_avg_loss / adamw_avg_loss:<15.6f}"
-    )
-    print(
-        f"{'Average Plasticity':<20} {cbp_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_avg_plasticity / adamw_avg_plasticity:<15.6f} "
-        f"{cbp_adamw_avg_plasticity / adam_avg_plasticity:<15.6f} {cbp_adamw_avg_plasticity / adamw_avg_plasticity:<15.6f}"
-    )
-    print(
-        f"{'Average Adaptation':<20} {cbp_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_avg_adaptation / adamw_avg_adaptation:<15.6f} "
-        f"{cbp_adamw_avg_adaptation / adam_avg_adaptation:<15.6f} {cbp_adamw_avg_adaptation / adamw_avg_adaptation:<15.6f}"
-    )
-    print(
-        f"{'Average Forgetting':<20} {cbp_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f} "
-        f"{cbp_adamw_avg_forgetting / max(adam_avg_forgetting, 1e-6):<15.6f} {cbp_adamw_avg_forgetting / max(adamw_avg_forgetting, 1e-6):<15.6f}"
-    )
-    print(
-        f"{'S-P Tradeoff':<20} {cbp_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f} "
-        f"{cbp_adamw_avg_tradeoff / max(adam_avg_tradeoff, 1e-6):<15.6f} {cbp_adamw_avg_tradeoff / max(adamw_avg_tradeoff, 1e-6):<15.6f}"
-    )
-    print("=" * 80)
-
-
+    for metric in metric_names:
+        display_name = metric_display.get(metric, metric)
+        row = f"{display_name:<20}"
+        for method in methods:
+            row += f" {avg_metrics[method][metric]:<15.6f}"
+        print(row)
+    
+    # Create relative comparison pairs
+    if len(methods) > 1:
+        if comparison_pairs is None:
+            # If methods contain "CBP", "CBP+AdamW", "Adam", "AdamW", use original comparison pairs
+            # if set(["CBP", "CBP+AdamW", "Adam", "AdamW"]).issubset(set(methods)):
+            #     pairs = [
+            #         ("CBP", "Adam"), 
+            #         ("CBP", "AdamW"), 
+            #         ("CBP+AdamW", "Adam"), 
+            #         ("CBP+AdamW", "AdamW")
+            #     ]
+            # else:
+                # Default to comparing first method with all others
+            pairs = [(methods[0], m) for m in methods[1:]]
+        else:
+            # Use provided pairs, filtering out any invalid methods
+            pairs = [(m1, m2) for m1, m2 in comparison_pairs 
+                    if m1 in methods and m2 in methods]
+        
+        if pairs:
+            print("\n===== RELATIVE COMPARISONS =====")
+            header = f"{'Metric':<20}"
+            for m1, m2 in pairs:
+                header += f" {m1}/{m2:<15}"
+            print(header)
+            print("=" * (20 + 15 * len(pairs)))
+            
+            for metric in metric_names:
+                display_name = metric_display.get(metric, metric)
+                row = f"{display_name:<20}"
+                for m1, m2 in pairs:
+                    # For forgetting and tradeoff, use max with small epsilon to avoid division by zero
+                    if metric in ["forgetting", "tradeoff"]:
+                        denominator = max(avg_metrics[m2][metric], 1e-6)
+                    else:
+                        denominator = avg_metrics[m2][metric]
+                    ratio = avg_metrics[m1][metric] / denominator
+                    row += f" {ratio:<15.6f}"
+                print(row)
+            print("=" * (20 + 15 * len(pairs)))
     """
 
     # Plot 5: Stability-Plasticity Tradeoff

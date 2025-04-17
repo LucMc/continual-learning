@@ -72,7 +72,7 @@ def train_continual_ant():
     env_spec = gym.spec("Ant-v5") # Could be simpler to just pass in max steps rather than require the whole spec
     env = VecMonitor(DummyVecEnv([make_env(ContinualAntEnv,
                                            env_spec,
-                                           seed=random.PRNGKey(11),
+                                           seed=random.PRNGKey(1),
                                            change_friction_every=change_every,
                                            max_friction=max_f,
                                            min_friction=min_f) for _ in range(n_envs)]))

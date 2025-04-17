@@ -59,6 +59,69 @@ class OnlineNormNet(nn.Module):
     def predict(self, params, x):
         return self.apply({"params": params}, x, capture_intermediates=True)
 
+
+class SimpleNetLayerNorm(nn.Module):
+    n_out: int = 1
+    h_size: int = 128
+
+    @nn.compact
+    def __call__(self, x):
+        intermediates = {}
+
+        layers = [
+            "dense1",
+            "dense2",
+            "dense3",
+        ]
+
+        for i, layer_name in enumerate(layers):
+            x = nn.Dense(features=self.h_size, name=layer_name)(x)
+            x = nn.relu(x)
+            x = nn.LayerNorm(name=f"layer_norm_{i}")(x)
+            intermediates[layer_name] = x
+
+        # x = nn.LayerNorm(name=f"layer_norm_out")(x)
+        x = nn.Dense(features=self.n_out, name="out_layer")(x)
+        # intermediates["out_layer"] = x
+
+        self.sow("intermediates", "activations", intermediates)
+        return x
+
+    @jax.jit
+    def predict(self, params, x):
+        return self.apply({"params": params}, x, capture_intermediates=True)
+
+
+class OnlineNormNet(nn.Module):
+    n_out: int = 1
+    h_size: int = 128
+
+    @nn.compact
+    def __call__(self, x):
+        intermediates = {}
+
+        layers = [
+            "dense1",
+            "dense2",
+            "dense3",
+        ]
+
+        for i, layer_name in enumerate(layers):
+            x = nn.Dense(features=self.h_size, name=layer_name)(x)
+            x = nn.relu(x)
+            intermediates[layer_name] = x
+
+        x = nn.Dense(features=self.n_out, name="out_layer")(x)
+        # intermediates["out_layer"] = x
+
+        self.sow("intermediates", "activations", intermediates)
+        return x
+
+    @jax.jit
+    def predict(self, params, x):
+        return self.apply({"params": params}, x, capture_intermediates=True)
+
+
 class TestNet(nn.Module):
     k_init = nn.initializers.zeros_init()
     b_init = nn.initializers.zeros_init()
@@ -80,6 +143,7 @@ class TestNet(nn.Module):
                 # kernel_init=self.k_init,
                 # bias_init=self.b_init
             )(x)
+            x = nn.LayerNorm(x, name=f"{layer_name}_lnorm")
             x = nn.relu(x)
             intermediates[layer_name] = x
 
@@ -97,3 +161,5 @@ class TestNet(nn.Module):
     @jax.jit
     def predict(self, params, x):
         return self.apply({"params": params}, x, capture_intermediates=True)
+
+

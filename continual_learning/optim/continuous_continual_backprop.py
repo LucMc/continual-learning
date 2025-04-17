@@ -48,7 +48,6 @@ Count = 15
 @dataclass
 class CBPOptimState:
     # Things you shouldn't really mess with
-    initial_weights: FrozenDict
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
@@ -102,20 +101,6 @@ class CBPTrainState(TrainState):
             params_after_tx["params"],
             features=features["intermediates"]["activations"][0],
         )
-        # new_params_after_cbp = new_params_from_tx # THIS MAKES IT EQUAL ADAM THEREFORE NEWPARAMS ARNT THE SAME?
-
-        ## debug -- Add to testing, only with --no-jit
-        # if self.cbp_state.replacement_rate == 0:
-        # equal_leaves = jax.tree_util.tree_map(lambda x, y: jnp.array_equal(x, y), params_after_tx, params_after_cbp)
-        # flat, _ = jax.tree_flatten(equal_leaves)
-        # assert jnp.all(jnp.array(flat)), f"Tree has changed: {breakpoint()}"
-
-        # assert jax.tree_util.tree_structure(params_after_tx) == jax.tree_util.tree_structure(params_after_cbp)
-        # assert jax.tree.map(lambda p1, p2: jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
-        #
-        # elif self.cbp_state.maturity_threshold == 0:
-        #     assert jax.tree.map(lambda p1, p2: not jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
-
         utils.check_tree_shapes(params_after_tx, params_after_cbp)
         utils.check_tree_shapes(self.params, params_after_cbp)
 
@@ -132,8 +117,7 @@ class CBPTrainState(TrainState):
 def reset_weights(
     reset_mask: Float[Array, "#neurons"],
     layer_w: Float[Array, "#weights"],
-    key_tree: FrozenDict,
-    initial_weights: FrozenDict,
+    key_tree: PyTree,
     bound: float = 0.01,
 ):
     layer_names = list(reset_mask.keys())
@@ -144,17 +128,16 @@ def reset_weights(
         out_layer = layer_names[i + 1]
 
         # Generate random weights for resets
-        # random_in_weights = random.uniform(
-        #     key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
-        # )
+        random_in_weights = random.uniform(
+            key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
+        )
         zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
 
         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
 
         # TODO: Check this is resetting the correct row and columns
         in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-        # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
-        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
+        _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
 
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
         _out_layer_w = jnp.where(
@@ -182,14 +165,14 @@ def get_reset_mask(
     maturity_threshold: float = 100,
     replacement_rate=0.01,
 ) -> Bool[Array, "#neurons"]:
-    # ROSO: Remove batch dim from some inputs just in case
+    # TODO: Remove batch dim from some inputs just in case
     updated_utility = (
         (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features) * out_w_mag
     ).flatten()  # Arr[#neurons]
 
     maturity_mask = (
         ages > maturity_threshold
-    )  # # get nodes over maturity threshold Arr[Bool]
+    )  # get nodes over maturity threshold Arr[Bool]
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
     k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)  # bool
 
@@ -207,11 +190,6 @@ def get_out_weights_mag(weights):
     }  # [128,]
 
     return out_tree
-
-    # for k in w_mags.keys()[-1:]:
-    # _, unravel_fn = jax.flatten_util.ravel_pytree(w_mags)
-    # first_layer = w_mags.pop(w_mags.keys()[0]) # Pop first layer
-    # return unravel_fn(jnp.concatenate((flat_ws[1:], jnp.array([jnp.nan])))) # Offset and nan last layer as no weights out of output layer
 
 
 def process_params(params: FrozenDict):
@@ -253,18 +231,18 @@ def continual_backprop(
         del params  # Delete params?
 
         return CBPOptimState(
-            initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             util_type_id=utils.UTIL_TYPES.index(
                 util_type
-            ),  # Replace with util function directly?
+            ),
             accumulated_features_to_replace=0,
             rng=random.PRNGKey(0),
             **kwargs,
         )
 
+    # @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
@@ -291,16 +269,12 @@ def continual_backprop(
                 state.utilities,
                 state.ages,
                 features,
-                # state.decay_rate,
-                # state.maturity_threshold,
-                # state.replacement_rate,
             )
 
             # reset weights given mask
-            _weights, reset_logs = reset_weights(reset_mask, weights, key_tree, state.initial_weights)
+            _weights, reset_logs = reset_weights(reset_mask, weights, key_tree)
 
             # reset bias given mask
-            # breakpoint()
             _bias = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
                 reset_mask,
@@ -339,96 +313,3 @@ def continual_backprop(
     return optax.GradientTransformation(init=init, update=update)
 
 
-""" old code snippets:
-    
-    # Why are exactly half the same?? How can I manage multiple utilities with the same value?
-    # zeros = jnp.zeros_like(k_masked_utility)
-    # twos = jnp.ones_like(k_masked_utility) * 2
-    # new_mask = jnp.where(k_masked_utility, twos, zeros) # 2=reset inp,1=reset out,0=Nothing
-
-            # reflect_mask(reset_mask, weights)
-            # next_layer_mask = jnp.roll(reset_mask, shift=1)
-
-            # Ensure this optimiser is running
-            # cbp_update = reset_params(reset_mask, weights, bias, state.ages, features, key_tree)
-            # cbp_update = jax.tree.map(
-            #     reset_params,
-            #     reset_mask,
-            #     weights,
-            #     bias,
-            #     state.ages,
-            #     features,
-            #     key_tree,
-            # )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
-            # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
-            # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
-
-    # utilities=_utilities,
-    # mean_feature_act=_mean_feature_act,
-    # util_type_id=_util_type_id,
-    # accumulated_features_to_replace=_accumulated_features_to_replace,
-    # step_size=_step_size,
-    # replacement_rate=_replacement_rate,
-    # decay_rate=_decay_rate,
-    # maturity_threshold=_maturity_threshold,
-    # accumulate=_accumulate,
-
-            # TODO: Replace with vmap/treemap
-            # def split_data(layer):
-            #     # ages = layer.pop("ages")
-            #     logs = layer.pop("logs")
-            #     return layer, logs
-
-            # for key, value in cbp_update.items():
-            #     new_params[key], new_ages[key], new_logs[key] = split_data(value)
-
-            # IDEA: Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
-            # num_new_features_to_replace = state.replacement_rate * eligable_features_to_replace
-            # new_accumulated_features_to_replace += features_to_replace
-            # I actually think it's this layers weight sum since this layer weights connect to next
-            # See ""calculate feature utility"" because it looks a little different, certainly need features
-            # bias_correction = 1 - state.decay_rate ** self.ages
-            # bias_correction = jax.tree.map(
-            #     lambda a: 1 - state.decay_rate**a, state.ages
-            # )
-
-            # layerwise_utility = jax.vmap(utility, in_axes=(0, None))(params) # Expect (layer_n, params) and map over layer_n
-            # next_layer_weight_sum = jax.tree.map(lambda layer: layer.sum(), params) # Instead of applying to each neuron we split it into layers now
-            # updated_utility = (state.decay_rate * layer) + (1-state.decay_rate) * jnp.abs(features) * next_layer_weight_sum
-            # idx_nodes_to_reset = lax.top_k_idx(, )
-
-            k_masked_utility = jax.lax.cond(
-                n_to_replace == 0,
-                lambda _: jnp.full_like(sorted_utility, fill_value=False, dtype=bool),
-                lambda _: jnp.asarray(sorted_utility < sorted_utility[n_to_replace - 1], dtype=bool),
-                operand=None
-            )
-
-            # resetting outbound connections [128] per node
-            # if len(idx_nodes_to_reset) > 0:
-            #     _layer_w = layer_w.at[idx_nodes_to_reset].set(
-            #         random.uniform(key, layer_w.shape[1], float, -bound, bound)
-            #     )
-            #     _ages = ages.at[idx_nodes_to_reset].set(0.0)
-            #     _layer_b = layer_b.at[idx_nodes_to_reset].set(0.0)
-            # else:
-            #     _layer_w = layer_w
-            #     _layer_b = layer_b
-            #     _ages = ages + 1
-
-            # mature_utils = updated_utility[:, maturity_mask]
-            #
-            # idx_nodes_to_reset = mature_utils[
-            #     jnp.argsort(mature_utils)[-n_to_replace:][::-1]
-            # ]
-        # util_functions = [
-        #     lambda x: output_weight_mag, # weight
-        #     lambda x: weight_mag * features.abs().mean(dim=1), # contribution
-        # lambda x: x, # adaptation
-        # lambda x: x, # zero_contribution
-        # lambda x: x, # adaptable_contribution
-        # lambda x: x, # feature_by_input
-        # ]
-        # Calculate new_util based on util_type
-        # util_function =
-"""

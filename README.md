@@ -1,22 +1,20 @@
 # Continual Learning
+This project aims to investigate how normalisation and continual backpropergation affect the plasticity of a neural network. 
 
-## Set up TODO
+## Installation
 ### Baselines
  * Weight decay (sgd/adam) 
  * Continual backpropergation
- * Online norm 
  * Layer norm
- * Dyt (metas new tanh function to replace norm layers)
- 
 
 ### Experiments
  * Slippery Ant v5
  * Sine regression
- ? (Implemented if we need it) Continual time-delays
- ? Perturbed MNIST / CIFAR 100
+ * Continual time-delays
 
 ### Notes
- * Install with: `uv pip install -e .`
+ * Clone repository: `git clone https://github.com/LucMc/continual-learning.git`
+ * Install with: `pip install -e .`
  * The todo list is currently at the top of `optim/continual_backprop.py`
 
 ### Example Usage

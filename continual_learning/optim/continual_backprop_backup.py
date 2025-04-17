@@ -48,7 +48,6 @@ Count = 15
 @dataclass
 class CBPOptimState:
     # Things you shouldn't really mess with
-    initial_weights: FrozenDict
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
@@ -132,8 +131,7 @@ class CBPTrainState(TrainState):
 def reset_weights(
     reset_mask: Float[Array, "#neurons"],
     layer_w: Float[Array, "#weights"],
-    key_tree: FrozenDict,
-    initial_weights: FrozenDict,
+    key_tree: PyTree,
     bound: float = 0.01,
 ):
     layer_names = list(reset_mask.keys())
@@ -144,17 +142,16 @@ def reset_weights(
         out_layer = layer_names[i + 1]
 
         # Generate random weights for resets
-        # random_in_weights = random.uniform(
-        #     key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
-        # )
+        random_in_weights = random.uniform(
+            key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
+        )
         zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
 
         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
 
         # TODO: Check this is resetting the correct row and columns
         in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-        # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
-        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
+        _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
 
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
         _out_layer_w = jnp.where(
@@ -253,7 +250,6 @@ def continual_backprop(
         del params  # Delete params?
 
         return CBPOptimState(
-            initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
@@ -265,6 +261,7 @@ def continual_backprop(
             **kwargs,
         )
 
+    @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
@@ -297,7 +294,7 @@ def continual_backprop(
             )
 
             # reset weights given mask
-            _weights, reset_logs = reset_weights(reset_mask, weights, key_tree, state.initial_weights)
+            _weights, reset_logs = reset_weights(reset_mask, weights, key_tree)
 
             # reset bias given mask
             # breakpoint()
