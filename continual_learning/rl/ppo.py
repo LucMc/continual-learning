@@ -21,6 +21,7 @@ import tyro
 @dataclass(frozen=True)
 class ExperimentConfig:
     """All the options for the experiment, all accessable within PPO class"""
+
     training_steps: int = 2_000_000
     n_envs: int = 1
     rollout_steps: int = 2048
@@ -163,7 +164,6 @@ class PPO(ExperimentConfig):
             lp_total += lp_mean
             kl_total += approx_kl_mean
             clip_fraction_total += clip_fraction_mean
-
         return (
             actor_ts,
             value_ts,
@@ -172,10 +172,10 @@ class PPO(ExperimentConfig):
                 "actor_loss_final": actor_loss_v,
                 "value_loss_total": value_loss_total,
                 "actor_loss_total": actor_loss_total,
-                "value_pred_mean": value_total / n_minibatches,
-                "actor_log_probs_mean": lp_total / n_minibatches,
-                "approx_kl": kl_total / n_minibatches,
-                "clip_fraction": clip_fraction_total / n_minibatches,
+                "value_pred_mean": (value_total / n_minibatches),
+                "actor_log_probs_mean": (lp_total / n_minibatches),
+                "approx_kl": (kl_total / n_minibatches),
+                "clip_fraction": (clip_fraction_total / n_minibatches),
                 "value_g_mag": jax.tree.reduce(
                     lambda acc, g: acc + jnp.sum(jnp.abs(g)),
                     value_grads,
@@ -253,18 +253,10 @@ class PPO(ExperimentConfig):
         )
 
         print("mean reward:", np.mean(rewards))
-        print("explained_var:", explained_var)
         print("stds:", stds.mean())
-        print("actor lr:", actor_ts.opt_state[-1].hyperparams["learning_rate"])
-        print("value lr:", value_ts.opt_state[-1].hyperparams["learning_rate"])
-        advantage_stats = {
-            "advantage_mean": jnp.mean(advantages),
-            "advantage_min": jnp.min(advantages),
-            "advantage_max": jnp.max(advantages),
-            "advantage_std": jnp.std(advantages),
-        }
-        print("advantage stats:")
-        pprint(advantage_stats)
+        print("explained_var:", explained_var)
+        # print("actor lr:", actor_ts.opt_state[-1].hyperparams["learning_rate"])
+        # print("value lr:", value_ts.opt_state[-1].hyperparams["learning_rate"])
 
         return (
             jnp.array(obss),
@@ -273,7 +265,14 @@ class PPO(ExperimentConfig):
             log_probs,
             advantages,
             returns,
-        )
+        ), {
+            "mean rollout reward": np.mean(rewards),
+            "advantage_mean": jnp.mean(advantages),
+            "advantage_std": jnp.std(advantages),
+            "explained variance": explained_var,
+            "actor lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
+            "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
+        }
 
     def compute_returns_and_advantage(  # TODO: Replace loop with scan keeping advs ass carry instead of at/set
         self, rewards, values, episode_starts, last_value: Array, done: np.ndarray
@@ -362,6 +361,9 @@ def outer_loop(key, actor_ts, value_ts, rollout, ppo_agent):
     (actor_ts, value_ts, key), info = jax.lax.scan(
         inner_loop, (actor_ts, value_ts, key), jnp.arange(ppo_agent.epochs)
     )
+
+    # remove to see over epochs, or change to min/max if curious
+    info = jax.tree.map(lambda x: x.mean(), info)
     return actor_ts, value_ts, key, info
 
 
@@ -376,14 +378,21 @@ def main(config):
         tags=["PPO", ppo_agent.env_id],  # Maybe put env id here or something
     )
 
-    env_args = {"render_mode": "rgb_array", "continuous": True} if ppo_agent.render else {"continuous": True}
+    env_args = (
+        {"render_mode": "rgb_array", "continuous": True}
+        if ppo_agent.render
+        else {"continuous": True}
+    )
     ckpt_path = "./checkpoints"
     assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (
         "Must have rollout steps divisible into batches"
     )
 
     envs = gym.vector.SyncVectorEnv(
-        [make_env(ppo_agent.env_id, i, ppo_agent.gamma, env_args=env_args) for i in range(ppo_agent.n_envs)]
+        [
+            make_env(ppo_agent.env_id, i, ppo_agent.gamma, env_args=env_args)
+            for i in range(ppo_agent.n_envs)
+        ]
     )
 
     dummy_obs, _ = envs.reset()
@@ -418,7 +427,7 @@ def main(config):
     while current_global_step < ppo_agent.training_steps:
         # TODO: Add if statement to reduce rollout if current_global_step is near total_training_steps
         print("\ncurrent_global_step:", current_global_step)
-        rollout = ppo_agent.get_rollout(
+        rollout, rollout_info = ppo_agent.get_rollout(
             actor_ts,
             value_ts,
             envs,
@@ -431,11 +440,13 @@ def main(config):
 
         current_global_step += ppo_agent.rollout_steps * ppo_agent.n_envs
 
-        actor_ts, value_ts, key, info = outer_loop(
+        actor_ts, value_ts, key, training_info = outer_loop(
             key, actor_ts, value_ts, rollout, ppo_agent
         )
-        pprint(info)
-        wandb.log(info, step=current_global_step)
+        full_logs = training_info | rollout_info
+        pprint(full_logs)
+
+        wandb.log(full_logs, step=current_global_step)
 
         if current_global_step % 100_000 == 0:
             wandb.save(ckpt_path)
