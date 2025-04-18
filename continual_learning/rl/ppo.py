@@ -15,16 +15,17 @@ from pprint import pprint
 from functools import partial
 import wandb
 import tyro
+import time
 # from memory_profiler import profile
 
 
 @dataclass(frozen=True)
-class ExperimentConfig:
+class Config:
     """All the options for the experiment, all accessable within PPO class"""
 
-    training_steps: int = 2_000_000
+    training_steps: int = 500_000
     n_envs: int = 1
-    rollout_steps: int = 2048
+    rollout_steps: int = 64*5
     env_id: str = "LunarLander-v3"
     batch_size: int = 64
     clip_range: float = 0.2
@@ -37,6 +38,7 @@ class ExperimentConfig:
     learning_rate: float = 3e-4
     vf_coef: float = 0.5
     render: bool = False
+    log: bool = False
 
 
 class ActorNet(nn.Module):
@@ -77,7 +79,7 @@ class ValueNet(nn.Module):
 
 
 @dataclass(frozen=True)
-class PPO(ExperimentConfig):
+class PPO(Config):
     buffer_size: int = 2048
 
     @partial(jax.jit, static_argnames=["self"])
@@ -127,6 +129,7 @@ class PPO(ExperimentConfig):
             # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
 
         # Shuffle idxs
+        # TODO: Add pre/postfix to indicate debug/logging variables?
         n_minibatches = obss.shape[0]
 
         actor_loss_total = 0
@@ -159,11 +162,13 @@ class PPO(ExperimentConfig):
                 value_loss, has_aux=True
             )(value_ts.params, obss[i], returns[i], old_values[i])
             value_ts = value_ts.apply_gradients(grads=value_grads)
+
             value_loss_total += value_loss_v
             value_total += value_mean
             lp_total += lp_mean
             kl_total += approx_kl_mean
             clip_fraction_total += clip_fraction_mean
+
         return (
             actor_ts,
             value_ts,
@@ -233,6 +238,9 @@ class PPO(ExperimentConfig):
         # Fix truncated using value
         last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
 
+
+        times_diff = []
+
         returns, advantages = jax.vmap(
             self.compute_returns_and_advantage, in_axes=(1, 1, 1, 0, 0)
         )(
@@ -252,12 +260,6 @@ class PPO(ExperimentConfig):
             else float(1 - np.var(returns.flatten() - values.flatten()) / ret_var)
         )
 
-        print("mean reward:", np.mean(rewards))
-        print("stds:", stds.mean())
-        print("explained_var:", explained_var)
-        # print("actor lr:", actor_ts.opt_state[-1].hyperparams["learning_rate"])
-        # print("value lr:", value_ts.opt_state[-1].hyperparams["learning_rate"])
-
         return (
             jnp.array(obss),
             jnp.array(actions),
@@ -266,29 +268,34 @@ class PPO(ExperimentConfig):
             advantages,
             returns,
         ), {
-            "mean rollout reward": np.mean(rewards),
+            "mean rollout reward": np.mean(
+                rewards
+            ),  # TODO: should negate the last episode
             "advantage_mean": jnp.mean(advantages),
             "advantage_std": jnp.std(advantages),
             "explained variance": explained_var,
             "actor lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
+            "action_dist_std": stds.mean(),
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
+
         }
 
+
+
+    @partial(jax.jit, static_argnames="self")
     def compute_returns_and_advantage(  # TODO: Replace loop with scan keeping advs ass carry instead of at/set
-        self, rewards, values, episode_starts, last_value: Array, done: np.ndarray
+        self, rewards, values, episode_starts, last_value: Array, done: jnp.ndarray
     ) -> None:
         buffer_size = values.shape[0]
-        advantages = jnp.ones(buffer_size)
 
-        last_gae_lam = 0
-        for step in reversed(range(buffer_size)):
-            if step == buffer_size - 1:
-                next_non_terminal = 1.0 - done.astype(np.float32)
-                next_values = last_value
-            else:
-                next_non_terminal = 1.0 - episode_starts[step + 1]
-                next_values = values[step + 1]
-            # next values shape (1024, 4, 4 1) check sbx and logic
+        # for step in reversed(range(buffer_size)):
+        def gae_step(last_gae_lam, step):
+            next_non_terminal, next_values = jax.lax.cond(
+                step == buffer_size - 1,
+                lambda: (1.0 - done, last_value[0]),
+                lambda: (1.0 - episode_starts[step + 1], values[step + 1])
+            )
+
             delta = (
                 rewards[step]
                 + self.gamma * next_values * next_non_terminal
@@ -297,7 +304,10 @@ class PPO(ExperimentConfig):
             last_gae_lam = (
                 delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
             )
-            advantages = advantages.at[step].set(last_gae_lam[0])
+
+            return last_gae_lam, last_gae_lam[0]
+
+        _, advantages = jax.lax.scan(gae_step, jnp.array([0.]), jnp.arange(buffer_size), reverse=True)
 
         returns = advantages + values
         return returns, advantages
@@ -371,12 +381,13 @@ def main(config):
     # TODO: Wandb watch models and log videos
     ppo_agent = PPO(buffer_size=config.n_envs * config.rollout_steps, **config.__dict__)
 
-    wandb.init(
-        project="jax-ppo",
-        name="ppo-0.0",
-        config=config.__dict__,  # Get from tyro etc
-        tags=["PPO", ppo_agent.env_id],  # Maybe put env id here or something
-    )
+    if ppo_agent.log:
+        wandb.init(
+            project="jax-ppo",
+            name="ppo-0.0",
+            config=config.__dict__,  # Get from tyro etc
+            tags=["PPO", ppo_agent.env_id],  # Maybe put env id here or something
+        )
 
     env_args = (
         {"render_mode": "rgb_array", "continuous": True}
@@ -446,14 +457,44 @@ def main(config):
         full_logs = training_info | rollout_info
         pprint(full_logs)
 
-        wandb.log(full_logs, step=current_global_step)
+        if ppo_agent.log: wandb.log(full_logs, step=current_global_step)
 
         if current_global_step % 100_000 == 0:
             wandb.save(ckpt_path)
 
 
 if __name__ == "__main__":
-    config = tyro.cli(ExperimentConfig)
+    config = tyro.cli(Config)
     main(config)
 
 # _reward = np.where(truncated, self.gamma * value_ts.apply_fn(value_ts.params, jnp.array(_obs)).item(), reward) # should be added to r anyway
+    #
+    # @partial(jax.jit, static_argnames="self")
+    # def compute_returns_and_advantage(  # TODO: Replace loop with scan keeping advs ass carry instead of at/set
+    #     self, rewards, values, episode_starts, last_value: Array, done: np.ndarray
+    # ) -> None:
+    #     buffer_size = values.shape[0]
+    #     advantages = jnp.ones(buffer_size)
+    #
+    #     last_gae_lam = 0
+    #     for step in reversed(range(buffer_size)):
+    #         if step == buffer_size - 1:
+    #             next_non_terminal = 1.0 - done.astype(np.float32)
+    #             next_values = last_value
+    #         else:
+    #             next_non_terminal = 1.0 - episode_starts[step + 1]
+    #             next_values = values[step + 1]
+    #         # next values shape (1024, 4, 4 1) check sbx and logic
+    #         delta = (
+    #             rewards[step]
+    #             + self.gamma * next_values * next_non_terminal
+    #             - values[step]
+    #         )
+    #         last_gae_lam = (
+    #             delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+    #         )
+    #         advantages = advantages.at[step].set(last_gae_lam[0])
+    #
+    #     returns = advantages + values
+    #     return returns, advantages
+    #
