@@ -1,3 +1,4 @@
+from typing import Optional, Tuple, Any
 from functools import partial
 import os
 from pathlib import Path
@@ -90,7 +91,8 @@ class ContinualAntEnv(gym.Env):
         self.local_time_steps += 1
         return self.env.step(*args, **kwargs)
 
-    def reset(self, *reset_args, **reset_kwargs):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
+        super().reset(seed=seed)
         if (self.local_time_steps / self.change_friction_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
             self.env = SlipperyAntEnv(
@@ -101,7 +103,7 @@ class ContinualAntEnv(gym.Env):
             # Figure out how to not do this as to keep incrementing for stats
             self.local_time_steps = 0
 
-        return self.env.reset(*reset_args, **reset_kwargs)
+        return self.env.reset(seed=seed, options=options)
 
     def render(self):
         return self.env.render()

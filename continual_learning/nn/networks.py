@@ -1,5 +1,87 @@
+from jaxtyping import Array
+import distrax
 import flax.linen as nn
 import jax
+import jax.numpy as jnp
+
+# Reinforcement Learning base
+class ValueNet(nn.Module):
+    @nn.compact
+    def __call__(self, x) -> Array:
+        x = nn.Dense(128)(x)
+        x = nn.relu(x)
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        q_value = nn.Dense(1)(x)
+        return q_value
+
+
+class ActorNet(nn.Module):
+    n_actions: int
+
+    @nn.compact
+    def __call__(self, x) -> distrax.Distribution:
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        mean = nn.Dense(self.n_actions, name="mu")(x)
+        log_std = self.param(
+            "log_std",
+            nn.initializers.zeros,
+            (
+                1,
+                self.n_actions,
+            ),
+        )
+        logstd_batch = jnp.broadcast_to(
+            log_std, mean.shape
+        )  # Make logstd the same shape as actions
+        return distrax.MultivariateNormalDiag(
+            loc=mean, scale_diag=jnp.exp(logstd_batch)
+        )
+
+# Reinforcement Learning Layer Norm
+class ActorNetLayerNorm(nn.Module):
+    n_actions: int
+
+    @nn.compact
+    def __call__(self, x) -> distrax.Distribution:
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        x = nn.LayerNorm(name=f"layer_norm_1")(x)
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        x = nn.LayerNorm(name=f"layer_norm_2")(x)
+
+        mean = nn.Dense(self.n_actions, name="mu")(x)
+        log_std = self.param(
+            "log_std",
+            nn.initializers.zeros,
+            (
+                1,
+                self.n_actions,
+            ),
+        )
+        logstd_batch = jnp.broadcast_to(
+            log_std, mean.shape
+        )  # Make logstd the same shape as actions
+        return distrax.MultivariateNormalDiag(
+            loc=mean, scale_diag=jnp.exp(logstd_batch)
+        )
+
+class ValueNetLayerNorm(nn.Module):
+    @nn.compact
+    def __call__(self, x) -> Array:
+        x = nn.Dense(128)(x)
+        x = nn.relu(x)
+        x = nn.LayerNorm(name=f"layer_norm_1")(x)
+        x = nn.Dense(64)(x)
+        x = nn.relu(x)
+        x = nn.LayerNorm(name=f"layer_norm_2")(x)
+        q_value = nn.Dense(1)(x)
+        return q_value
+
 
 class SimpleNet(nn.Module):
     n_out: int = 1

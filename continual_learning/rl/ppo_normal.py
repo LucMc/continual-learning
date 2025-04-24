@@ -1,4 +1,4 @@
-from typing import Tuple, Literal
+from ast import Tuple
 from chex import dataclass
 import jax
 import jax.numpy as jnp
@@ -18,7 +18,6 @@ import os
 from pathlib import Path
 import continual_learning.envs.slippery_ant_v5
 from continual_learning.nn import ActorNet, ValueNet, ActorNetLayerNorm, ValueNetLayerNorm
-from continual_learning.optim.continual_backprop import CBPTrainState
 
 # import time
 # from memory_profiler import profile
@@ -37,7 +36,6 @@ TODO:
 class Config:
     """All the options for the experiment, all accessable within PPO class"""
 
-    seed: int = 0 # Random seed
     training_steps: int = 500_000  # total training time-steps
     n_envs: int = 1  # number of parralel training envs
     rollout_steps: int = 64 * 20  # env steps per rollout
@@ -55,8 +53,7 @@ class Config:
     log_video_every: int = -1  # save videos locally/on wandb (-1 for no logging)
     log: bool = False  # Log with wandb
     layer_norm: bool = False # Weather or not to use LayerNorm layers after activations
-    cbp = False # Weather or not to use continual backpropergation
-    optim = Literal["adam", "adamw", "sgd", "muon"] = "adamw"
+
 
 
 @dataclass(frozen=True)
@@ -372,7 +369,6 @@ def outer_loop(
 
 def main(config: Config):
     ppo_agent = PPO(buffer_size=config.n_envs * config.rollout_steps, **config.__dict__)
-    env_args = {"seed": ppo_agent.seed}
 
     if ppo_agent.log_video_every > 0:
         base_video_dir = Path("videos")
@@ -380,21 +376,17 @@ def main(config: Config):
             len(os.listdir(base_video_dir))
         )  # run_id for local videos
         os.makedirs(video_folder)
-        env_args.update({"render_mode": "rgb_array"})
+        env_args = {"render_mode": "rgb_array"}
     else:
         video_folder = None
+        env_args = {}
 
     if ppo_agent.log:
-        tags = ["PPO", ppo_agent.env_id, ppo_agent.optim]
-        # NOTE: If using layernorm, increase learning rate to 0.0005
-        if ppo_agent.layer_norm: tags.append("LayerNorm")
-        if ppo_agent.cbp: tags.append("ContinualBackprop")
-
         wandb.init(
             project="jax-ppo",
             name="ppo-0.1",
             config=config.__dict__,  # Get from tyro etc
-            tags=tags,
+            tags=["PPO", ppo_agent.env_id],
             # monitor_gym=True,
             save_code=True,
         )
@@ -415,7 +407,7 @@ def main(config: Config):
     )
 
     dummy_obs, _ = envs.reset()
-    key = random.PRNGKey(ppo_agent.seed)
+    key = random.PRNGKey(0)
     current_global_step = 0
 
     actor_key, value_key, key = random.split(key, num=3)
@@ -428,38 +420,24 @@ def main(config: Config):
         actor_net = ActorNet(envs.action_space.shape[-1]) # Have these as options
         value_net = ValueNet()
 
-    if ppo_agent.optim == "adam": tx = optax.adam
-    if ppo_agent.optim == "adamw": tx = optax.adamw
-    if ppo_agent.optim == "sgd": tx = optax.sgd
-    if ppo_agent.optim == "muon": tx = optax.contrib.muon
 
     opt = optax.chain(
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),
-        optax.inject_hyperparams(tx)(
+        optax.inject_hyperparams(optax.adamw)(
             learning_rate=optax.linear_schedule(
                 init_value=ppo_agent.learning_rate,
                 end_value=ppo_agent.learning_rate / 10,
-                transition_steps= 2_000_000,# ppo_agent.training_steps
+                transition_steps=ppo_agent.training_steps,
             ),
         ),
     )
 
-
-    # Continual backpropergation
-    if ppo_agent.cbp:
-        actor_ts = CBPTrainState.create(
-            apply_fn=actor_net.apply, params=actor_net.init(actor_key, dummy_obs), tx=opt
-        )
-        value_ts = CBPTrainState.create(
-            apply_fn=value_net.apply, params=value_net.init(value_key, dummy_obs), tx=opt
-        )
-    else:
-        actor_ts = TrainState.create(
-            apply_fn=actor_net.apply, params=actor_net.init(actor_key, dummy_obs), tx=opt
-        )
-        value_ts = TrainState.create(
-            apply_fn=value_net.apply, params=value_net.init(value_key, dummy_obs), tx=opt
-        )
+    actor_ts = TrainState.create(
+        apply_fn=actor_net.apply, params=actor_net.init(actor_key, dummy_obs), tx=opt
+    )
+    value_ts = TrainState.create(
+        apply_fn=value_net.apply, params=value_net.init(value_key, dummy_obs), tx=opt
+    )
 
     last_obs, first_info = envs.reset()
     last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
