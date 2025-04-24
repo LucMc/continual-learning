@@ -10,6 +10,13 @@ import jax.numpy as jnp
 
 import continual_learning.envs
 
+# Register the environment such that it can easily be used w/ gym.make
+gym.register(
+    id='SlipperyAnt-v5',
+    entry_point=f'{__name__}:ContinualAntEnv',
+    max_episode_steps=1000,
+    kwargs={'change_friction_every': 2000000}
+)
 
 def gen_xml_file(friction, xml_file):
     old_file = os.path.join(
