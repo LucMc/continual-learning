@@ -424,6 +424,9 @@ def main(config: Config):
             # monitor_gym=True,
             save_code=True,
         )
+    # Specific to this setup, should probably add a config file for env_args?
+    if ppo_agent.env_id == "ContinualAnt-v0":
+        env_args.update({"change_friction_every": 2_000})
 
     ckpt_path = "./checkpoints"
     assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (  # TODO: Make adaptive

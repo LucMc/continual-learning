@@ -12,11 +12,12 @@ import continual_learning.envs
 
 # Register the environment such that it can easily be used w/ gym.make
 gym.register(
-    id='SlipperyAnt-v5',
-    entry_point=f'{__name__}:ContinualAntEnv',
+    id="ContinualAnt-v0",
+    entry_point=f"{__name__}:ContinualAntEnv",
     max_episode_steps=1000,
-    kwargs={'change_friction_every': 2000000}
+    kwargs={"change_friction_every": 2000000},
 )
+
 
 def gen_xml_file(friction, xml_file):
     old_file = os.path.join(
@@ -57,6 +58,7 @@ class ContinualAntEnv(gym.Env):
         change_friction_every=int(2e6),  # 2M
         xml_file: str = str(Path(__file__).parent / "ant.xml"),  # This dir by default
         seed=random.PRNGKey(0),
+        render_mode=None,
         **kwargs,
     ):
         self.min_friction = min_friction
@@ -64,12 +66,17 @@ class ContinualAntEnv(gym.Env):
         self.change_friction_every = change_friction_every
         self.seed = random.PRNGKey(seed) if type(seed) == int else seed
         self.local_time_steps = 0
+        self.render_mode = render_mode
+        self.env_init_kwargs = kwargs
         self.env = SlipperyAntEnv(
-            friction=self.gen_random_friction()
+            friction=self.gen_random_friction(),
+            render_mode=render_mode,
+            **self.env_init_kwargs,
         )
         super().__init__()
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
+        self.metadata = self.env.metadata  # Enables rendering
 
     def gen_random_friction(self):
         self.seed, f_key = random.split(self.seed)
@@ -83,15 +90,21 @@ class ContinualAntEnv(gym.Env):
         self.local_time_steps += 1
         return self.env.step(*args, **kwargs)
 
-    def reset(self, *args, **kwargs):
+    def reset(self, *reset_args, **reset_kwargs):
         if (self.local_time_steps / self.change_friction_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
-            self.env = SlipperyAntEnv(friction=self.gen_random_friction())
-            self.local_time_steps = (
-                0  # Figure out how to not do this as to keep incrementing for stats
+            self.env = SlipperyAntEnv(
+                friction=self.gen_random_friction(),
+                render_mode=self.render_mode,
+                **self.env_init_kwargs,
             )
+            # Figure out how to not do this as to keep incrementing for stats
+            self.local_time_steps = 0
 
-        return self.env.reset(*args, **kwargs)
+        return self.env.reset(*reset_args, **reset_kwargs)
+
+    def render(self):
+        return self.env.render()
 
 
 if __name__ == "__main__":
