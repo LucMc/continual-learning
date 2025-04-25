@@ -7,6 +7,7 @@ from jaxtyping import Array, Float, PRNGKeyArray
 import flax.linen as nn
 from flax.training.train_state import TrainState
 import gymnasium as gym
+import gymnasium_robotics
 import numpy as np
 import optax
 import distrax
@@ -41,7 +42,7 @@ class Config:
     training_steps: int = 500_000  # total training time-steps
     n_envs: int = 1  # number of parralel training envs
     rollout_steps: int = 64 * 20  # env steps per rollout
-    env_id: str = "LunarLanderContinuous-v3"
+    env_id: str = "Ant-v5"
     batch_size: int = 64  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
@@ -56,7 +57,7 @@ class Config:
     log: bool = False  # Log with wandb
     layer_norm: bool = False # Weather or not to use LayerNorm layers after activations
     cbp = False # Weather or not to use continual backpropergation
-    optim = Literal["adam", "adamw", "sgd", "muon"] = "adamw"
+    optim: Literal["adam", "adamw", "sgd", "muon"] = "adamw"
 
 
 @dataclass(frozen=True)
@@ -239,7 +240,7 @@ class PPO(Config):
         explained_var = (
             np.nan
             if ret_var == 0
-            else float(1 - np.var(returns.flatten() - values.flatten()) / ret_var)
+            else float(1 - (np.var(advantages.flatten()) / ret_var))
         )
 
         return (
@@ -372,7 +373,7 @@ def outer_loop(
 
 def main(config: Config):
     ppo_agent = PPO(buffer_size=config.n_envs * config.rollout_steps, **config.__dict__)
-    env_args = {"seed": ppo_agent.seed}
+    env_args = {}
 
     if ppo_agent.log_video_every > 0:
         base_video_dir = Path("videos")
@@ -414,7 +415,7 @@ def main(config: Config):
         ]
     )
 
-    dummy_obs, _ = envs.reset()
+    dummy_obs, _ = envs.reset(seed=ppo_agent.seed)
     key = random.PRNGKey(ppo_agent.seed)
     current_global_step = 0
 
@@ -494,6 +495,8 @@ def main(config: Config):
         if ppo_agent.log_video_every:
             print("[ ] Uploading Videos ...", end="\r")
             for video_name in os.listdir(video_folder):
+                print("Check line bellow")
+                breakpoint()
                 wandb.log({video_name: wandb.Video(str(video_folder / video_name))})
             print(r"[x] Uploading Videos ...")
 
