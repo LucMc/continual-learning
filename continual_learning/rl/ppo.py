@@ -7,7 +7,6 @@ from jaxtyping import Array, Float, PRNGKeyArray
 import flax.linen as nn
 from flax.training.train_state import TrainState
 import gymnasium as gym
-import gymnasium_robotics
 import numpy as np
 import optax
 import distrax
@@ -20,6 +19,7 @@ from pathlib import Path
 import continual_learning.envs.slippery_ant_v5
 from continual_learning.nn import ActorNet, ValueNet, ActorNetLayerNorm, ValueNetLayerNorm
 from continual_learning.optim.continual_backprop import CBPTrainState
+from continual_learning.utils.wrappers_rd import ContinualRandomIntervalDelayWrapper
 
 # import time
 # from memory_profiler import profile
@@ -42,7 +42,7 @@ class Config:
     training_steps: int = 500_000  # total training time-steps
     n_envs: int = 1  # number of parralel training envs
     rollout_steps: int = 64 * 20  # env steps per rollout
-    env_id: str = "Ant-v5"
+    env_id: str = "ContinualAnt-v0"
     batch_size: int = 64  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
@@ -58,6 +58,8 @@ class Config:
     layer_norm: bool = False # Weather or not to use LayerNorm layers after activations
     cbp = False # Weather or not to use continual backpropergation
     optim: Literal["adam", "adamw", "sgd", "muon"] = "adamw"
+    run_name: str = "" # Postfix name for training run
+    delay: bool = False
 
 
 @dataclass(frozen=True)
@@ -303,6 +305,13 @@ class PPO(Config):
 
 def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict = {}):
     def thunk():
+
+        if ppo_agent.delay:
+            print(":: Added continual time delays ::")
+            change_every = env_args.pop("change_every")
+            env = gym.make(ppo_agent.env_id, **env_args)
+            ContinualRandomIntervalDelayWrapper(env, change_every=change_every)
+
         env = gym.make(ppo_agent.env_id, **env_args)
         # env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -390,18 +399,19 @@ def main(config: Config):
         # NOTE: If using layernorm, increase learning rate to 0.0005
         if ppo_agent.layer_norm: tags.append("LayerNorm")
         if ppo_agent.cbp: tags.append("ContinualBackprop")
+        if ppo_agent.delay == "delay": tags.append("delay") 
 
         wandb.init(
             project="jax-ppo",
-            name="ppo-0.1",
+            name="ppo-0.1"+ppo_agent.run_name,
             config=config.__dict__,  # Get from tyro etc
             tags=tags,
             # monitor_gym=True,
             save_code=True,
         )
     # Specific to this setup, should probably add a config file for env_args?
-    if ppo_agent.env_id == "ContinualAnt-v0":
-        env_args.update({"change_friction_every": ppo_agent.training_steps // 10})
+    if ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay:
+        env_args.update({"change_every": ppo_agent.training_steps // 10})
 
     ckpt_path = "./checkpoints"
     assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (  # TODO: Make adaptive
@@ -421,18 +431,19 @@ def main(config: Config):
 
     actor_key, value_key, key = random.split(key, num=3)
     if ppo_agent.layer_norm:
-        print("Using LayerNorm layers ...")
+        print(":: Using LayerNorm layers ::")
         actor_net = ActorNetLayerNorm(envs.action_space.shape[-1]) # Have these as options
         value_net = ValueNetLayerNorm()
     else:
-        print("Using standard architecture ...")
+        print(":: Using standard architecture ::")
         actor_net = ActorNet(envs.action_space.shape[-1]) # Have these as options
         value_net = ValueNet()
 
     if ppo_agent.optim == "adam": tx = optax.adam
     if ppo_agent.optim == "adamw": tx = optax.adamw
     if ppo_agent.optim == "sgd": tx = optax.sgd
-    if ppo_agent.optim == "muon": tx = optax.contrib.muon
+    # partial(optax.contrib.muon, weight_decay=0.0001) # Same decay as adamw. Consider writing as muonw?
+    if ppo_agent.optim == "muon": tx = optax.contrib.muon 
 
     opt = optax.chain(
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),

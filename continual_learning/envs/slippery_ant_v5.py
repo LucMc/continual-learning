@@ -16,7 +16,7 @@ gym.register(
     id="ContinualAnt-v0",
     entry_point=f"{__name__}:ContinualAntEnv",
     max_episode_steps=1000,
-    kwargs={"change_friction_every": 2000000},
+    kwargs={"change_friction_every": 2_000_000},
 )
 
 
@@ -52,11 +52,12 @@ class SlipperyAntEnv(AntEnv):
 
 
 class ContinualAntEnv(gym.Env):
+    """This continual learning Ant-v5 environment changes the friction every `change_every` timesteps"""
     def __init__(
         self,
         min_friction: float = 0.1,
         max_friction: float = 2,
-        change_friction_every=int(2e6),  # 2M
+        change_every=int(2e6),  # 2M How often to change friction
         xml_file: str = str(Path(__file__).parent / "ant.xml"),  # This dir by default
         seed=random.PRNGKey(0),
         render_mode=None,
@@ -64,7 +65,7 @@ class ContinualAntEnv(gym.Env):
     ):
         self.min_friction = min_friction
         self.max_friction = max_friction
-        self.change_friction_every = change_friction_every
+        self.change_every = change_every
         self.seed = random.PRNGKey(seed) if type(seed) == int else seed
         self.local_time_steps = 0
         self.render_mode = render_mode
@@ -93,7 +94,7 @@ class ContinualAntEnv(gym.Env):
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
         super().reset(seed=seed)
-        if (self.local_time_steps / self.change_friction_every) > 1:
+        if (self.local_time_steps / self.change_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
             self.env = SlipperyAntEnv(
                 friction=self.gen_random_friction(),
@@ -110,5 +111,5 @@ class ContinualAntEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = ContinualAnt(change_friction_every=1000)
+    env = ContinualAnt(change_every=1000)
     obs, _ = env.reset()
