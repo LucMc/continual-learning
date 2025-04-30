@@ -39,6 +39,8 @@ TODO:
  - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
  param directly (less to change when chaning n_envs/ more intuitive)
  - Test w/ multiple envs?
+ - Test w/ changing constant delays too
+ - Add logs for env delay/ friction - i.e. in info and add info
 """
 
 
@@ -321,8 +323,8 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             env = GymContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
-                obs_delay_range=range(0, 4),
-                act_delay_range=range(0, 4),
+                obs_delay_range=range(0, 8),
+                act_delay_range=range(0, 8),
             )
 
         else:
