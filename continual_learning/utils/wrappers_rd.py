@@ -449,7 +449,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         give_kappa=False,
         output="standard",  # "dcac", "standard" >> Extra outputs for dcac or standard gym outputs
         # interval_aware=True, # Include interval emb in state
-        **kwargs,
+        **init_kwargs,
     ):
         # Constants
         self.AVAILABLE_MODES = ["continual", "multi-task", "fixed"]
@@ -457,6 +457,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         self.AVAILABLE_DELAY_EMB_TYPES = ["one_hot", "float", "scalar", None]
         self.AVAILABLE_INTERVAL_EMB_TYPES = ["two_hot", "float", "scalar", None]
 
+        self.init_kwargs = init_kwargs
         # Multi-choice settings
         self.output = output.lower()
         if interval_emb_type:
@@ -492,12 +493,13 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         self.act_delay_range = self.get_interval(act_delay_range)
         print(f"obs delay is: {self.obs_delay_range}")
         print(f"act delay is: {self.act_delay_range}")
+        print(f"changing every: {change_every}")
 
         self.n_obs_delays = len(self.overall_obs_delay_range)
         self.n_act_delays = len(self.overall_act_delay_range)
 
         # Initialise RandomDelayWrapper
-        super().__init__(env, self.obs_delay_range, self.act_delay_range, **kwargs)
+        super().__init__(env, self.obs_delay_range, self.act_delay_range, **init_kwargs)
 
         # Other
         self.give_kappa = give_kappa
@@ -767,7 +769,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         # assert len(obs) == 5
         return (obs, *aux)  # aux=rew,term,trun,info
 
-    def reset(self, seed=None, **kwargs):
+    def reset(self, seed=None, **reset_kwargs):
         """
         observation_space:
         Tuple((
@@ -782,22 +784,24 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         # print(f"act delay interval", self.act_delay_range)
 
         # Comment out changing on reset for now
-        if self.time_steps > self.change_every:
+        if self.time_steps >= self.change_every:
             # self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
             # self.act_delay_range = self.get_interval(self.overall_act_delay_range)
 
             self.__init__(
                 env=self.wrapped_env,
+                change_every=self.change_every,
                 obs_delay_range=self.overall_obs_delay_range,
                 act_delay_range=self.overall_act_delay_range,
                 interval_emb_type=self.interval_emb_type,
                 delay_emb_type=self.delay_emb_type,
                 give_kappa=self.give_kappa,
                 output=self.output,
-                **kwargs,
+                **self.init_kwargs,
             )
+            print("time steps after reset", self.time_steps)
 
-        recieved_obs, reset_info = super().reset(**kwargs)
+        recieved_obs, reset_info = super().reset(**reset_kwargs)
         padded_act_buf = self.get_padded_act_buf(recieved_obs)
         recieved_obs = self.get_int_emb_obs(recieved_obs, padded_act_buf)
 
@@ -819,208 +823,143 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         return obs, {}
 
 
-# Below was presumedly abandoned
 """
-Version for algos using standard gym environments
+Simplified logic to not return delay embeddings
 """
 
 
-class GymRandomIntervalDelayWrapper(RandomDelayWrapper):
+class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
     def __init__(
         self,
         env,
+        change_every: int = 10_000,
         obs_delay_range=range(0, 4),
         act_delay_range=range(0, 4),
-        interval_emb_type="two_hot",  # twohot, float, scalar
-        delay_emb_type="one_hot",  # (one_hot, float, scalar, multi_hot?[0,0,1,2,0,0]?) transition delay embedding
-        give_kappa=False,
-        **kwargs,
+        **init_kwargs,
     ):
-        self.interval_emb_type = interval_emb_type
-        self.delay_emb_type = delay_emb_type
+        self.init_kwargs = init_kwargs
+        assert len(obs_delay_range) >= 2, (
+            "obs delay must be sufficiently large to enable sub-interval"
+        )
+        assert len(act_delay_range) >= 2, (
+            "act delay must be sufficiently large to enable sub-interval"
+        )
 
-        self.give_kappa = give_kappa
-        self.overall_act_delay_range = act_delay_range
+        # Delay ranges
+        self.overall_act_delay_range = act_delay_range  # Now in RD Wrapper
         self.overall_obs_delay_range = obs_delay_range
+
         self.obs_delay_range = self.get_interval(obs_delay_range)
         self.act_delay_range = self.get_interval(act_delay_range)
-        super().__init__(env, self.obs_delay_range, self.act_delay_range, **kwargs)
+        print(f"obs delay is: {self.obs_delay_range}")
+        print(f"act delay is: {self.act_delay_range}")
+        print(f"changing every: {change_every}")
+
+        self.n_obs_delays = len(self.overall_obs_delay_range)
+        self.n_act_delays = len(self.overall_act_delay_range)
+
+        # Initialise RandomDelayWrapper
+        super().__init__(env, self.obs_delay_range, self.act_delay_range, **init_kwargs)
+
+        # Other
+        self.time_steps = 0
+        self.change_every = change_every
+
+        act_buf_len = np.sum(
+            [self.env.action_space.shape]
+            * (
+                self.overall_obs_delay_range.stop
+                + self.overall_act_delay_range.stop
+                - 1
+            )
+        )
+        self.observation_space = Box(
+            shape=(
+                self.observation_space[0].shape[0] + act_buf_len + 3,
+            ),  # +3 kappa etc
+            low=-np.inf,
+            high=np.inf,
+            dtype=np.float32,
+        )
+        print("self.observation_space", self.observation_space.shape)
 
     def get_interval(self, interval_range):
+        # print("interval_range:\n", interval_range)
+        assert len(interval_range) > 2, (
+            f"Not enough range between delay max and min, start: {interval_range.start} stop: {interval_range.stop}"
+        )
         nums = []
+        iters = 0
 
         while len(set(nums)) != 2:  # Pick 2 different numbers
             nums = [
                 random.randint(min(interval_range), max(interval_range)),
                 random.randint(min(interval_range), max(interval_range)),
             ]
+            iters += 1
 
         return range(min(nums), max(nums))
 
-    def get_delay_interval_embedding(self) -> tuple:
-        # min and maxs for given interval
-        rel_obs_min = self.obs_delay_range.start - self.overall_obs_delay_range.start
-        rel_obs_max = self.obs_delay_range.stop - self.overall_obs_delay_range.start
-        rel_act_min = self.act_delay_range.start - self.overall_act_delay_range.start
-        rel_act_max = self.act_delay_range.stop - self.overall_act_delay_range.start
-
-        n_pos_obs_delays = len(self.overall_obs_delay_range)
-        n_pos_act_delays = len(self.overall_act_delay_range)
-
-        if (
-            self.interval_emb_type == "two_hot"
-        ):  # provides the delays as a two hot embedding
-            two_hot_obs = np.zeros(n_pos_obs_delays)
-            two_hot_act = np.zeros(n_pos_act_delays)
-
-            # print("n_pos_act_delays", n_pos_act_delays)
-            # print("rel_obs_min", rel_obs_min)
-            # print("rel_obs_max", rel_obs_max)
-            # print("rel_act_min", rel_act_min)
-            # print("rel_act_max", rel_act_max)
-
-            two_hot_obs[[rel_obs_min, rel_obs_max - 1]] = 1
-            two_hot_act[[rel_act_min, rel_act_max - 1]] = 1
-
-            return (two_hot_obs, two_hot_act)
-
-        elif self.interval_emb_type == "scalar":  # provides the range simply as scalars
-            return (
-                (self.obs_delay_range.start, self.obs_delay_range.stop + 1),
-                (self.act_delay_range.start, self.act_delay_range.stop + 1),
-            )
-
-        elif (
-            self.interval_emb_type == "float"
-        ):  # normalise over range, show delay as percentage of max range
-            # print(f"rel_obs_min", rel_obs_min)
-            # print("rel_obs_max", rel_obs_max)
-            # print("rel_act_min", rel_act_min)
-            # print("rel_act_max", rel_act_max)
-            # print("n_pos_obs_delays", n_pos_obs_delays)
-            # print("n_pos_act_delays", n_pos_act_delays)
-
-            obs_min_float = rel_obs_min / (n_pos_obs_delays)
-            obs_max_float = rel_obs_max / (n_pos_obs_delays)
-
-            act_min_float = rel_act_min / (n_pos_act_delays)
-            act_max_float = rel_act_max / (n_pos_act_delays)
-
-            return ((obs_min_float, obs_max_float), (act_min_float, act_max_float))
-        else:
-            raise Exception(f"Unsupported embedding type: {self.interval_emb_type}")
-
-    def format_obs(self, obs):
-        action_buffer = obs[
-            1
-        ]  # Can be variable length based on delay interval so needs padding
-        act_buf_max = self.overall_act_delay_range.stop + max(
-            self.overall_act_delay_range
+    def get_padded_act_buf(self, recieved_obs: tuple):
+        # overall_start = self.overall_act_delay_range.start + self.overall_obs_delay_range.start
+        overall_stop = (
+            self.overall_act_delay_range.stop + self.overall_obs_delay_range.stop
         )
-        action_buffer += (0,) * (act_buf_max - len(action_buffer))
 
-        obs_diff = max(self.overall_obs_delay_range) - min(self.overall_obs_delay_range)
-        act_diff = max(self.overall_act_delay_range) - min(self.overall_act_delay_range)
+        # int_start = self.act_delay_range.start + self.obs_delay_range.start
+        int_stop = self.act_delay_range.stop + self.obs_delay_range.stop
 
-        # get delays
-        obs_delay = obs[2]
-        act_delay = obs[3]
-        kappa_delay = obs[4]
+        # front_padding = tuple(
+        #     np.zeros(self.env.action_space.shape)
+        #     for _ in range(int_start - overall_start)
+        # )
+        back_padding = tuple(
+            np.zeros(self.env.action_space.shape)
+            for _ in range(overall_stop - int_stop)
+        )
 
-        if self.delay_emb_type == "one_hot":
-            obs_emb = np.zeros(
-                obs_diff + 1
-            )  # Should have similar to get delay interval embedding
-            act_emb = np.zeros(act_diff + 1)
-            kappa_emb = np.zeros(obs_diff + 1)
-            obs_emb[obs_delay - self.overall_obs_delay_range.start] = (
-                1.0  # Error when delay=array size, is this index -1 or array not large enough?
-            )
-            act_emb[act_delay - self.overall_act_delay_range.start] = 1.0
-            kappa_emb[kappa_delay - self.overall_obs_delay_range.start] = 1.0
-
-        elif self.delay_emb_type == "scalar":
-            obs_emb = [obs_delay]
-            act_emb = [act_delay]
-            kappa_emb = [kappa_delay]
-
-        elif self.delay_emb_type == "float":
-            # Provide as float, relative to the overall interval
-
-            obs_emb = [(obs_delay - self.overall_obs_delay_range.start) / obs_diff]
-            act_emb = [(act_delay - self.overall_act_delay_range.start) / act_diff]
-            kappa_emb = [(kappa_delay - self.overall_obs_delay_range.start) / obs_diff]
-        else:
-            raise ValueError("Invalide delay_emb_type", self.delay_emb_type)
-
-        # print("obs+act delay:", obs_delay, act_delay)
-        # print("obs len", len(obs))
-        # print("obs0:", obs[0], len(obs[0]))
-        # print("obs1:", obs[1], len(obs[1]))
-        # print("action_buffer:", action_buffer, len(action_buffer))
-        # print("obs_emb", obs_emb, len(obs_emb))
-        # print("act_emb", act_emb, len(obs_emb))
-
-        if self.give_kappa:
-            new_obs = np.concatenate(
-                (obs[0], obs[1], obs_emb, act_emb, kappa_emb), axis=0
-            )
-        else:
-            new_obs = np.concatenate((obs[0], obs[1], obs_emb, act_emb), axis=0)
-
-        return new_obs
+        # For some reason RandomDelayWrapper only uses end delay when making buffer
+        # Meaning delays of (18,20) have loads of unnessary padding
+        # padded_act_buf = front_padding + recieved_obs[1] + back_padding
+        padded_act_buf = recieved_obs[1] + back_padding
+        act_buf_flat = np.hstack(padded_act_buf).astype(np.float32)
+        return act_buf_flat
 
     def step(self, action, **kwargs):
-        t, *aux = super().step(
+        self.time_steps += 1
+
+        recieved_obs, *aux = super().step(
             action
         )  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
-        return (self.format_obs(t), *aux)  # aux=rew,term,trun,info
+        padded_act_buf = self.get_padded_act_buf(recieved_obs)
 
-    def reset(self, **kwargs):
-        """
-        observation_space:
-        Tuple((
-            obs_space,  # most recent observation
-            Tuple([act_space] * (obs_delay_range.stop + act_delay_range.stop)),  # action buffer
-            Discrete(obs_delay_range.stop),  # observation delay int64
-            Discrete(act_delay_range.stop),  # action delay int64
-        ))
-        """
-        self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
-        self.act_delay_range = self.get_interval(self.overall_act_delay_range)
+        delay_info = np.array(recieved_obs[2:], dtype=np.float32)
+        final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
 
-        # print(f"obs delay interval", self.obs_delay_range)
-        # print(f"act delay interval", self.act_delay_range)
+        return (final_obs, *aux)  # aux=rew,term,trun,info
 
-        recieved_obs, reset_info = super().reset(**kwargs)
+    def reset(self, seed=None, **reset_kwargs):
+        if self.time_steps >= self.change_every:
+            # self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
+            # self.act_delay_range = self.get_interval(self.overall_act_delay_range)
 
-        obs = self.format_obs(recieved_obs)  # one hot encoding of the transition delay
-        return obs.astype(np.float32)
+            self.__init__(
+                env=self.wrapped_env,
+                change_every=self.change_every,
+                obs_delay_range=self.overall_obs_delay_range,
+                act_delay_range=self.overall_act_delay_range,
+                interval_emb_type=self.interval_emb_type,
+                delay_emb_type=self.delay_emb_type,
+                give_kappa=self.give_kappa,
+                output=self.output,
+                **self.init_kwargs,
+            )
+            print("time steps after reset", self.time_steps)
 
-        # print(f"obs_delay_max: ", obs_delay_max)
-        # print(f"obs_delay_min: ", obs_delay_min)
-        #
-        # print(f"act_delay_max: ", act_delay_max)
-        # print(f"act_delay_min: ", act_delay_min)
-        #
-        # print(f"overall_obs_min: ", overall_obs_min)
-        # print(f"overall_obs_max: ", overall_obs_max)
-        #
-        # print(f"overall_act_min: ", overall_act_min)
-        # print(f"overall_act_max: ", overall_act_max)
-        #
-        # print(f"rel_obs_min: ", rel_obs_min)
-        # print(f"rel_obs_max: ", rel_obs_max)
-        #
-        # print(f"rel_act_min: ", rel_act_min)
-        # print(f"rel_act_max: ", rel_act_max)
-        # Random choice to make uniform probability over interval range
-        # min_or_max = random.choice([True, False])
-        # mid = random.randint(min(interval_range), max(interval_range))
-        #
-        # if min_or_max:
-        #     min_range = max(mid-1,0)
-        #     max_range = random.randint(mid, max(interval_range))
-        # else:
-        #     max_range = min(mid+1,
-        #     min_range = random.randint(min(interval_range), mid)
+        recieved_obs, reset_info = super().reset(**reset_kwargs)
+        padded_act_buf = self.get_padded_act_buf(recieved_obs)
+
+        delay_info = np.array(recieved_obs[2:], dtype=np.float32)
+        final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
+
+        return final_obs, {}

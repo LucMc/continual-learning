@@ -36,7 +36,6 @@ Count = 15
   * Implement layer norm
   * Implement Dtanh (meta recent paper)
   * Link with continual time-delays
-  * Implement my own PPO to show it's not some random trick in SBX
 
 :: Errors ::
   * Replacement rate of 0 gives worse loss than adam, should be equal

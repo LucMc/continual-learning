@@ -4,6 +4,10 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
+'''
+TODO:
+ - Compare pre and post activation normalisation as different sources say differently i.e. Disentangling the causes of plasticity in NNs paper
+'''
 # Reinforcement Learning base
 class ValueNet(nn.Module):
     @nn.compact
@@ -225,7 +229,6 @@ class TestNet(nn.Module):
                 # kernel_init=self.k_init,
                 # bias_init=self.b_init
             )(x)
-            x = nn.LayerNorm(x, name=f"{layer_name}_lnorm")
             x = nn.relu(x)
             intermediates[layer_name] = x
 

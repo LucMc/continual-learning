@@ -40,6 +40,7 @@ def pt(pytree, indent=0):
         print(f"{prefix}{type(pytree).__name__}: {pytree}")
 
 
+
 @pytest.fixture
 def full_setup():
     key = random.PRNGKey(0)
@@ -192,6 +193,12 @@ def test_process_params(full_setup):
         assert jnp.all(feats["intermediates"]["activations"][0]["dense3"] == 37.0), "Third layer activations check"
         # 4x36+1=149
         assert pred == 149.0, "pred check"
+
+    def test_reset_weights():
+        pass # TODO by you, Gemini
+
+
+
 
     # test_rr not in function
     test_ages()

@@ -17,9 +17,14 @@ import tyro
 import os
 from pathlib import Path
 import continual_learning.envs.slippery_ant_v5
-from continual_learning.nn import ActorNet, ValueNet, ActorNetLayerNorm, ValueNetLayerNorm
+from continual_learning.nn import (
+    ActorNet,
+    ValueNet,
+    ActorNetLayerNorm,
+    ValueNetLayerNorm,
+)
 from continual_learning.optim.continual_backprop import CBPTrainState
-from continual_learning.utils.wrappers_rd import ContinualRandomIntervalDelayWrapper
+from continual_learning.utils.wrappers_rd import ContinualRandomIntervalDelayWrapper, GymContinualIntervalDelayWrapper
 
 # import time
 # from memory_profiler import profile
@@ -38,7 +43,7 @@ TODO:
 class Config:
     """All the options for the experiment, all accessable within PPO class"""
 
-    seed: int = 0 # Random seed
+    seed: int = 0  # Random seed
     training_steps: int = 500_000  # total training time-steps
     n_envs: int = 1  # number of parralel training envs
     rollout_steps: int = 64 * 20  # env steps per rollout
@@ -55,10 +60,10 @@ class Config:
     vf_coef: float = 0.5  # balance vf loss magnitude
     log_video_every: int = -1  # save videos locally/on wandb (-1 for no logging)
     log: bool = False  # Log with wandb
-    layer_norm: bool = False # Weather or not to use LayerNorm layers after activations
-    cbp = False # Weather or not to use continual backpropergation
+    layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
+    cbp = False  # Weather or not to use continual backpropergation
     optim: Literal["adam", "adamw", "sgd", "muon"] = "adamw"
-    run_name: str = "" # Postfix name for training run
+    run_name: str = ""  # Postfix name for training run
     delay: bool = False
 
 
@@ -305,14 +310,20 @@ class PPO(Config):
 
 def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict = {}):
     def thunk():
-
         if ppo_agent.delay:
             print(":: Added continual time delays ::")
             change_every = env_args.pop("change_every")
             env = gym.make(ppo_agent.env_id, **env_args)
-            ContinualRandomIntervalDelayWrapper(env, change_every=change_every)
-
-        env = gym.make(ppo_agent.env_id, **env_args)
+            # env = ContinualRandomIntervalDelayWrapper(
+            env = GymContinualIntervalDelayWrapper(
+                env,
+                change_every=change_every,
+                obs_delay_range=range(0, 4),
+                act_delay_range=range(0, 4),
+            )
+            
+        else:
+            env = gym.make(ppo_agent.env_id, **env_args)
         # env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         # env = gym.wrappers.ClipAction(env)
@@ -382,6 +393,8 @@ def outer_loop(
 
 def main(config: Config):
     ppo_agent = PPO(buffer_size=config.n_envs * config.rollout_steps, **config.__dict__)
+    np.random.seed(ppo_agent.seed) # Seeding for np operations
+    pprint(ppo_agent.__dict__)
     env_args = {}
 
     if ppo_agent.log_video_every > 0:
@@ -397,21 +410,24 @@ def main(config: Config):
     if ppo_agent.log:
         tags = ["PPO", ppo_agent.env_id, ppo_agent.optim]
         # NOTE: If using layernorm, increase learning rate to 0.0005
-        if ppo_agent.layer_norm: tags.append("LayerNorm")
-        if ppo_agent.cbp: tags.append("ContinualBackprop")
-        if ppo_agent.delay == "delay": tags.append("delay") 
+        if ppo_agent.layer_norm:
+            tags.append("LayerNorm")
+        if ppo_agent.cbp:
+            tags.append("ContinualBackprop")
+        if ppo_agent.delay:
+            tags.append("delay")
 
         wandb.init(
             project="jax-ppo",
-            name="ppo-0.1"+ppo_agent.run_name,
+            name="ppo-0.1" + ppo_agent.run_name,
             config=config.__dict__,  # Get from tyro etc
             tags=tags,
             # monitor_gym=True,
             save_code=True,
         )
     # Specific to this setup, should probably add a config file for env_args?
-    if ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay:
-        env_args.update({"change_every": ppo_agent.training_steps // 10})
+    if ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay: # Add change every as param?
+        env_args.update({"change_every": ppo_agent.training_steps // 10}) # should be 10
 
     ckpt_path = "./checkpoints"
     assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (  # TODO: Make adaptive
@@ -425,6 +441,7 @@ def main(config: Config):
         ]
     )
 
+
     dummy_obs, _ = envs.reset(seed=ppo_agent.seed)
     key = random.PRNGKey(ppo_agent.seed)
     current_global_step = 0
@@ -432,18 +449,24 @@ def main(config: Config):
     actor_key, value_key, key = random.split(key, num=3)
     if ppo_agent.layer_norm:
         print(":: Using LayerNorm layers ::")
-        actor_net = ActorNetLayerNorm(envs.action_space.shape[-1]) # Have these as options
+        actor_net = ActorNetLayerNorm(
+            envs.action_space.shape[-1]
+        )  # Have these as options
         value_net = ValueNetLayerNorm()
     else:
         print(":: Using standard architecture ::")
-        actor_net = ActorNet(envs.action_space.shape[-1]) # Have these as options
+        actor_net = ActorNet(envs.action_space.shape[-1])  # Have these as options
         value_net = ValueNet()
 
-    if ppo_agent.optim == "adam": tx = optax.adam
-    if ppo_agent.optim == "adamw": tx = optax.adamw
-    if ppo_agent.optim == "sgd": tx = optax.sgd
+    if ppo_agent.optim == "adam":
+        tx = optax.adam
+    if ppo_agent.optim == "adamw":
+        tx = optax.adamw
+    if ppo_agent.optim == "sgd":
+        tx = optax.sgd
     # partial(optax.contrib.muon, weight_decay=0.0001) # Same decay as adamw. Consider writing as muonw?
-    if ppo_agent.optim == "muon": tx = optax.contrib.muon 
+    if ppo_agent.optim == "muon":
+        tx = optax.contrib.muon
 
     opt = optax.chain(
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),
@@ -451,26 +474,33 @@ def main(config: Config):
             learning_rate=optax.linear_schedule(
                 init_value=ppo_agent.learning_rate,
                 end_value=ppo_agent.learning_rate / 10,
-                transition_steps= 2_000_000,# ppo_agent.training_steps
+                transition_steps=2_000_000,  # ppo_agent.training_steps
             ),
         ),
     )
 
-
     # Continual backpropergation
     if ppo_agent.cbp:
         actor_ts = CBPTrainState.create(
-            apply_fn=actor_net.apply, params=actor_net.init(actor_key, dummy_obs), tx=opt
+            apply_fn=actor_net.apply,
+            params=actor_net.init(actor_key, dummy_obs),
+            tx=opt,
         )
         value_ts = CBPTrainState.create(
-            apply_fn=value_net.apply, params=value_net.init(value_key, dummy_obs), tx=opt
+            apply_fn=value_net.apply,
+            params=value_net.init(value_key, dummy_obs),
+            tx=opt,
         )
     else:
         actor_ts = TrainState.create(
-            apply_fn=actor_net.apply, params=actor_net.init(actor_key, dummy_obs), tx=opt
+            apply_fn=actor_net.apply,
+            params=actor_net.init(actor_key, dummy_obs),
+            tx=opt,
         )
         value_ts = TrainState.create(
-            apply_fn=value_net.apply, params=value_net.init(value_key, dummy_obs), tx=opt
+            apply_fn=value_net.apply,
+            params=value_net.init(value_key, dummy_obs),
+            tx=opt,
         )
 
     last_obs, first_info = envs.reset()
