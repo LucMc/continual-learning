@@ -12,7 +12,7 @@ import time
 from typing import Dict, Any, Tuple, List, Callable, Literal
 from dataclasses import dataclass, field
 
-from continual_learning.optim.continual_backprop_backup import (
+from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
 )
@@ -29,8 +29,8 @@ METHODS = [
     "adamw",
     "layer_norm",
     "layer_norm_wd",
-    "layer_norm_cbp",
-    "layer_norm_cbplnwd",
+    # "layer_norm_cbp",
+    # "layer_norm_cbplnwd",
     "all",
 ]
 
@@ -527,6 +527,7 @@ if __name__ == "__main__":
     cbp_kwargs = {
         "maturity_threshold": args.maturity_threshold,
         "replacement_rate": args.replacement_rate,
+        "rng": random.PRNGKey(args.seed)
     }
 
     # Common settings

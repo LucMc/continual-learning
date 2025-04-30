@@ -827,7 +827,6 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
 Simplified logic to not return delay embeddings
 """
 
-
 class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
     def __init__(
         self,
@@ -948,13 +947,8 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
                 change_every=self.change_every,
                 obs_delay_range=self.overall_obs_delay_range,
                 act_delay_range=self.overall_act_delay_range,
-                interval_emb_type=self.interval_emb_type,
-                delay_emb_type=self.delay_emb_type,
-                give_kappa=self.give_kappa,
-                output=self.output,
                 **self.init_kwargs,
             )
-            print("time steps after reset", self.time_steps)
 
         recieved_obs, reset_info = super().reset(**reset_kwargs)
         padded_act_buf = self.get_padded_act_buf(recieved_obs)

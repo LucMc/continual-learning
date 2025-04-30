@@ -208,7 +208,7 @@ class OnlineNormNet(nn.Module):
         return self.apply({"params": params}, x, capture_intermediates=True)
 
 
-class TestNet(nn.Module):
+class SimpleTestNet(nn.Module):
     k_init = nn.initializers.zeros_init()
     b_init = nn.initializers.zeros_init()
 

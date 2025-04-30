@@ -71,9 +71,9 @@ def gen_key_tree(key: PRNGKeyArray, tree: PyTree):
     Creates a PyTree of random keys such that is can be traversed in the tree map and have
     a new key for each leaf.
     """
-    leaves, treedef = jax.tree_flatten(tree)
+    leaves, treedef = jax.tree.flatten(tree)
     subkeys = jax.random.split(key, len(leaves))
-    return jax.tree_unflatten(treedef, subkeys)
+    return jax.tree.unflatten(treedef, subkeys)
 
 
 def get_bottom_k_mask(values, n_to_replace):

@@ -214,6 +214,9 @@ def get_out_weights_mag(weights):
 
 
 def process_params(params: FrozenDict):
+    """
+    TODO: LayerNorm layers etc have 'scale' instead of kernelk so skip and add back later
+    """
     out_layer_name = "out_layer"
 
     _params = deepcopy(params)  # ["params"]
@@ -221,11 +224,11 @@ def process_params(params: FrozenDict):
     excluded = {
         out_layer_name: params[out_layer_name]
     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-
     bias = {}
     weights = {}
 
     for layer_name in _params.keys():
+        # if not "kernel"  in _params[layer_name].keys():
         bias[layer_name] = _params[layer_name].pop("bias")
         weights[layer_name] = _params[layer_name].pop("kernel")
 
@@ -260,7 +263,7 @@ def continual_backprop(
                 util_type
             ),  # Replace with util function directly?
             accumulated_features_to_replace=0,
-            rng=random.PRNGKey(0),
+            # rng=random.PRNGKey(0), # Seed passed in through kwargs?
             **kwargs,
         )
 
