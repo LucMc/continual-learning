@@ -1,3 +1,4 @@
+import enum
 from typing import Tuple, Literal
 from chex import dataclass
 import jax
@@ -65,11 +66,12 @@ class Config:
     vf_coef: float = 0.5  # balance vf loss magnitude
     log_video_every: int = -1  # save videos locally/on wandb (-1 for no logging)
     log: bool = False  # Log with wandb
-    layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
+    layer_norm: bool = True  # Weather or not to use LayerNorm layers after activations
     cbp = False  # Weather or not to use continual backpropergation
-    optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "adamw"
+    optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
     run_name: str = ""  # Postfix name for training run
     delay: bool = False
+    changes: int = 10 # How many env changes for continual learning (if using ContinualAnt-v0 or delay=True)
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,7 @@ class PPO(Config):
         stds = np.zeros((self.rollout_steps,) + envs.action_space.shape)
         obss = np.zeros((self.rollout_steps,) + envs.observation_space.shape)
         actions = np.zeros((self.rollout_steps,) + envs.action_space.shape)
+        infos = []
 
         for i in range(self.rollout_steps):
             action_key, key = random.split(key)
@@ -225,16 +228,14 @@ class PPO(Config):
             log_probs[i] = log_prob
             obss[i] = last_obs
             stds[i] = action_dist.stddev()
+            infos.append(info)
 
             episode_start = False
             last_obs = _obs
             last_episode_start = terminated
 
         values = value_ts.apply_fn(value_ts.params, jnp.array(obss))
-        # Fix truncated using value
         last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
-
-        times_diff = []
 
         returns, advantages = jax.vmap(
             self.compute_returns_and_advantage, in_axes=(1, 1, 1, 0, 0)
@@ -255,14 +256,7 @@ class PPO(Config):
             else float(1 - (np.var(advantages.flatten()) / ret_var))
         )
 
-        return (
-            jnp.array(obss),
-            jnp.array(actions),
-            values,
-            log_probs,
-            advantages,
-            returns,
-        ), {
+        rollout_info = {
             "mean rollout reward": np.mean(
                 rewards
             ),  # TODO: should negate the last episode
@@ -273,6 +267,18 @@ class PPO(Config):
             "action_dist_std": stds.mean(),
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
         }
+
+        if self.delay:
+            rollout_info.update(mean_delay_mag=np.mean([x["delay_mag"] for x in infos]))
+
+        return (
+            jnp.array(obss),
+            jnp.array(actions),
+            values,
+            log_probs,
+            advantages,
+            returns,
+        ), rollout_info
 
     @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames="self")
@@ -323,8 +329,9 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             env = GymContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
-                obs_delay_range=range(0, 8),
-                act_delay_range=range(0, 8),
+                obs_delay_range=range(0, 6),
+                act_delay_range=range(0, 6),
+                random_delays=False # TODO: Better delay settings
             )
 
         else:
@@ -392,6 +399,7 @@ def outer_loop(
     )
 
     # remove to see over epochs, or change to min/max if curious
+    # TODO: Is info over last epoch better?
     info = jax.tree.map(lambda x: x.mean(), info)
     return actor_ts, value_ts, key, info
 
@@ -435,7 +443,7 @@ def main(config: Config):
         ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay
     ):  # Add change every as param?
         env_args.update(
-            {"change_every": ppo_agent.training_steps // 10}
+            {"change_every": ppo_agent.training_steps // ppo_agent.changes}
         )  # should be 10
 
     ckpt_path = "./checkpoints"
@@ -456,15 +464,17 @@ def main(config: Config):
 
     actor_key, value_key, key = random.split(key, num=3)
     if ppo_agent.layer_norm:
-        print(":: Using LayerNorm layers ::")
+        print(":: Using LayerNorm layers (lr *= 2) ::")
         actor_net = ActorNetLayerNorm(
             envs.action_space.shape[-1]
         )  # Have these as options
         value_net = ValueNetLayerNorm()
+        learning_rate = ppo_agent.learning_rate*2
     else:
         print(":: Using standard architecture ::")
         actor_net = ActorNet(envs.action_space.shape[-1])  # Have these as options
         value_net = ValueNet()
+        learning_rate = ppo_agent.learning_rate
 
     # Select optimiser
     if ppo_agent.optim == "adam":
@@ -481,9 +491,9 @@ def main(config: Config):
     opt = optax.chain(
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),
         optax.inject_hyperparams(tx)(
-            learning_rate=optax.linear_schedule( # Does this have an adverse effect of continual learning?
-                init_value=ppo_agent.learning_rate,
-                end_value=ppo_agent.learning_rate / 10,
+            learning_rate=optax.linear_schedule(  # Does this have an adverse effect of continual learning?
+                init_value=learning_rate,
+                end_value=learning_rate / 10,
                 transition_steps=2_000_000,  # ppo_agent.training_steps
             ),
         ),
@@ -538,8 +548,15 @@ def main(config: Config):
         if ppo_agent.log:
             wandb.log(full_logs, step=current_global_step)
 
-            if current_global_step % 100_000 == 0:
-                wandb.save(ckpt_path)
+            if (
+                current_global_step // ppo_agent.rollout_steps * ppo_agent.n_envs
+            ) % 10 == 0:  # Every 10 rollouts
+                print(f":: Checkpointing to --> {ckpt_path} :: ")
+                try:
+                    wandb.save(ckpt_path)
+                except:
+                    print("Checkpoint failed")
+                    breakpoint()
 
     # Close stuff
     if ppo_agent.log:
@@ -547,7 +564,6 @@ def main(config: Config):
             print("[ ] Uploading Videos ...", end="\r")
             for video_name in os.listdir(video_folder):
                 print("Check line bellow")
-                breakpoint()
                 wandb.log({video_name: wandb.Video(str(video_folder / video_name))})
             print(r"[x] Uploading Videos ...")
 

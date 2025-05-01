@@ -45,7 +45,6 @@ class RandomDelayWrapper(gym.Wrapper):
         act_delay_range=range(0, 4),
         initial_action=None,
         skip_initial_actions=False,
-        PD=False,
     ):
         super().__init__(env)
         self.wrapped_env = env
@@ -72,8 +71,6 @@ class RandomDelayWrapper(gym.Wrapper):
         self.past_observations = deque(maxlen=obs_delay_range.stop)
         self.arrival_times_actions = deque(maxlen=act_delay_range.stop)
         self.arrival_times_observations = deque(maxlen=obs_delay_range.stop)
-
-        self.PD = PD
 
         self.t = 0
         self.done_signal_sent = False
@@ -131,14 +128,9 @@ class RandomDelayWrapper(gym.Wrapper):
         else:
             # Editted this for PD controller by adding obs
             # print(f"Running: {self.PD}")
-            if not self.PD:
-                m, r, term, trun, info = self.env.step(
-                    self.next_action
-                )  # before receive_action (e.g. rtrl setting with 0 delays)
-            elif self.PD:
-                m, r, term, trun, info = self.env.step(
-                    self.next_action, self.past_observations[0][0]
-                )  # before receive_action (e.g. rtrl setting with 0 delays)
+            m, r, term, trun, info = self.env.step(
+                self.next_action
+            )  # before receive_action (e.g. rtrl setting with 0 delays)
             d = term | trun
             kappa, beta = self.receive_action()
             self.cum_rew_actor += r
@@ -227,6 +219,7 @@ class RandomDelayWrapper(gym.Wrapper):
         )
 
         m, r, term, trun, info, kappa, beta = self.past_observations[alpha]
+        info.update(delay_mag=alpha+beta)
         return (
             (
                 m.astype(np.float32),
@@ -265,11 +258,6 @@ class UnseenRandomDelayWrapper(RandomDelayWrapper):
             action
         )  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
         return (t[0], *aux)
-
-
-## My own only augmented state wrapper
-# from gym.spaces import Dict, Box, Tuple
-# ASSERT THE SHAPES FROM RESET AND STEP ARE RIGHT
 
 
 class AugmentedRandomDelayWrapper(RandomDelayWrapper):
@@ -342,99 +330,6 @@ class AugmentedRandomDelayWrapper(RandomDelayWrapper):
 
         return (aug_state, *aux)
 
-
-##
-
-
-def simple_wifi_sampler1():
-    return np.random.choice(
-        [1, 2, 3, 4, 5, 6], p=[0.3082, 0.5927, 0.0829, 0.0075, 0.0031, 0.0056]
-    )
-
-
-def simple_wifi_sampler2():
-    return np.random.choice([1, 2, 3, 4], p=[0.3082, 0.5927, 0.0829, 0.0162])
-
-
-class WifiDelayWrapper1(RandomDelayWrapper):
-    """
-    Simple sampler built from a dataset of 10000 real-world wifi communications
-    The atomic time-step is 0.02s
-    All communication times above 0.1s have been clipped to 0.1s
-    """
-
-    def __init__(self, env, initial_action=None, skip_initial_actions=False):
-        super().__init__(
-            env,
-            obs_delay_range=range(0, 7),
-            act_delay_range=range(0, 7),
-            initial_action=initial_action,
-            skip_initial_actions=skip_initial_actions,
-        )
-
-    def send_observation(self, obs):
-        # at the remote actor
-        alpha = simple_wifi_sampler1()
-        self.arrival_times_observations.appendleft(self.t + alpha)
-        self.past_observations.appendleft(obs)
-
-    def send_action(self, action, init=False):
-        # at the brain
-        kappa = (
-            simple_wifi_sampler1() if not init else 0
-        )  # TODO: change this if we implement a different initialization
-        self.arrival_times_actions.appendleft(self.t + kappa)
-        self.past_actions.appendleft(action)
-
-
-class WifiDelayWrapper2(RandomDelayWrapper):
-    """
-    Simple sampler built from a dataset of 10000 real-world wifi communications
-    The atomic time-step is 0.02s
-    All communication times above 0.1s have been clipped to 0.1s
-    """
-
-    def __init__(self, env, initial_action=None, skip_initial_actions=False):
-        super().__init__(
-            env,
-            obs_delay_range=range(0, 5),
-            act_delay_range=range(0, 5),
-            initial_action=initial_action,
-            skip_initial_actions=skip_initial_actions,
-        )
-
-    def send_observation(self, obs):
-        # at the remote actor
-        alpha = simple_wifi_sampler2()
-        self.arrival_times_observations.appendleft(self.t + alpha)
-        self.past_observations.appendleft(obs)
-
-    def send_action(self, action, init=False):
-        # at the brain
-        kappa = (
-            simple_wifi_sampler2() if not init else 0
-        )  # TODO: change this if we implement a different initialization
-        self.arrival_times_actions.appendleft(self.t + kappa)
-        self.past_actions.appendleft(action)
-
-
-"""
-Rewrite a new version of this which keeps output variables in DCAC format as that is what I'll mainly
-be working off ig. Also create continual version so I can check the continuous neuron resetting
-Plan for Tuesday:
-    - Deep how the wrapper works again
-    - Get it working for DCAC normal
-    - BONUS: Working on typical gym setting too
-
-- Fixed working on DCAC []
-- Multi-task working on DCAC []
-- Continual working on DCAC []
-
-- Plot neural plasticity []
-- Add continual backprop []
-- Test against continuout continual backprop []
-- Add baselines, SAC []
-"""
 
 
 class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
@@ -834,6 +729,7 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
         change_every: int = 10_000,
         obs_delay_range=range(0, 4),
         act_delay_range=range(0, 4),
+        random_delays=False,
         **init_kwargs,
     ):
         self.init_kwargs = init_kwargs
@@ -845,14 +741,17 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
         )
 
         # Delay ranges
+        self.random_delays = random_delays
         self.overall_act_delay_range = act_delay_range  # Now in RD Wrapper
         self.overall_obs_delay_range = obs_delay_range
 
         self.obs_delay_range = self.get_interval(obs_delay_range)
         self.act_delay_range = self.get_interval(act_delay_range)
+
         print(f"obs delay is: {self.obs_delay_range}")
         print(f"act delay is: {self.act_delay_range}")
         print(f"changing every: {change_every}")
+        print(f"Random Delays: {random_delays}")
 
         self.n_obs_delays = len(self.overall_obs_delay_range)
         self.n_act_delays = len(self.overall_act_delay_range)
@@ -887,17 +786,21 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
         assert len(interval_range) > 2, (
             f"Not enough range between delay max and min, start: {interval_range.start} stop: {interval_range.stop}"
         )
-        nums = []
-        iters = 0
 
-        while len(set(nums)) != 2:  # Pick 2 different numbers
-            nums = [
-                random.randint(min(interval_range), max(interval_range)),
-                random.randint(min(interval_range), max(interval_range)),
-            ]
-            iters += 1
+        if self.random_delays:
+            nums = []
+            iters = 0
 
-        return range(min(nums), max(nums))
+            while len(set(nums)) != 2:  # Pick 2 different numbers
+                nums = [
+                    random.randint(min(interval_range), max(interval_range)),
+                    random.randint(min(interval_range), max(interval_range)),
+                ]
+                iters += 1
+            return range(min(nums), max(nums))
+        else:
+            delay = random.choice(interval_range)
+            return range(delay, delay+1)
 
     def get_padded_act_buf(self, recieved_obs: tuple):
         # overall_start = self.overall_act_delay_range.start + self.overall_obs_delay_range.start
@@ -908,10 +811,6 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
         # int_start = self.act_delay_range.start + self.obs_delay_range.start
         int_stop = self.act_delay_range.stop + self.obs_delay_range.stop
 
-        # front_padding = tuple(
-        #     np.zeros(self.env.action_space.shape)
-        #     for _ in range(int_start - overall_start)
-        # )
         back_padding = tuple(
             np.zeros(self.env.action_space.shape)
             for _ in range(overall_stop - int_stop)
@@ -935,13 +834,11 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
         delay_info = np.array(recieved_obs[2:], dtype=np.float32)
         final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
 
-        return (final_obs, *aux)  # aux=rew,term,trun,info
+        return (final_obs, *aux)
 
     def reset(self, seed=None, **reset_kwargs):
         if self.time_steps >= self.change_every:
-            # self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
-            # self.act_delay_range = self.get_interval(self.overall_act_delay_range)
-
+            # Debatable weather to reset everything manually or just reinit, seems simpler
             self.__init__(
                 env=self.wrapped_env,
                 change_every=self.change_every,
@@ -955,5 +852,26 @@ class GymContinualIntervalDelayWrapper(RandomDelayWrapper):
 
         delay_info = np.array(recieved_obs[2:], dtype=np.float32)
         final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
+        return final_obs, reset_info
 
-        return final_obs, {}
+
+# self.__init__(
+#     env=self.wrapped_env,
+#     change_every=self.change_every,
+#     obs_delay_range=self.overall_obs_delay_range,
+#     act_delay_range=self.overall_act_delay_range,
+#     **self.init_kwargs,
+# )
+# front_padding = tuple(
+#     np.zeros(self.env.action_space.shape
+# self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
+# self.act_delay_range = self.get_interval(self.overall_act_delay_range)
+#
+# self.past_actions.clear()
+# self.past_observations.clear()
+# self.arrival_times_actions.clear()
+# self.arrival_times_observations.clear()
+#
+# super().obs_delay_range = self.obs_delay_range
+# super().act_delay_range = self.act_delay_range
+# self.time_steps = 0

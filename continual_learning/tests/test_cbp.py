@@ -662,7 +662,7 @@ def test_apply_gradients_divergence_rate_positive(initial_state, network, key):
         # filtered_features,
     )
     layer_any_reset_tree = tu.tree_map(jnp.any, reset_mask)
-    flat_any_reset_list, _ = tu.tree_flatten(layer_any_reset_tree)
+    flat_any_reset_list, _ = jax.tree.flatten(layer_any_reset_tree)
     any_reset_occurred = any(flat_any_reset_list)
 
     if any_reset_occurred:

@@ -30,11 +30,7 @@ Count = 15
 
 :: Implementation ::
   * Implement accumulated nodes to reset for inexact division by replacement rate
-  * Make out_w_mag general
   * Additional logging
-  * Implement online norm: https://github.com/Cerebras/online-normalization/blob/master/online-norm/numpy_on/online_norm_1d.py
-  * Implement layer norm
-  * Implement Dtanh (meta recent paper)
   * Link with continual time-delays
 
 :: Errors ::
@@ -104,8 +100,8 @@ class CBPTrainState(TrainState):
             features=features["intermediates"]["activations"][0],
         )
 
-        utils.check_tree_shapes(params_after_tx, params_after_cbp)
-        utils.check_tree_shapes(self.params, params_after_cbp)
+        # utils.check_tree_shapes(params_after_tx, params_after_cbp)
+        # utils.check_tree_shapes(self.params, params_after_cbp)
 
         return self.replace(
             step=self.step + 1,
@@ -114,6 +110,7 @@ class CBPTrainState(TrainState):
             cbp_state=new_cbp_state[0],
             **kwargs,
         )
+
 
 # -------------- CBP Weight reset ---------------
 def reset_weights(
@@ -190,28 +187,18 @@ def get_reset_mask(
     return k_masked_utility
 
 
+@jax.jit
 def get_out_weights_mag(weights):
+    """TODO: Make this not hardcoded"""
     w_mags = jax.tree.map(
         lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
-    )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of ou_layer but should be eqivalent
-    out_tree = {
-        "dense1": w_mags["dense2"],  # [128,]
-        "dense2": w_mags["dense3"],  # [128,]
-        "dense3": w_mags["out_layer"],
-    }  # [128,]
+    )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of out_layer but should be eqivalent
 
-    return out_tree
-
-    # for k in w_mags.keys()[-1:]:
-    # _, unravel_fn = jax.flatten_util.ravel_pytree(w_mags)
-    # first_layer = w_mags.pop(w_mags.keys()[0]) # Pop first layer
-    # return unravel_fn(jnp.concatenate((flat_ws[1:], jnp.array([jnp.nan])))) # Offset and nan last layer as no weights out of output layer
+    keys = list(w_mags.keys())
+    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
 
 
 def process_params(params: FrozenDict):
-    """
-    TODO: LayerNorm layers etc have 'scale' instead of kernelk so skip and add back later
-    """
     out_layer_name = "out_layer"
 
     _params = deepcopy(params)  # ["params"]
@@ -223,7 +210,11 @@ def process_params(params: FrozenDict):
     weights = {}
 
     for layer_name in _params.keys():
-        # if not "kernel"  in _params[layer_name].keys():
+        # For layer norm etc
+        if not ("kernel" in _params[layer_name].keys()):
+            excluded.update({layer_name: _params[layer_name]})
+            continue
+
         bias[layer_name] = _params[layer_name].pop("bias")
         weights[layer_name] = _params[layer_name].pop("kernel")
 
@@ -262,6 +253,7 @@ def continual_backprop(
             **kwargs,
         )
 
+    @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
         state: optax.OptState,
@@ -273,7 +265,6 @@ def continual_backprop(
         ) -> Tuple[optax.Updates, CBPOptimState]:
             weights, bias, out_w_mag, excluded = process_params(params)
 
-            # because we need the next layers weight magnitude
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
@@ -294,9 +285,6 @@ def continual_backprop(
                 ),
                 _utility,
                 state.ages,
-                # state.decay_rate,
-                # state.maturity_threshold,
-                # state.replacement_rate,
             )
 
             # reset weights given mask
@@ -305,7 +293,6 @@ def continual_backprop(
             )
 
             # reset bias given mask
-            # breakpoint()
             _bias = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
                 reset_mask,
@@ -334,7 +321,9 @@ def continual_backprop(
                 _logs[layer_name]["avg_age"] = avg_ages[layer_name]
                 _logs[layer_name]["nodes_reset"] = reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(ages=_ages, rng=new_rng, logs=_logs, utilities=_utility)
+            new_state = state.replace(
+                ages=_ages, rng=new_rng, logs=_logs, utilities=_utility
+            )
             new_params.update(excluded)  # TODO
 
             return {"params": new_params}, (new_state,)  # For now
@@ -450,4 +439,14 @@ def continual_backprop(
         #
         # elif self.cbp_state.maturity_threshold == 0:
         #     assert jax.tree.map(lambda p1, p2: not jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
+
+    # out_tree = {
+    #     "dense1": w_mags["dense2"],  # [128,]
+    #     "dense2": w_mags["dense3"],  # [128,]
+    #     "dense3": w_mags["out_layer"],
+    # }  # [128,]
+    # for k in w_mags.keys()[-1:]:
+    # _, unravel_fn = jax.flatten_util.ravel_pytree(w_mags)
+    # first_layer = w_mags.pop(w_mags.keys()[0]) # Pop first layer
+    # return unravel_fn(jnp.concatenate((flat_ws[1:], jnp.array([jnp.nan])))) # Offset and nan last layer as no weights out of output layer
 """

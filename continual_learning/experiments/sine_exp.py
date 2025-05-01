@@ -29,8 +29,8 @@ METHODS = [
     "adamw",
     "layer_norm",
     "layer_norm_wd",
-    # "layer_norm_cbp",
-    # "layer_norm_cbplnwd",
+    "layer_norm_cbp",
+    "layer_norm_cbplnwd",
     "all",
 ]
 
@@ -551,6 +551,7 @@ if __name__ == "__main__":
         print("--- Running in DEBUG mode ---")
         # Example: import bpdb; bpdb.set_trace()
         with jax.disable_jit() if not args.jit else nullcontext():
+            print("!! disabled jit !!")
             metrics = continual_sine_learning(
                 num_phase_shifts=args.shifts,
                 epochs_per_phase=args.epochs,

@@ -16,7 +16,7 @@ gym.register(
     id="ContinualAnt-v0",
     entry_point=f"{__name__}:ContinualAntEnv",
     max_episode_steps=1000,
-    kwargs={"change_friction_every": 2_000_000},
+    kwargs={"change_every": 2_000_000},
 )
 
 
