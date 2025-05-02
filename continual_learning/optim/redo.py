@@ -16,32 +16,6 @@ from dataclasses import field
 
 import continual_learning.optim.utils as utils
 
-"""
-Count = 15
-
-:: Testing ::
-  * See testing list in test_reset.py
-
-:: Experiments ::
-  * Implement SGDW as for some reason it's not in https://optax.readthedocs.io/en/latest/api/optimizers.html
-  * Make continual task sequence sequential i.e. [1,2,3] instead of random [1,3,2] (SlipperyAnt and sine exp)
-  * Test the ppo continual env more/ guage performance of base agent in comparison to lop results
-  * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
-
-:: Implementation ::
-  * Implement accumulated nodes to reset for inexact division by replacement rate
-  * Additional logging
-  * Link with continual time-delays
-
-:: Errors ::
-  * Replacement rate of 0 gives worse loss than adam, should be equal
-  * Assert statements throughout, check mask is always false when replacement rate is 0 and n_to_replace is also always zero etc same with maturity_threshold
-
-:: Errors ::
- * Is utility a good measure/ do we outperform random weight reinitialisation?
-"""
-
-
 @dataclass
 class CBPOptimState:
     # Things you shouldn't really mess with

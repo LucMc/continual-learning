@@ -2,7 +2,8 @@ from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
-from jaxtyping import Array, Float, Bool, PRNGKeyArray, PyTree
+from jaxtyping import Array, Float, Bool, PRNGKeyArray, PyTree, jaxtyped, TypeCheckError, Scalar, Int
+from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
 from typing import Tuple
 from chex import dataclass
@@ -17,6 +18,11 @@ from dataclasses import field
 import continual_learning.optim.utils as utils
 
 """
+TODO:
+ * Typechecking with jaxtyping
+ * Actual optim not ts
+ * Clip ages
+
 Count = 15
 
 :: Testing ::
@@ -43,9 +49,9 @@ Count = 15
 
 
 @dataclass
+@jaxtyped(typechecker=typechecker)
 class CBPOptimState:
-    # Things you shouldn't really mess with
-    initial_weights: FrozenDict
+    initial_weights: PyTree[Float[Array, '...']]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
@@ -113,12 +119,13 @@ class CBPTrainState(TrainState):
 
 
 # -------------- CBP Weight reset ---------------
+@jaxtyped(typechecker=typechecker)
 def reset_weights(
-    reset_mask: Float[Array, "#neurons"],
-    layer_w: Float[Array, "#weights"],
-    key_tree: FrozenDict,
-    initial_weights: FrozenDict,
-    bound: float = 0.01,
+    reset_mask: PyTree[Bool[Array, '#neurons']],
+    layer_w: PyTree[Float[Array, '...']],
+    key_tree: PyTree[PRNGKeyArray],
+    initial_weights: PyTree[Float[Array, '...']],
+    bound: Float[Array, ""] = 0.01,
 ):
     layer_names = list(reset_mask.keys())
     logs = {}
@@ -158,11 +165,12 @@ def reset_weights(
     return layer_w, logs
 
 
-def get_updated_utility(
+@jaxtyped(typechecker=typechecker)
+def get_updated_utility( # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
-    features: Float[Array, "#neurons"],
-    decay_rate: float = 0.9,
+    features: Float[Array, "#batch #neurons"],
+    decay_rate: Float[Array, ""] = 0.9,
 ):
     # Remove batch dim from some inputs just in case
     updated_utility = (
@@ -172,11 +180,12 @@ def get_updated_utility(
 
 
 # -------------- lowest utility mask ---------------
+@jaxtyped(typechecker=typechecker)
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
-    maturity_threshold: float = 100,
-    replacement_rate=0.01,
+    maturity_threshold: Int[Array, ""] = 100,
+    replacement_rate: Float[Array, ""] = 0.01,
 ) -> Bool[Array, "#neurons"]:
     maturity_mask = (
         ages > maturity_threshold
@@ -187,6 +196,7 @@ def get_reset_mask(
     return k_masked_utility
 
 
+@jaxtyped(typechecker=typechecker)
 @jax.jit
 def get_out_weights_mag(weights):
     """TODO: Make this not hardcoded"""
@@ -198,7 +208,8 @@ def get_out_weights_mag(weights):
     return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
 
 
-def process_params(params: FrozenDict):
+@jaxtyped(typechecker=typechecker)
+def process_params(params: PyTree):
     out_layer_name = "out_layer"
 
     _params = deepcopy(params)  # ["params"]
@@ -229,6 +240,7 @@ def process_params(params: FrozenDict):
 
 
 # -------------- Main CBP Optimiser body ---------------
+@jaxtyped(typechecker=typechecker)
 def continual_backprop(
     util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
@@ -256,9 +268,9 @@ def continual_backprop(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: optax.OptState,
+        state: CBPOptimState,
         params: optax.Params | None = None,
-        features: PyTree | None = None,
+        features: Array | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
         def _continual_backprop(
             updates: optax.Updates,

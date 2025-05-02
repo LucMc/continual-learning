@@ -1,3 +1,12 @@
+"""
+TODO:
+ - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
+ param directly (less to change when chaning n_envs/ more intuitive)
+ - Test w/ multiple envs?
+ - Test w/ changing constant delays too
+ - Add logs for env delay/ friction - i.e. in info and add info
+"""
+
 import enum
 from typing import Tuple, Literal
 from chex import dataclass
@@ -26,8 +35,8 @@ from continual_learning.nn import (
 )
 from continual_learning.optim.continual_backprop import CBPTrainState
 from continual_learning.utils.wrappers_rd import (
-    ContinualRandomIntervalDelayWrapper,
-    GymContinualIntervalDelayWrapper,
+    # ContinualRandomIntervalDelayWrapper,
+    ContinualIntervalDelayWrapper,
 )
 
 # import time
@@ -35,14 +44,6 @@ from continual_learning.utils.wrappers_rd import (
 from jaxtyping import jaxtyped, TypeCheckError
 from beartype import beartype as typechecker
 
-"""
-TODO:
- - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
- param directly (less to change when chaning n_envs/ more intuitive)
- - Test w/ multiple envs?
- - Test w/ changing constant delays too
- - Add logs for env delay/ friction - i.e. in info and add info
-"""
 
 
 @dataclass(frozen=True)
@@ -326,12 +327,12 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             change_every = env_args.pop("change_every")
             env = gym.make(ppo_agent.env_id, **env_args)
             # env = ContinualRandomIntervalDelayWrapper(
-            env = GymContinualIntervalDelayWrapper(
+            env = ContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
                 obs_delay_range=range(0, 6),
                 act_delay_range=range(0, 6),
-                random_delays=False # TODO: Better delay settings
+                delay_type="incremental" # TODO: Better delay settings
             )
 
         else:
@@ -464,12 +465,12 @@ def main(config: Config):
 
     actor_key, value_key, key = random.split(key, num=3)
     if ppo_agent.layer_norm:
-        print(":: Using LayerNorm layers (lr *= 2) ::")
+        print(":: Using LayerNorm layers (lr *= 1.5) ::")
         actor_net = ActorNetLayerNorm(
             envs.action_space.shape[-1]
         )  # Have these as options
         value_net = ValueNetLayerNorm()
-        learning_rate = ppo_agent.learning_rate*2
+        learning_rate = ppo_agent.learning_rate*1.5
     else:
         print(":: Using standard architecture ::")
         actor_net = ActorNet(envs.action_space.shape[-1])  # Have these as options
@@ -560,7 +561,7 @@ def main(config: Config):
 
     # Close stuff
     if ppo_agent.log:
-        if ppo_agent.log_video_every:
+        if ppo_agent.log_video_every > 0:
             print("[ ] Uploading Videos ...", end="\r")
             for video_name in os.listdir(video_folder):
                 print("Check line bellow")
