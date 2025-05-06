@@ -1,5 +1,6 @@
 """
 TODO:
+ - Remember the total delay subtly influences things as it affects the total action buf size
  - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
  param directly (less to change when chaning n_envs/ more intuitive)
  - Test w/ multiple envs?
@@ -45,7 +46,6 @@ from jaxtyping import jaxtyped, TypeCheckError
 from beartype import beartype as typechecker
 
 
-
 @dataclass(frozen=True)
 class Config:
     """All the options for the experiment, all accessable within PPO class"""
@@ -79,7 +79,7 @@ class Config:
 class PPO(Config):
     buffer_size: int = 2048
 
-    @jaxtyped(typechecker=typechecker)
+    # @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames=["self"])
     def update(
         self,
@@ -191,7 +191,7 @@ class PPO(Config):
             },
         )
 
-    @jaxtyped(typechecker=typechecker)
+    # @jaxtyped(typechecker=typechecker)
     def get_rollout(
         self,
         actor_ts: TrainState,
@@ -281,7 +281,7 @@ class PPO(Config):
             returns,
         ), rollout_info
 
-    @jaxtyped(typechecker=typechecker)
+    # @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames="self")
     def compute_returns_and_advantage(
         self,
@@ -330,8 +330,8 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             env = ContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
-                obs_delay_range=range(0, 6),
-                act_delay_range=range(0, 6),
+                obs_delay_range=range(0, 1),
+                act_delay_range=range(0, 1),
                 delay_type="incremental" # TODO: Better delay settings
             )
 

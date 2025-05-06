@@ -170,6 +170,7 @@ class RandomDelayWrapper(gym.Wrapper):
         next_action_idx = next(
             i for i, t in enumerate(self.arrival_times_actions) if t <= self.t
         )
+
         self.prev_action_idx = next_action_idx
         self.next_action = self.past_actions[next_action_idx]
         # print(f"DEBUG: next_action_idx:{next_action_idx}, prev_action_idx:{prev_action_idx}")
@@ -239,47 +240,57 @@ class ContinualIntervalDelayWrapper(RandomDelayWrapper):
 
         # Delay ranges
         self.delay_type = delay_type
-        self.overall_act_delay_range = act_delay_range  # Now in RD Wrapper
+        self.overall_act_delay_range = act_delay_range
         self.overall_obs_delay_range = obs_delay_range
 
-        # self.current_act_delay = act_delay_range.start
         self.n_changes = 0
 
-        self.obs_delay_range = self.get_interval(obs_delay_range)
-        self.act_delay_range = self.get_interval(act_delay_range)
+        # Determine initial ranges BEFORE calling super().__init__
+        self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
+        self.act_delay_range = self.get_interval(self.overall_act_delay_range)
 
-        print(f"obs delay is: {self.obs_delay_range}")
-        print(f"act delay is: {self.act_delay_range}")
+        print(f"Initial obs delay is: {self.obs_delay_range}")
+        print(f"Initial act delay is: {self.act_delay_range}")
         print(f"changing every: {change_every}")
-        print(f"Delay type: {delay_type}")
+        print(f"Delay type: {self.delay_type}")
 
-        self.n_obs_delays = len(self.overall_obs_delay_range)
-        self.n_act_delays = len(self.overall_act_delay_range)
-
-        # Initialise RandomDelayWrapper
+        # Initialise RandomDelayWrapper with INITIAL ranges
         super().__init__(env, self.obs_delay_range, self.act_delay_range, **init_kwargs)
+
+        # Target length for padding should match the space definition
+        self.target_act_buf_tuple_len = (
+            self.overall_obs_delay_range.stop
+            + self.overall_act_delay_range.stop
+            - 1
+        )
+
+        # Calculate the flattened size correctly (handle multi-dimensional actions)
+        action_element_size = np.prod(self.env.action_space.shape) if self.env.action_space.shape else 1
+        flat_act_buf_len = self.target_act_buf_tuple_len * action_element_size
+
+        # Define the final observation space based on OVERALL ranges
+        base_obs_shape = self.env.observation_space.shape # Get shape from underlying env
+        if not base_obs_shape: # Handle scalar observation spaces
+             base_obs_len = 1
+        else:
+             base_obs_len = np.prod(base_obs_shape)
+
+
+        self.observation_space = Box(
+            shape=(
+                base_obs_len + flat_act_buf_len + 3, # base_obs + flat_padded_act_buf + alpha/kappa/beta
+            ),
+            low=-np.inf,
+            high=np.inf,
+            dtype=np.float32, # Ensure consistent dtype
+        )
+        print("Final observation_space shape:", self.observation_space.shape)
+        print("action buffer tuple length:", self.target_act_buf_tuple_len)
+        print("action buffer length (flat):", flat_act_buf_len)
 
         # Other
         self.time_steps = 0
         self.change_every = change_every
-
-        act_buf_len = np.sum(
-            [self.env.action_space.shape]
-            * (
-                self.overall_obs_delay_range.stop
-                + self.overall_act_delay_range.stop
-                - 1
-            )
-        )
-        self.observation_space = Box(
-            shape=(
-                self.observation_space[0].shape[0] + act_buf_len + 3,
-            ),  # +3 kappa etc
-            low=-np.inf,
-            high=np.inf,
-            dtype=np.float32,
-        )
-        print("self.observation_space", self.observation_space.shape)
 
     def get_interval(self, interval_range):
         if self.delay_type == "random":
@@ -287,81 +298,156 @@ class ContinualIntervalDelayWrapper(RandomDelayWrapper):
                 "obs delay must be sufficiently large to enable sub-interval"
             )
             nums = []
-
             while len(set(nums)) != 2:  # Pick 2 different numbers
                 nums = [
                     random.randint(min(interval_range), max(interval_range)),
                     random.randint(min(interval_range), max(interval_range)),
                 ]
-            return range(min(nums), max(nums))
-        
+            return range(min(nums), max(nums)+1) # Ensure range includes max num chosen
+
         elif self.delay_type == "constant":
             delay = random.choice(interval_range)
             return range(delay, delay + 1)
 
         elif self.delay_type == "incremental":
-            delay = interval_range.start +self.n_changes
-            delay_clipped = min(interval_range.stop-1, self.n_changes)
-            return range(delay_clipped, self.n_changes + 1)
-
+            # Ensure delay stays within overall bounds
+            max_delay = interval_range.stop -1
+            current_delay = min(interval_range.start + self.n_changes, max_delay)
+            # Range is [current_delay, current_delay + 1) -> just current_delay
+            return range(current_delay, current_delay + 1)
         else:
-            raise f"Invalid delay type: {self.delay_type}"
+            raise ValueError(f"Invalid delay type: {self.delay_type}")
+
 
     def get_padded_act_buf(self, recieved_obs: tuple):
-        # overall_start = self.overall_act_delay_range.start + self.overall_obs_delay_range.start
-        overall_stop = (
-            self.overall_act_delay_range.stop + self.overall_obs_delay_range.stop
-        )
+        # recieved_obs[1] is the tuple of past actions returned by super().receive_observation
+        # Its length is determined by the parent's maxlen, based on INITIAL ranges.
+        actual_actions_tuple = recieved_obs[1]
+        actual_len = len(actual_actions_tuple)
 
-        # int_start = self.act_delay_range.start + self.obs_delay_range.start
-        int_stop = self.act_delay_range.stop + self.obs_delay_range.stop
+        # Calculate padding needed to reach the target length defined by OVERALL ranges
+        padding_needed = self.target_act_buf_tuple_len - actual_len
 
-        back_padding = tuple(
-            np.zeros(self.env.action_space.shape)
-            for _ in range(overall_stop - int_stop)
-        )
+        if padding_needed < 0:
+            # This implies the initial ranges were larger than the overall ranges, shouldn't happen with correct setup
+            print(f"Warning: Padding needed is negative ({padding_needed}). Target len: {self.target_act_buf_tuple_len}, Actual len: {actual_len}. Clipping to zero.")
+            padding_needed = 0
+            # Or raise error: raise ValueError("Initial ranges exceed overall ranges, padding calculation failed.")
 
-        padded_act_buf = recieved_obs[1] + back_padding
-        act_buf_flat = np.hstack(padded_act_buf).astype(np.float32)
-        return act_buf_flat
+        # Create padding elements with correct shape and dtype
+        # Use np.zeros matching the action space element shape and dtype
+        padding_element = np.zeros(self.env.action_space.shape, dtype=self.env.action_space.dtype)
+        back_padding = tuple(padding_element for _ in range(padding_needed))
+
+        # Combine actual actions and padding
+        padded_act_buf_tuple = actual_actions_tuple + back_padding
+
+        # Flatten the buffer correctly
+        # Use hstack for simple Box spaces, might need reshape/concatenate for more complex spaces
+        # Ensure consistent dtype before flattening/stacking if actions aren't float32
+        try:
+            # Convert elements to float32 numpy arrays before stacking
+            elements_to_stack = [np.array(a, dtype=np.float32).flatten() for a in padded_act_buf_tuple]
+            if not elements_to_stack: # Handle case where buffer might be empty
+                 act_buf_flat = np.array([], dtype=np.float32)
+            else:
+                 act_buf_flat = np.concatenate(elements_to_stack)
+                 # Alternative using hstack if elements are already 1D numpy arrays
+                 # act_buf_flat = np.hstack([np.array(a, dtype=np.float32) for a in padded_act_buf_tuple]).astype(np.float32)
+
+        except ValueError as e:
+            print("Error during action buffer flattening:")
+            print("Action space shape:", self.env.action_space.shape)
+            print("Padded action tuple length:", len(padded_act_buf_tuple))
+            # print("Elements:", [a.shape for a in padded_act_buf_tuple]) # Debug shapes
+            raise e
+
+
+        # Optional check: Verify flattened shape (good for debugging)
+        # action_element_size = np.prod(self.env.action_space.shape) if self.env.action_space.shape else 1
+        # expected_flat_len = self.target_act_buf_tuple_len * action_element_size
+        # if act_buf_flat.shape[0] != expected_flat_len:
+        #      print(f"Warning: Padded action buffer has wrong flat shape. Got {act_buf_flat.shape[0]}, expected {expected_flat_len}")
+             # raise ValueError("Flattened action buffer shape mismatch")
+
+        return act_buf_flat.astype(np.float32) # Ensure final dtype
+
+    def _format_observation(self, recieved_obs):
+        """Helper function to format observation for both step and reset."""
+        # recieved_obs = (m, past_actions_tuple, alpha, kappa, beta)
+        base_obs = recieved_obs[0].astype(np.float32).flatten() # Flatten base obs too for consistency
+        padded_act_buf = self.get_padded_act_buf(recieved_obs)
+        delay_info = np.array(recieved_obs[2:], dtype=np.float32) # alpha, kappa, beta
+
+        final_obs = np.concatenate((base_obs, padded_act_buf, delay_info))
+
+        # Final check on shape
+        if final_obs.shape != self.observation_space.shape:
+             raise ValueError(f"Final observation shape mismatch! Got {final_obs.shape}, expected {self.observation_space.shape}. "
+                              f"Base: {base_obs.shape}, PadAct: {padded_act_buf.shape}, Delay: {delay_info.shape}")
+
+        return final_obs
 
     def step(self, action, **kwargs):
         self.time_steps += 1
 
-        recieved_obs, *aux = super().step(
-            action
-        )  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
-        padded_act_buf = self.get_padded_act_buf(recieved_obs)
+        # Call parent step
+        recieved_obs_tuple, r, term, trun, info = super().step(action)
+        # recieved_obs_tuple format: (m, past_actions_tuple, alpha, kappa, beta)
 
-        delay_info = np.array(recieved_obs[2:], dtype=np.float32)
-        final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
+        # Format the observation using the helper
+        final_obs = self._format_observation(recieved_obs_tuple)
 
-        return (final_obs, *aux)
+        return final_obs, r, term, trun, info # Return consistently shaped observation
 
     def reset(self, seed=None, **reset_kwargs):
-        if self.time_steps >= self.change_every:
-            # Debatable weather to reset everything manually or just reinit, seems simpler
-            self.n_changes += 1
-            self.time_steps = 0
+        """ Probably don't need all of this but I'm just being cautious.
+        Perhaps remove one of the super().reset()
+        todo: try to remove first line here
+        """
+        
+        super().reset(seed=seed, **reset_kwargs) # Call parent reset FIRST to handle its state/env reset
 
+        if self.time_steps >= self.change_every:
+            print("-" * 20)
+            print(f"Changing delay interval at step {self.time_steps}")
+            self.n_changes += 1
+            self.time_steps = 0 # Reset counter AFTER check
+
+            # Reset vars from RandomDelayWrapper
+            self.t = 0
+            self.done_signal_sent = False
+            self.next_action = None
+            self.cum_rew_actor = 0.0
+            self.cum_rew_brain = 0.0
+            self.prev_action_idx = 0
+
+            # Recalculate CURRENT delay ranges
             self.obs_delay_range = self.get_interval(self.overall_obs_delay_range)
             self.act_delay_range = self.get_interval(self.overall_act_delay_range)
 
-            self.past_actions.clear()
-            self.past_observations.clear()
-            self.arrival_times_actions.clear()
-            self.arrival_times_observations.clear()
+            print(f"New obs delay range: {self.obs_delay_range}")
+            print(f"New act delay range: {self.act_delay_range}")
+            print("-" * 20)
 
-            # Does this happen automatically?
-            super().obs_delay_range = self.obs_delay_range
-            super().act_delay_range = self.act_delay_range
+            # Re-clear buffers (parent's reset already does some clearing/refilling)
+            # Clearing here ensures consistency if parent doesn't clear everything needed.
+            self.past_actions = deque(maxlen=self.obs_delay_range.stop + self.act_delay_range.stop)
+            self.past_observations = deque(maxlen=self.obs_delay_range.stop)
+            self.arrival_times_actions = deque(maxlen=self.act_delay_range.stop)
+            self.arrival_times_observations = deque(maxlen=self.obs_delay_range.stop)
 
-        recieved_obs, reset_info = super().reset(**reset_kwargs)
-        padded_act_buf = self.get_padded_act_buf(recieved_obs)
+            # Call parent reset AGAIN after updating ranges and clearing buffers
+            # to ensure it refills buffers correctly based on the *new* logic/ranges
+            # for sampling initial actions/observations if its reset logic uses them.
+            recieved_obs_tuple, reset_info = super().reset(seed=seed, **reset_kwargs)
 
-        delay_info = np.array(recieved_obs[2:], dtype=np.float32)
-        final_obs = np.concatenate((recieved_obs[0], padded_act_buf, delay_info))
-        return final_obs, reset_info
+        else:
+             recieved_obs_tuple, reset_info = super().reset(seed=seed, **reset_kwargs)
+
+        final_obs = self._format_observation(recieved_obs_tuple)
+
+        return final_obs, reset_info # Return consistently shaped observation
 
 
 """

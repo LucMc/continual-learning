@@ -1,3 +1,4 @@
+import time
 from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
@@ -18,14 +19,10 @@ import continual_learning.optim.utils as utils
 
 @dataclass
 class CBPOptimState:
-    # Things you shouldn't really mess with
     initial_weights: FrozenDict
-    utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
-    ages: Array
-    util_type_id: int
-    accumulated_features_to_replace: int
 
+    timestep: int = 0
     rng: PRNGKeyArray  # = random.PRNGKey(0)
     step_size: float = 0.001
     replacement_rate: float = 0.01

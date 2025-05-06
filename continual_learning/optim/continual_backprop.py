@@ -19,9 +19,8 @@ import continual_learning.optim.utils as utils
 
 """
 TODO:
- * Typechecking with jaxtyping
- * Actual optim not ts
  * Clip ages
+ * Reset adam/optim state for reset nodes
 
 Count = 15
 
