@@ -233,7 +233,7 @@ class ContinualIntervalDelayWrapper(RandomDelayWrapper):
         change_every: int = 10_000,
         obs_delay_range=range(0, 4),
         act_delay_range=range(0, 4),
-        delay_type: Literal["random", "constant", "incremental"] = "incremental",
+        delay_type: Literal["random", "random_incremental", "constant", "incremental"] = "incremental",
         **init_kwargs,
     ):
         self.init_kwargs = init_kwargs

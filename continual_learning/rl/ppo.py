@@ -1,4 +1,7 @@
 """
+LayerNorm reduces grads, so increase lr, delay increases grads so decrease lr
+would be nice to adjust lr automatically to get the same grad curve under each condition...
+
 TODO:
  - Remember the total delay subtly influences things as it affects the total action buf size
  - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
@@ -67,7 +70,7 @@ class Config:
     vf_coef: float = 0.5  # balance vf loss magnitude
     log_video_every: int = -1  # save videos locally/on wandb (-1 for no logging)
     log: bool = False  # Log with wandb
-    layer_norm: bool = True  # Weather or not to use LayerNorm layers after activations
+    layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
     cbp = False  # Weather or not to use continual backpropergation
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
     run_name: str = ""  # Postfix name for training run
@@ -330,9 +333,9 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             env = ContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
-                obs_delay_range=range(0, 1),
-                act_delay_range=range(0, 1),
-                delay_type="incremental" # TODO: Better delay settings
+                obs_delay_range=range(0, 8),
+                act_delay_range=range(0, 8),
+                delay_type="random" # TODO: Better delay settings
             )
 
         else:
@@ -464,18 +467,17 @@ def main(config: Config):
     current_global_step = 0
 
     actor_key, value_key, key = random.split(key, num=3)
+
     if ppo_agent.layer_norm:
-        print(":: Using LayerNorm layers (lr *= 1.5) ::")
+        print(":: Using LayerNorm layers ::")
         actor_net = ActorNetLayerNorm(
             envs.action_space.shape[-1]
         )  # Have these as options
         value_net = ValueNetLayerNorm()
-        learning_rate = ppo_agent.learning_rate*1.5
     else:
         print(":: Using standard architecture ::")
         actor_net = ActorNet(envs.action_space.shape[-1])  # Have these as options
         value_net = ValueNet()
-        learning_rate = ppo_agent.learning_rate
 
     # Select optimiser
     if ppo_agent.optim == "adam":
@@ -493,8 +495,8 @@ def main(config: Config):
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),
         optax.inject_hyperparams(tx)(
             learning_rate=optax.linear_schedule(  # Does this have an adverse effect of continual learning?
-                init_value=learning_rate,
-                end_value=learning_rate / 10,
+                init_value=ppo_agent.learning_rate,
+                end_value=ppo_agent.learning_rate / 10,
                 transition_steps=2_000_000,  # ppo_agent.training_steps
             ),
         ),
