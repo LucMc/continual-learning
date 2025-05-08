@@ -30,16 +30,16 @@ def compute_plasticity_metrics(old_params, new_params):
             abs_changes = jnp.abs(new_weights - old_weights)
 
             # Per-layer metrics
-            layer_metrics[layer_name] = {
-                "mean_change": float(abs_changes.mean()),
-                "max_change": float(abs_changes.max()),
-                "positive_changes": float(
-                    (new_weights > old_weights).sum() / old_weights.size
-                ),
-                "negative_changes": float(
-                    (new_weights < old_weights).sum() / old_weights.size
-                ),
-            }
+            # layer_metrics[layer_name] = {
+            #     "mean_change": float(abs_changes.mean()),
+            #     "max_change": float(abs_changes.max()),
+            #     "positive_changes": float(
+            #         (new_weights > old_weights).sum() / old_weights.size
+            #     ),
+            #     "negative_changes": float(
+            #         (new_weights < old_weights).sum() / old_weights.size
+            #     ),
+            # }
 
             # Update totals
             total_abs_change += jnp.sum(abs_changes)
@@ -47,7 +47,7 @@ def compute_plasticity_metrics(old_params, new_params):
 
     # Overall metrics
     metrics["total_plasticity"] = float(total_abs_change / max(total_weights, 1))
-    metrics["layer_metrics"] = layer_metrics
+    # metrics["layer_metrics"] = layer_metrics
 
     return metrics
 

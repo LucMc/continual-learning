@@ -4,7 +4,7 @@ would be nice to adjust lr automatically to get the same grad curve under each c
 
 TODO:
  - Remember the total delay subtly influences things as it affects the total action buf size
- - Change from calculating mini-batches based on batch_size to using n_mini_batches a 
+ - Change from calculating mini-batches based on batch_size to using n_mini_batches a
  param directly (less to change when chaning n_envs/ more intuitive)
  - Test w/ multiple envs?
  - Test w/ changing constant delays too
@@ -38,6 +38,7 @@ from continual_learning.nn import (
     ValueNetLayerNorm,
 )
 from continual_learning.optim.continual_backprop import CBPTrainState
+from continual_learning.utils.miscellaneous import compute_plasticity_metrics
 from continual_learning.utils.wrappers_rd import (
     # ContinualRandomIntervalDelayWrapper,
     ContinualIntervalDelayWrapper,
@@ -75,7 +76,10 @@ class Config:
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
     run_name: str = ""  # Postfix name for training run
     delay: bool = False
-    changes: int = 10 # How many env changes for continual learning (if using ContinualAnt-v0 or delay=True)
+    delay_type: Literal["random", "random_incremental", "constant", "incremental"] = (
+        "incremental"
+    )
+    changes: int = 10  # How many env changes for continual learning (if using ContinualAnt-v0 or delay=True)
 
 
 @dataclass(frozen=True)
@@ -333,16 +337,17 @@ def make_env(ppo_agent: PPO, idx: int, video_folder: str = None, env_args: dict 
             env = ContinualIntervalDelayWrapper(
                 env,
                 change_every=change_every,
-                obs_delay_range=range(0, 8),
-                act_delay_range=range(0, 8),
-                delay_type="random" # TODO: Better delay settings
+                obs_delay_range=range(0, 4),
+                act_delay_range=range(0, 4),
+                delay_type=ppo_agent.delay_type,
             )
 
         else:
             env = gym.make(ppo_agent.env_id, **env_args)
+
         # env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        # env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.ClipAction(env)
         # env = gym.wrappers.NormalizeObservation(env)
         # env = gym.wrappers.NormalizeReward(env, gamma=0.99) # TODO: replace with actual gamma
         if ppo_agent.log_video_every > 0 and idx == 0:
@@ -398,14 +403,21 @@ def outer_loop(
         )
         return (actor_ts, value_ts, key), info
 
-    (actor_ts, value_ts, key), info = jax.lax.scan(
+    (_actor_ts, _value_ts, key), info = jax.lax.scan(
         inner_loop, (actor_ts, value_ts, key), jnp.arange(ppo_agent.epochs)
     )
 
     # remove to see over epochs, or change to min/max if curious
     # TODO: Is info over last epoch better?
-    info = jax.tree.map(lambda x: x.mean(), info)
-    return actor_ts, value_ts, key, info
+    act_plasticity = compute_plasticity_metrics(
+        actor_ts.params, _actor_ts.params, ppo_agent.learning_rate, label="actor"
+    )
+    val_plasticity = compute_plasticity_metrics(
+        value_ts.params, _value_ts.params, ppo_agent.learning_rate, label="critic"
+    )
+
+    info = jax.tree.map(lambda x: x.mean(), info) | act_plasticity | val_plasticity
+    return _actor_ts, _value_ts, key, info
 
 
 def main(config: Config):
@@ -480,16 +492,13 @@ def main(config: Config):
         value_net = ValueNet()
 
     # Select optimiser
-    if ppo_agent.optim == "adam":
-        tx = optax.adam
-    if ppo_agent.optim == "adamw":
-        tx = optax.adamw
-    if ppo_agent.optim == "sgd":
-        tx = optax.sgd
-    if ppo_agent.optim == "muon":
-        tx = optax.contrib.muon
-    if ppo_agent.optim == "muonw":
-        tx = partial(optax.contrib.muon, weight_decay=0.0001)
+    # fmt: off
+    if ppo_agent.optim == "adam": tx = optax.adam
+    if ppo_agent.optim == "adamw": tx = optax.adamw
+    if ppo_agent.optim == "sgd": tx = optax.sgd
+    if ppo_agent.optim == "muon": tx = optax.contrib.muon
+    if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.0001)
+    # fmt: on
 
     opt = optax.chain(
         optax.clip_by_global_norm(ppo_agent.max_grad_norm),

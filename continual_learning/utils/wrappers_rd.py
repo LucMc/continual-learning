@@ -227,6 +227,10 @@ class RandomDelayWrapper(gym.Wrapper):
 
 
 class ContinualIntervalDelayWrapper(RandomDelayWrapper):
+    """
+    Under this formulation, is the distiction between overall_obs_delay_range and obs_delay_range nessesary?
+    """
+
     def __init__(
         self,
         env,
@@ -315,6 +319,12 @@ class ContinualIntervalDelayWrapper(RandomDelayWrapper):
             current_delay = min(interval_range.start + self.n_changes, max_delay)
             # Range is [current_delay, current_delay + 1) -> just current_delay
             return range(current_delay, current_delay + 1)
+        elif self.delay_type == "random_incremental":
+            # Ensure delay stays within overall bounds
+            max_delay = interval_range.stop -1
+            current_delay = min(interval_range.start + self.n_changes, max_delay)
+            # Range is [current_delay, current_delay + 1) -> just current_delay
+            return range(interval_range.start, current_delay + 1)
         else:
             raise ValueError(f"Invalid delay type: {self.delay_type}")
 

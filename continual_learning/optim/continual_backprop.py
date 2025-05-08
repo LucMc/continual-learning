@@ -208,7 +208,7 @@ def get_out_weights_mag(weights):
 
 
 @jaxtyped(typechecker=typechecker)
-def process_params(params: PyTree):
+def process_params_old(params: PyTree):
     out_layer_name = "out_layer"
 
     _params = deepcopy(params)  # ["params"]
@@ -227,6 +227,35 @@ def process_params(params: PyTree):
 
         bias[layer_name] = _params[layer_name].pop("bias")
         weights[layer_name] = _params[layer_name].pop("kernel")
+
+    out_w_mag = get_out_weights_mag(weights)
+
+    # Remove output layer
+    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
+    weights.pop(out_layer_name)
+    bias.pop(out_layer_name)
+
+    return weights, bias, out_w_mag, excluded
+
+def process_params(params: PyTree):
+    out_layer_name = "out_layer"
+    # Removed deep copy of params however be careful as changes to `weights` and `bias` are
+    # silently updating params
+
+    excluded = {
+        out_layer_name: params[out_layer_name]
+    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+    bias = {}
+    weights = {}
+
+    for layer_name in params.keys():
+        # For layer norm etc
+        if not ("kernel" in params[layer_name].keys()):
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        bias[layer_name] = params[layer_name]["bias"]
+        weights[layer_name] = params[layer_name]["kernel"]
 
     out_w_mag = get_out_weights_mag(weights)
 
