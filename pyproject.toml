@@ -26,9 +26,13 @@ dependencies = [
 [tool.ruff]
 ignore = ["F722"]
 ignore-init-module-imports = true
+line-length = 95
 
 [tool.setuptools.packages.find]
 include = ["continual_learning", "continual_learning.*"]
 
 # [tool.uv.sources]
 # metaworld = { git = "https://github.com/reginald-mclean/Metaworld", rev = "release" }
+
+[tool.black]
+line-length = 95  # Default is 88

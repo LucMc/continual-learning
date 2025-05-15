@@ -550,17 +550,18 @@ if __name__ == "__main__":
 
         print("--- Running in DEBUG mode ---")
         # Example: import bpdb; bpdb.set_trace()
-        with jax.disable_jit() if not args.jit else nullcontext():
-            print("!! disabled jit !!")
-            metrics = continual_sine_learning(
-                num_phase_shifts=args.shifts,
-                epochs_per_phase=args.epochs,
-                eval_interval=args.eval_interval,
-                save_interval=args.save_interval
-                if args.save_interval != 0
-                else float("inf"),  # Handle 0 save interval
-                **common_kwargs,
-            )
+        with jax.default_device("cpu"):
+            with jax.disable_jit() if not args.jit else nullcontext():
+                print("!! disabled jit !!")
+                metrics = continual_sine_learning(
+                    num_phase_shifts=args.shifts,
+                    epochs_per_phase=args.epochs,
+                    eval_interval=args.eval_interval,
+                    save_interval=args.save_interval
+                    if args.save_interval != 0
+                    else float("inf"),  # Handle 0 save interval
+                    **common_kwargs,
+                )
     else:
         print("--- Running in FULL experiment mode ---")
         # Adjust CBP kwargs for full run if needed

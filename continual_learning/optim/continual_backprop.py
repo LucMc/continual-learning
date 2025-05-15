@@ -2,7 +2,17 @@ from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
-from jaxtyping import Array, Float, Bool, PRNGKeyArray, PyTree, jaxtyped, TypeCheckError, Scalar, Int
+from jaxtyping import (
+    Array,
+    Float,
+    Bool,
+    PRNGKeyArray,
+    PyTree,
+    jaxtyped,
+    TypeCheckError,
+    Scalar,
+    Int,
+)
 from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
 from typing import Tuple
@@ -48,9 +58,9 @@ Count = 15
 
 
 @dataclass
-@jaxtyped(typechecker=typechecker)
+# @jaxtyped(typechecker=typechecker)
 class CBPOptimState:
-    initial_weights: PyTree[Float[Array, '...']]
+    initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
@@ -118,12 +128,12 @@ class CBPTrainState(TrainState):
 
 
 # -------------- CBP Weight reset ---------------
-@jaxtyped(typechecker=typechecker)
+# @jaxtyped(typechecker=typechecker)
 def reset_weights(
-    reset_mask: PyTree[Bool[Array, '#neurons']],
-    layer_w: PyTree[Float[Array, '...']],
+    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
     key_tree: PyTree[PRNGKeyArray],
-    initial_weights: PyTree[Float[Array, '...']],
+    initial_weights: PyTree[Float[Array, "..."]],
     bound: Float[Array, ""] = 0.01,
 ):
     layer_names = list(reset_mask.keys())
@@ -144,16 +154,10 @@ def reset_weights(
         # TODO: Check this is resetting the correct row and columns
         in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
         # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
-        _in_layer_w = jnp.where(
-            in_reset_mask, initial_weights[in_layer], layer_w[in_layer]
-        )
+        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
 
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        _out_layer_w = jnp.where(
-            out_reset_mask,
-            zero_out_weights,  # Reuse the same random weights or generate new ones if needed
-            layer_w[out_layer],
-        )
+        _out_layer_w = jnp.where(out_reset_mask, zero_out_weights, layer_w[out_layer])
         n_reset = reset_mask[in_layer].sum()
 
         layer_w[in_layer] = _in_layer_w
@@ -164,8 +168,8 @@ def reset_weights(
     return layer_w, logs
 
 
-@jaxtyped(typechecker=typechecker)
-def get_updated_utility( # Add batch dim
+# @jaxtyped(typechecker=typechecker)
+def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
     features: Float[Array, "#batch #neurons"],
@@ -179,23 +183,21 @@ def get_updated_utility( # Add batch dim
 
 
 # -------------- lowest utility mask ---------------
-@jaxtyped(typechecker=typechecker)
+# @jaxtyped(typechecker=typechecker)
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
     maturity_threshold: Int[Array, ""] = 100,
     replacement_rate: Float[Array, ""] = 0.01,
 ) -> Bool[Array, "#neurons"]:
-    maturity_mask = (
-        ages > maturity_threshold
-    )  # get nodes over maturity threshold Arr[Bool]
+    maturity_mask = ages > maturity_threshold  # get nodes over maturity threshold Arr[Bool]
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
     k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)  # bool
 
     return k_masked_utility
 
 
-@jaxtyped(typechecker=typechecker)
+# @jaxtyped(typechecker=typechecker)
 @jax.jit
 def get_out_weights_mag(weights):
     """TODO: Make this not hardcoded"""
@@ -207,40 +209,9 @@ def get_out_weights_mag(weights):
     return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
 
 
-@jaxtyped(typechecker=typechecker)
-def process_params_old(params: PyTree):
-    out_layer_name = "out_layer"
-
-    _params = deepcopy(params)  # ["params"]
-
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
-
-    for layer_name in _params.keys():
-        # For layer norm etc
-        if not ("kernel" in _params[layer_name].keys()):
-            excluded.update({layer_name: _params[layer_name]})
-            continue
-
-        bias[layer_name] = _params[layer_name].pop("bias")
-        weights[layer_name] = _params[layer_name].pop("kernel")
-
-    out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, out_w_mag, excluded
-
 def process_params(params: PyTree):
     out_layer_name = "out_layer"
     # Removed deep copy of params however be careful as changes to `weights` and `bias` are
-    # silently updating params
 
     excluded = {
         out_layer_name: params[out_layer_name]
@@ -268,7 +239,7 @@ def process_params(params: PyTree):
 
 
 # -------------- Main CBP Optimiser body ---------------
-@jaxtyped(typechecker=typechecker)
+# @jaxtyped(typechecker=typechecker)
 def continual_backprop(
     util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
@@ -308,15 +279,16 @@ def continual_backprop(
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            _utility = jax.tree.map(
-                partial(
-                    get_updated_utility,
-                    decay_rate=state.decay_rate,
-                ),
-                out_w_mag,
-                state.utilities,
-                features,
+            # vmap utility calculation over batch
+            batched_util_calculation = jax.vmap(
+                partial(get_updated_utility, decay_rate=state.decay_rate),
+                in_axes=(None, None, 0),
             )
+            _utility_batch = jax.tree.map(
+                batched_util_calculation, out_w_mag, state.utilities, features
+            )
+            _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
+
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
@@ -361,14 +333,12 @@ def continual_backprop(
                 _logs[layer_name]["avg_age"] = avg_ages[layer_name]
                 _logs[layer_name]["nodes_reset"] = reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(
-                ages=_ages, rng=new_rng, logs=_logs, utilities=_utility
-            )
+            new_state = state.replace(ages=_ages, rng=new_rng, logs=_logs, utilities=_utility)
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, (new_state,)  # For now
+            return {"params": new_params}, (new_state,)
 
-        return _continual_backprop(updates)  # updates, ContinualBackpropState()
+        return _continual_backprop(updates)
 
     return optax.GradientTransformation(init=init, update=update)
 
@@ -489,4 +459,36 @@ def continual_backprop(
     # _, unravel_fn = jax.flatten_util.ravel_pytree(w_mags)
     # first_layer = w_mags.pop(w_mags.keys()[0]) # Pop first layer
     # return unravel_fn(jnp.concatenate((flat_ws[1:], jnp.array([jnp.nan])))) # Offset and nan last layer as no weights out of output layer
+
+# @jaxtyped(typechecker=typechecker)
+def process_params_old(params: PyTree):
+    out_layer_name = "out_layer"
+
+    _params = deepcopy(params)  # ["params"]
+
+    excluded = {
+        out_layer_name: params[out_layer_name]
+    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+    bias = {}
+    weights = {}
+
+    for layer_name in _params.keys():
+        # For layer norm etc
+        if not ("kernel" in _params[layer_name].keys()):
+            excluded.update({layer_name: _params[layer_name]})
+            continue
+
+        bias[layer_name] = _params[layer_name].pop("bias")
+        weights[layer_name] = _params[layer_name].pop("kernel")
+
+    out_w_mag = get_out_weights_mag(weights)
+
+    # Remove output layer
+    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
+    weights.pop(out_layer_name)
+    bias.pop(out_layer_name)
+
+    return weights, bias, out_w_mag, excluded
+
+
 """
