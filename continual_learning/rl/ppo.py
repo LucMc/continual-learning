@@ -436,7 +436,7 @@ class PPO(Config):
 
         # Close stuff
         if ppo_agent.log:
-            if abs(ppo_agent.log_video_every - ppo_agent.rollout_steps) < ppo_agent:
+            if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log(
