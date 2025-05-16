@@ -27,7 +27,7 @@ class Config:
     training_steps: int = 500_000  # total training time-steps
     n_envs: int = 1  # number of parralel training envs
     rollout_steps: int = 64 * 20  # env steps per rollout
-    env_id: str = "LunarLanderContinuous-v3"
+    env_id: str = "Ant-v5"
     batch_size: int = 64  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches

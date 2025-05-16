@@ -200,53 +200,51 @@ class PPO(Config):
         (last_states, key), (rewards, actions, dones, log_probs, obss, stds, infos) = jax.lax.scan(
             step, (last_state, key), jnp.arange(self.rollout_steps // self.n_envs)
         )
-        print("Got here!")
-        breakpoint()
-
+        
         ## -------------------------------------------------
-        rollout_size = self.rollout_steps // self.n_envs
-
-        episode_starts = np.zeros((rollout_size, self.n_envs))
-        rewards = np.zeros((rollout_size, self.n_envs))
-        log_probs = np.zeros((rollout_size, self.n_envs))
-
-        stds = np.zeros((rollout_size,) + envs.action_space.shape)
-        obss = np.zeros((rollout_size,) + envs.observation_space.shape)
-        actions = np.zeros((rollout_size,) + envs.action_space.shape)
-        infos = []
-
-        for i in range(self.rollout_steps // self.n_envs):
-            action_key, key = random.split(key)
-            action_dist = actor_ts.apply_fn(actor_ts.params, jnp.array(last_obs))
-            action = action_dist.sample(seed=action_key)
-            log_prob = action_dist.log_prob(action)
-
-            value = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
-
-            _obs, reward, terminated, truncated, info = envs.step(np.array(action))
-
-            rewards[i] = reward
-            actions[i] = action
-            episode_starts[i] = last_episode_start
-            log_probs[i] = log_prob
-            obss[i] = last_obs
-            stds[i] = action_dist.stddev()
-            infos.append(info)
-
-            last_obs = _obs
-            last_episode_start = terminated
-
+        # rollout_size = self.rollout_steps // self.n_envs
+        #
+        # episode_starts = np.zeros((rollout_size, self.n_envs))
+        # rewards = np.zeros((rollout_size, self.n_envs))
+        # log_probs = np.zeros((rollout_size, self.n_envs))
+        #
+        # stds = np.zeros((rollout_size,) + envs.action_space.shape)
+        # obss = np.zeros((rollout_size,) + envs.observation_space.shape)
+        # actions = np.zeros((rollout_size,) + envs.action_space.shape)
+        # infos = []
+        #
+        # for i in range(self.rollout_steps // self.n_envs):
+        #     action_key, key = random.split(key)
+        #     action_dist = actor_ts.apply_fn(actor_ts.params, jnp.array(last_obs))
+        #     action = action_dist.sample(seed=action_key)
+        #     log_prob = action_dist.log_prob(action)
+        #
+        #     value = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
+        #
+        #     _obs, reward, terminated, truncated, info = envs.step(np.array(action))
+        #
+        #     rewards[i] = reward
+        #     actions[i] = action
+        #     episode_starts[i] = last_episode_start
+        #     log_probs[i] = log_prob
+        #     obss[i] = last_obs
+        #     stds[i] = action_dist.stddev()
+        #     infos.append(info)
+        #
+        #     last_obs = _obs
+        #     last_episode_start = terminated
+        #
         values = value_ts.apply_fn(value_ts.params, jnp.array(obss))
-        last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
+        last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_states.obs))
 
         returns, advantages = jax.vmap(
             self.compute_returns_and_advantage, in_axes=(1, 1, 1, 0, 0)
         )(
             rewards,
             values.squeeze(axis=-1),  # remove squeeze
-            episode_starts,
+            dones,
             last_values,
-            last_episode_start,
+            last_states.done,
         )
 
         rollout_info = {
@@ -260,6 +258,16 @@ class PPO(Config):
             "action_dist_std": stds.mean(),
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
         }
+
+        # print("advantages:\n", advantages.shape)
+        # print("returns:\n", returns.shape)
+        # print("obss shape", obss.shape)
+        # print("actions shape", actions.shape)
+        # print("values shape", values.shape)
+        # print("log_probs shape", log_probs.shape)
+        # print("advantages shape", advantages.shape)
+        # print("returns shape", returns.shape)
+        # breakpoint()
 
         return (
             (
