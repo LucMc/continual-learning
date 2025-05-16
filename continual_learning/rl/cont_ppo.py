@@ -58,24 +58,24 @@ class ContConfig(Config):
     """Only need to specify new params, over overwrite existing defaults in ppo.py"""
 
     # Changed defaults
-    training_steps: int = 2_000_000  # total training time-steps
-    n_envs: int = 1  # number of parralel training envs
-    rollout_steps: int = 64 * 20  # env steps per rollout
-    env_id: str = "ContinualAnt-v0"
-    batch_size: int = 64  # minibatch size
-    clip_range: float = 0.2  # policy clip range
-    epochs: int = 10  # number of epochs for fitting mini-batches
-    max_grad_norm: float = 0.5  # maximum gradient norm
-    gamma: float = 0.99  # discount factor
-    vf_clip_range: float = np.inf  # vf clipping (typically higher than clip_range)
-    ent_coef: float = 0.0  # how much exploration?
-    gae_lambda: float = 0.95  # bias-variance tradeoff in gae
-    learning_rate: float = 3e-4  # lr for both actor and critic
-    vf_coef: float = 0.5  # balance vf loss magnitude
+    # training_steps: int = 2_000_000  # total training time-steps
+    # n_envs: int = 1  # number of parralel training envs
+    # rollout_steps: int = 64 * 20  # env steps per rollout
+    # env_id: str = "ContinualAnt-v0"
+    # batch_size: int = 64  # minibatch size
+    # clip_range: float = 0.2  # policy clip range
+    # epochs: int = 10  # number of epochs for fitting mini-batches
+    # max_grad_norm: float = 0.5  # maximum gradient norm
+    # gamma: float = 0.99  # discount factor
+    # vf_clip_range: float = np.inf  # vf clipping (typically higher than clip_range)
+    # ent_coef: float = 0.0  # how much exploration?
+    # gae_lambda: float = 0.95  # bias-variance tradeoff in gae
+    # learning_rate: float = 3e-4  # lr for both actor and critic
+    # vf_coef: float = 0.5  # balance vf loss magnitude
 
     # New params
     layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
-    cbp = False  # Weather or not to use continual backpropergation
+    cbp: bool = False  # Weather or not to use continual backpropergation
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
     run_name: str = ""  # Postfix name for training run
     delay_type: Literal[
@@ -89,7 +89,110 @@ class ContPPO(PPO, ContConfig):
     buffer_size: int = 2048
 
     # @jaxtyped(typechecker=typechecker)
-    """ TODO: Move the delay metric thing somewhere else to avoid overwriting this entire thing"""
+    @partial(jax.jit, static_argnames=["self", "apply_fn"])
+    def actor_loss(self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch):
+        dist = apply_fn(actor_params, obs_batch)
+        log_prob = dist.log_prob(action_batch)
+        entropy = dist.entropy()
+        ratio = jnp.exp(log_prob - old_log_prob_batch)
+
+        approx_kl = ((old_log_prob_batch - log_prob) ** 2).mean() / 2  # Just for logging
+        clip_fraction = (ratio < (1 - self.clip_range)) | (ratio > (1 + self.clip_range))
+        return (
+            -jnp.minimum(
+                ratio * adv_batch,
+                adv_batch * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range),
+            ).mean()
+            - jnp.mean(entropy) * self.ent_coef
+        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean())
+
+
+    @partial(jax.jit, static_argnames=["self", "apply_fn"])
+    def value_loss(self, value_params, apply_fn, obs_batch, ret_batch, old_val_batch):
+        new_values = apply_fn(value_params, obs_batch)
+        v_clipped = old_val_batch + jnp.clip(
+            new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
+        )
+        return self.vf_coef * jnp.mean(
+            jnp.maximum((ret_batch - new_values) ** 2, (ret_batch - v_clipped) ** 2)
+        ), new_values.mean()
+        # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
+
+
+    @partial(jax.jit, static_argnames=["self"])
+    def update(
+        self,
+        actor_ts: TrainState,
+        value_ts: TrainState,
+        obss: Float[Array, "#n_minibatches #batch_size #obs_dim"],
+        actions: Float[Array, "#n_minibatches #batch_size #action_dim"],
+        old_values: Float[Array, "#n_minibatches #batch_size 1"],
+        old_log_probs: Float[Array, "#n_minibatches #batch_size"],
+        advantages: Float[Array, "#n_minibatches #batch_size"],
+        returns: Float[Array, "#n_minibatches #batch_size"],
+    ):
+        # Shuffle idxs
+        # TODO: Add pre/postfix to indicate debug/logging variables?
+        n_minibatches = obss.shape[0]
+
+        actor_loss_total = 0
+        value_loss_total = 0
+        value_total = 0
+        lp_total = 0
+        kl_total = 0
+        clip_fraction_total = 0
+
+        for i in range(n_minibatches):
+            # advantage normalisation
+            adv_norm = (advantages[i] - advantages[i].mean()) / (advantages[i].std() + 1e-8)
+
+            (
+                (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean)),
+                actor_grads,
+            ) = jax.value_and_grad(self.actor_loss, has_aux=True)(
+                actor_ts.params,
+                actor_ts.apply_fn,
+                obss[i],
+                actions[i],
+                old_log_probs[i],
+                adv_norm,
+            )
+            actor_ts = actor_ts.apply_gradients(grads=actor_grads)
+            actor_loss_total += actor_loss_v
+
+            (value_loss_v, value_mean), value_grads = jax.value_and_grad(
+                self.value_loss, has_aux=True
+            )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
+            value_ts = value_ts.apply_gradients(grads=value_grads)
+
+            value_loss_total += value_loss_v
+            value_total += value_mean
+            lp_total += lp_mean
+            kl_total += approx_kl_mean
+            clip_fraction_total += clip_fraction_mean
+
+        return (
+            actor_ts,
+            value_ts,
+            {
+                "value_loss_final": value_loss_v,
+                "actor_loss_final": actor_loss_v,
+                "value_loss_total": value_loss_total,
+                "actor_loss_total": actor_loss_total,
+                "value_pred_mean": (value_total / n_minibatches),
+                "actor_log_probs_mean": (lp_total / n_minibatches),
+                "approx_kl": (kl_total / n_minibatches),
+                "clip_fraction": (clip_fraction_total / n_minibatches),
+                "value_g_mag": jax.tree.reduce(
+                    lambda acc, g: acc + jnp.sum(jnp.abs(g)),
+                    value_grads,
+                ),
+                "actor_g_mag": jax.tree.reduce(
+                    lambda acc, g: acc + jnp.sum(jnp.abs(g)),
+                    actor_grads,
+                ),
+            },
+        )
 
     def get_rollout(
         self,
@@ -146,6 +249,9 @@ class ContPPO(PPO, ContConfig):
             last_values,
             last_episode_start,
         )
+
+        returns = returns.T
+        advantages = advantages.T
 
         # Metrics
         ret_var = np.var(returns.flatten())
@@ -368,15 +474,19 @@ def main(config: ContConfig):
 
     # Continual backpropergation
     if ppo_agent.cbp:
+        cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
+
         actor_ts = CBPTrainState.create(
             apply_fn=actor_net.apply,
             params=actor_net.init(actor_key, dummy_obs),
             tx=opt,
+            rng=cbp_actor_key
         )
         value_ts = CBPTrainState.create(
             apply_fn=value_net.apply,
             params=value_net.init(value_key, dummy_obs),
             tx=opt,
+            rng=cbp_value_key
         )
     else:
         actor_ts = TrainState.create(

@@ -221,7 +221,11 @@ def process_params(params: PyTree):
 
     for layer_name in params.keys():
         # For layer norm etc
-        if not ("kernel" in params[layer_name].keys()):
+        if type(params[layer_name]) != dict:
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        elif not ("kernel" in params[layer_name].keys()):
             excluded.update({layer_name: params[layer_name]})
             continue
 

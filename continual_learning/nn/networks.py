@@ -12,11 +12,12 @@ TODO:
 class ValueNet(nn.Module):
     @nn.compact
     def __call__(self, x) -> Array:
+        intermediates = {}
         x = nn.Dense(128)(x)
         x = nn.relu(x)
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        q_value = nn.Dense(1)(x)
+        q_value = nn.Dense(1, name="out_layer")(x)
         return q_value
 
 
@@ -29,7 +30,7 @@ class ActorNet(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        mean = nn.Dense(self.n_actions, name="mu")(x)
+        mean = nn.Dense(self.n_actions, name="out_layer")(x)
         log_std = self.param(
             "log_std",
             nn.initializers.zeros,

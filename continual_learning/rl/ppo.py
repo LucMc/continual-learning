@@ -24,11 +24,11 @@ class Config:
     """All the options for the experiment, these are all loaded into 'self' in PPO class"""
 
     seed: int = 0  # Random seed
-    training_steps: int = 500_000  # total training time-steps
-    n_envs: int = 1  # number of parralel training envs
-    rollout_steps: int = 64 * 20  # env steps per rollout
+    training_steps: int = 500_000*2  # total training time-steps
+    n_envs: int = 1*2  # number of parralel training envs
+    rollout_steps: int = 64 * 20*2  # env steps per rollout
     env_id: str = "Ant-v5"
-    batch_size: int = 64  # minibatch size
+    batch_size: int = 64*2  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
     max_grad_norm: float = 0.5  # maximum gradient norm
@@ -44,9 +44,37 @@ class Config:
 
 @dataclass(frozen=True)
 class PPO(Config):
-    buffer_size: int
+    buffer_size: int = 2048
 
-    # @jaxtyped(typechecker=typechecker)
+    @partial(jax.jit, static_argnames=["self", "apply_fn"])
+    def actor_loss(self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch):
+        dist = apply_fn(actor_params, obs_batch)
+        log_prob = dist.log_prob(action_batch)
+        entropy = dist.entropy()
+        ratio = jnp.exp(log_prob - old_log_prob_batch)
+
+        approx_kl = ((old_log_prob_batch - log_prob) ** 2).mean() / 2  # Just for logging
+        clip_fraction = (ratio < (1 - self.clip_range)) | (ratio > (1 + self.clip_range))
+        return (
+            -jnp.minimum(
+                ratio * adv_batch,
+                adv_batch * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range),
+            ).mean()
+            - jnp.mean(entropy) * self.ent_coef
+        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean())
+
+    @partial(jax.jit, static_argnames=["self", "apply_fn"])
+    def value_loss(self, value_params, apply_fn, obs_batch, ret_batch, old_val_batch):
+        new_values = apply_fn(value_params, obs_batch)
+        v_clipped = old_val_batch + jnp.clip(
+            new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
+        )
+        return self.vf_coef * jnp.mean(
+            jnp.maximum((ret_batch - new_values) ** 2, (ret_batch - v_clipped) ** 2)
+        ), new_values.mean()
+        # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
+
+
     @partial(jax.jit, static_argnames=["self"])
     def update(
         self,
@@ -59,39 +87,6 @@ class PPO(Config):
         advantages: Float[Array, "#n_minibatches #batch_size"],
         returns: Float[Array, "#n_minibatches #batch_size"],
     ):
-        def actor_loss(
-            actor_params, obs_batch, action_batch, old_log_prob_batch, adv_batch
-        ):
-            dist = actor_ts.apply_fn(actor_params, obs_batch)
-            log_prob = dist.log_prob(action_batch)
-            entropy = dist.entropy()
-            ratio = jnp.exp(log_prob - old_log_prob_batch)
-
-            approx_kl = (
-                (old_log_prob_batch - log_prob) ** 2
-            ).mean() / 2  # Just for logging
-            clip_fraction = (ratio < (1 - self.clip_range)) | (
-                ratio > (1 + self.clip_range)
-            )
-            return (
-                -jnp.minimum(
-                    ratio * adv_batch,
-                    adv_batch
-                    * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range),
-                ).mean()
-                - jnp.mean(entropy) * self.ent_coef
-            ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean())
-
-        def value_loss(value_params, obs_batch, ret_batch, old_val_batch):
-            new_values = value_ts.apply_fn(value_params, obs_batch)
-            v_clipped = old_val_batch + jnp.clip(
-                new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
-            )
-            return self.vf_coef * jnp.mean(
-                jnp.maximum((ret_batch - new_values) ** 2, (ret_batch - v_clipped) ** 2)
-            ), new_values.mean()
-            # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
-
         # Shuffle idxs
         # TODO: Add pre/postfix to indicate debug/logging variables?
         n_minibatches = obss.shape[0]
@@ -105,15 +100,14 @@ class PPO(Config):
 
         for i in range(n_minibatches):
             # advantage normalisation
-            adv_norm = (advantages[i] - advantages[i].mean()) / (
-                advantages[i].std() + 1e-8
-            )
+            adv_norm = (advantages[i] - advantages[i].mean()) / (advantages[i].std() + 1e-8)
 
             (
                 (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean)),
                 actor_grads,
-            ) = jax.value_and_grad(actor_loss, has_aux=True)(
+            ) = jax.value_and_grad(self.actor_loss, has_aux=True)(
                 actor_ts.params,
+                actor_ts.apply_fn,
                 obss[i],
                 actions[i],
                 old_log_probs[i],
@@ -123,8 +117,8 @@ class PPO(Config):
             actor_loss_total += actor_loss_v
 
             (value_loss_v, value_mean), value_grads = jax.value_and_grad(
-                value_loss, has_aux=True
-            )(value_ts.params, obss[i], returns[i], old_values[i])
+                self.value_loss, has_aux=True
+            )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
             value_ts = value_ts.apply_gradients(grads=value_grads)
 
             value_loss_total += value_loss_v
@@ -211,14 +205,19 @@ class PPO(Config):
             last_episode_start,
         )
 
+        returns = returns.T
+        advantages = advantages.T
+
         rollout_info = {
-            "mean rollout reward": np.mean(rewards),
+            "mean_rollout_reward": np.mean(rewards),
             "advantage_mean": jnp.mean(advantages),
             "advantage_std": jnp.std(advantages),
-            "explained variance": float(1 - (np.var(advantages.flatten()) / np.var(returns.flatten()))),
-            "actor lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
+            "explained_variance": float(
+                1 - (np.var(advantages.flatten()) / np.var(returns.flatten()))
+            ),
+            "actor_lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
             "action_dist_std": stds.mean(),
-            "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
+            "value_lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
         }
 
         return (
@@ -254,11 +253,7 @@ class PPO(Config):
                 lambda: (1.0 - episode_starts[step + 1], values[step + 1]),
             )
 
-            delta = (
-                rewards[step]
-                + self.gamma * next_values * next_non_terminal
-                - values[step]
-            )
+            delta = rewards[step] + self.gamma * next_values * next_non_terminal - values[step]
             last_gae_lam = (
                 delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
             )
@@ -291,7 +286,7 @@ class PPO(Config):
 
         return thunk
 
-    # @partial(jax.jit, static_argnames=["self"])
+    @partial(jax.jit, static_argnames=["self"])
     def outer_loop(
         self,
         key: PRNGKeyArray,
@@ -316,8 +311,7 @@ class PPO(Config):
             idxs = random.permutation(perm_key, self.buffer_size)
             mb_rollout = tuple(shape_minibatches(x, idxs) for x in flat_rollout)
 
-            actor_ts, value_ts, info = PPO.update(
-                self,
+            actor_ts, value_ts, info = self.update(
                 actor_ts,
                 value_ts,
                 *mb_rollout,
@@ -334,9 +328,7 @@ class PPO(Config):
 
     @staticmethod
     def main(config: Config):
-        ppo_agent = PPO(
-            buffer_size=config.rollout_steps, **config.__dict__
-        )
+        ppo_agent = PPO(buffer_size=config.rollout_steps, **config.__dict__)
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 
         if ppo_agent.log_video_every:
@@ -361,9 +353,7 @@ class PPO(Config):
             )
 
         ckpt_path = "./checkpoints"
-        assert (
-            not ppo_agent.rollout_steps % ppo_agent.batch_size
-        ), (  # TODO: Make adaptive
+        assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (  # TODO: Make adaptive
             "Must have rollout steps divisible into batches"
         )
 
@@ -417,7 +407,7 @@ class PPO(Config):
                 key,
             )
 
-            current_global_step += ppo_agent.rollout_steps * ppo_agent.n_envs
+            current_global_step += ppo_agent.rollout_steps
 
             actor_ts, value_ts, key, training_info = ppo_agent.outer_loop(
                 key, actor_ts, value_ts, rollout
@@ -439,9 +429,7 @@ class PPO(Config):
             if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
-                    wandb.log(
-                        {video_name: wandb.Video(str(base_video_dir / video_name))}
-                    )
+                    wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
                 print(r"[x] Uploading Videos ...")
 
             wandb.finish()
@@ -456,5 +444,3 @@ if __name__ == "__main__":
 # def get_minibatch(data, idxs):
 #     for i in range(n_minibatches):
 #         yield data[idxs][i*ppo_agent.batch_size:(i+2)*ppo_agent.batch_size]
-
-
