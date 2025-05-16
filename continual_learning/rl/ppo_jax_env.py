@@ -25,10 +25,10 @@ from continual_learning.rl.ppo import PPO, Config
 @dataclass(frozen=True)
 class BraxConfig(Config):
     env_id: str = "ant" # BRAX env name
-    training_steps: int = 500_000*64  # total training time-steps
-    n_envs: int = 1*32  # number of parralel training envs
-    rollout_steps: int = 64 * 20 * 16  # env steps per rollout
-    batch_size: int = 64*3  # minibatch size
+    # training_steps: int = 500_000*64  # total training time-steps
+    # n_envs: int = 1*32  # number of parralel training envs
+    # rollout_steps: int = 64 * 20 * 16  # env steps per rollout
+    # batch_size: int = 64*3  # minibatch size
 
 @dataclass(frozen=True)
 class BraxPPO(PPO, BraxConfig):
