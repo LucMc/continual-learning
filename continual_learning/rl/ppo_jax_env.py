@@ -46,7 +46,6 @@ class Config:
 class PPO(Config):
     buffer_size: int = 2048
 
-    # @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames=["self"])
     def update(
         self,
@@ -147,18 +146,13 @@ class PPO(Config):
             },
         )
 
-    # @jaxtyped(typechecker=typechecker)
-    # @partial(jax.jit, static_argnames="self")
+    @partial(jax.jit, static_argnames=["self", "env"])
     def get_rollout(
         self,
         actor_ts: TrainState,
         value_ts: TrainState,
-        #envs: gym.vector.VectorEnv,
-        vmap_env_reset,
-        vmap_env_step,
-        # last_obs: Float[Array, "#n_envs"],
+        env, 
         last_state,
-        # last_episode_start: Float[Array, "#n_envs"], can just use states.done?
         key: PRNGKeyArray,
     ):
        
@@ -188,13 +182,13 @@ class PPO(Config):
             # last_episode_start = terminated
 
             return (next_states, key), (
-                states.reward,
+                next_states.reward,
                 actions,
-                states.done, # should be episode starts?
+                next_states.done, # should be episode starts?
                 log_prob,
                 states.obs, # NOTE: this is states not next_states
                 action_dist.stddev(),
-                states.info
+                next_states.info
             )
 
         (last_states, key), (rewards, actions, dones, log_probs, obss, stds, infos) = jax.lax.scan(
@@ -251,9 +245,9 @@ class PPO(Config):
             "mean rollout reward": np.mean(rewards),
             "advantage_mean": jnp.mean(advantages),
             "advantage_std": jnp.std(advantages),
-            "explained variance": float(
-                1 - (np.var(advantages.flatten()) / np.var(returns.flatten()))
-            ),
+            # "explained variance": float(
+            #     1 - (jnp.var(advantages.flatten()) / jnp.var(returns.flatten()))
+            # ),
             "actor lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
             "action_dist_std": stds.mean(),
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
@@ -267,7 +261,6 @@ class PPO(Config):
         # print("log_probs shape", log_probs.shape)
         # print("advantages shape", advantages.shape)
         # print("returns shape", returns.shape)
-        # breakpoint()
 
         return (
             (
@@ -282,7 +275,6 @@ class PPO(Config):
             infos,
         )
 
-    # @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames="self")
     def compute_returns_and_advantage(
         self,
@@ -336,7 +328,7 @@ class PPO(Config):
         return thunk
 
     def make_brax_env(self, video_folder: str = None, env_args: dict = {}):
-        return brax.envs.get_environment(self.env_id)
+        return brax.envs.wrappers.training.wrap(brax.envs.get_environment(self.env_id))
 
     # @partial(jax.jit, static_argnames=["self"])
     def outer_loop(
@@ -381,7 +373,7 @@ class PPO(Config):
 
     @staticmethod
     def main(config: Config):
-        ppo_agent = PPO(buffer_size=config.n_envs * config.rollout_steps, **config.__dict__)
+        ppo_agent = PPO(buffer_size=config.rollout_steps, **config.__dict__)
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 
         if ppo_agent.log_video_every:
@@ -414,13 +406,8 @@ class PPO(Config):
         env_keys, actor_key, value_key, key = random.split(key, num=4)
         initial_reset_keys = random.split(env_keys, num=ppo_agent.n_envs)
         env = ppo_agent.make_brax_env(video_folder=video_folder, env_args=env_args) # REMEMBER TO JIT/vmap RESET AND STEP
-        jit_env_reset = jax.jit(env.reset)
-        jit_env_step = jax.jit(env.step)
 
-        vmap_env_reset = jax.vmap(jit_env_reset, in_axes=(0,)) # vmap over keys
-        vmap_env_step = jax.vmap(jit_env_step, in_axes=(0, 0)) # vmap over states and actions
-
-        states = vmap_env_reset(initial_reset_keys)
+        states = env.reset(initial_reset_keys)
         current_global_step = 0
 
         actor_net = ActorNet(env.action_size)
@@ -454,11 +441,8 @@ class PPO(Config):
             rollout, rollout_info, env_infos = ppo_agent.get_rollout(
                 actor_ts,
                 value_ts,
-                vmap_env_reset,
-                vmap_env_step,
-                # env,
+                env,
                 states,
-                # last_episode_starts,
                 key
             )
 
