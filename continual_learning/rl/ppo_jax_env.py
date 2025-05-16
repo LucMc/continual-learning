@@ -167,7 +167,7 @@ class PPO(Config):
             value = value_ts.apply_fn(value_ts.params, jnp.array(states.obs))
 
             # _obs, reward, terminated, truncated, info = #envs.step(np.array(action))
-            next_states = vmap_env_step(states, actions) #envs.step(np.array(action))
+            next_states = env.step(states, actions) #envs.step(np.array(action))
 
             # rewards[i] = reward
             # actions[i] = action
@@ -465,7 +465,7 @@ class PPO(Config):
 
         # Close stuff
         if ppo_agent.log:
-            if abs(ppo_agent.log_video_every - ppo_agent.rollout_steps) < ppo_agent:
+            if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
