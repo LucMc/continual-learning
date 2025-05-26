@@ -1,8 +1,10 @@
+from flax.linen.module import capture_call_intermediates
 from jaxtyping import Array
 import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from functools import partial
 
 '''
 TODO:
@@ -26,6 +28,10 @@ class ValueNet(nn.Module):
 
         self.sow("intermediates", "activations", intermediates)
         return value
+
+    @partial(jax.jit, static_argnames="self")
+    def apply_w_features(self, params, x):
+        return self.apply(params, x, capture_intermediates=True)
 
 
 class ActorNet(nn.Module):
@@ -56,9 +62,18 @@ class ActorNet(nn.Module):
         )  # Make logstd the same shape as actions
 
         self.sow("intermediates", "activations", intermediates)
-        return distrax.MultivariateNormalDiag(
-            loc=mean, scale_diag=jnp.exp(logstd_batch)
-        )
+        return mean, jnp.exp(logstd_batch)
+
+    @partial(jax.jit, static_argnames="self")
+    def apply_w_features(self, params, x):
+        return self.apply(params, x, capture_intermediates=True)
+
+    # @partial(jax.jit, static_argnames="self")
+    # def apply_w_features(self, params, x):
+    #     (mean, scale), features = partial(self.apply, capture_intermediates=True)(params, x)
+    #     return distrax.MultivariateNormalDiag(
+    #             loc=mean, scale_diag=scale
+    #         ), features
 
 # Reinforcement Learning Layer Norm
 class ActorNetLayerNorm(nn.Module):
@@ -89,6 +104,10 @@ class ActorNetLayerNorm(nn.Module):
             loc=mean, scale_diag=jnp.exp(logstd_batch)
         )
 
+    @partial(jax.jit, static_argnames="self")
+    def apply_w_features(self, params, x):
+        return self.apply(params, x, capture_intermediates=True)
+
 class ValueNetLayerNorm(nn.Module):
     @nn.compact
     def __call__(self, x) -> Array:
@@ -101,6 +120,9 @@ class ValueNetLayerNorm(nn.Module):
         q_value = nn.Dense(1)(x)
         return q_value
 
+    @partial(jax.jit, static_argnames="self")
+    def apply_w_features(self, params, x):
+        return self.apply(params, x, capture_intermediates=True)
 
 class SimpleNet(nn.Module):
     n_out: int = 1

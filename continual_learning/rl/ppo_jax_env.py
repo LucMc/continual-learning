@@ -115,7 +115,7 @@ class BraxPPO(PPO, BraxConfig):
         return brax.envs.wrappers.training.wrap(brax.envs.get_environment(self.env_id))
 
     @staticmethod
-    def main(config: Config):
+    def learn(config: Config):
         ppo_agent = BraxPPO(buffer_size=config.rollout_steps, **config.__dict__)
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 
@@ -213,7 +213,7 @@ class BraxPPO(PPO, BraxConfig):
 
 if __name__ == "__main__":
     config = tyro.cli(BraxConfig)
-    BraxPPO.main(config)
+    BraxPPO.learn(config)
 
 # Alternative minibatch gen for mem-constrained devices
 # def get_minibatch(data, idxs):

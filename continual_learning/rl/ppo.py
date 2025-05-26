@@ -18,11 +18,13 @@ import os
 from pathlib import Path
 from continual_learning.nn import ActorNet, ValueNet
 
+"""
+Base PPO class with networks in ../networks/nn.py modified to pass features to optimiser
+"""
 
 @dataclass(frozen=True)
 class Config:
     """All the options for the experiment, these are all loaded into 'self' in PPO class"""
-
     seed: int = 0  # Random seed
     training_steps: int = 500_000*2  # total training time-steps
     n_envs: int = 1*2  # number of parralel training envs
@@ -48,7 +50,8 @@ class PPO(Config):
 
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
     def actor_loss(self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch):
-        dist = apply_fn(actor_params, obs_batch)
+        (mean, scale), features = apply_fn(actor_params, obs_batch)
+        dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=scale)
         log_prob = dist.log_prob(action_batch)
         entropy = dist.entropy()
         ratio = jnp.exp(log_prob - old_log_prob_batch)
@@ -65,7 +68,7 @@ class PPO(Config):
 
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
     def value_loss(self, value_params, apply_fn, obs_batch, ret_batch, old_val_batch):
-        new_values = apply_fn(value_params, obs_batch)
+        new_values, features = apply_fn(value_params, obs_batch)
         v_clipped = old_val_batch + jnp.clip(
             new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
         )
@@ -173,7 +176,8 @@ class PPO(Config):
 
         for i in range(self.rollout_steps // self.n_envs):
             action_key, key = random.split(key)
-            action_dist = actor_ts.apply_fn(actor_ts.params, jnp.array(last_obs))
+            (mean, scale), _ = actor_ts.apply_fn(actor_ts.params, jnp.array(last_obs))
+            action_dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=scale)  # Create here
             action = action_dist.sample(seed=action_key)
             log_prob = action_dist.log_prob(action)
 
@@ -192,8 +196,8 @@ class PPO(Config):
             last_obs = _obs
             last_episode_start = terminated
 
-        values = value_ts.apply_fn(value_ts.params, jnp.array(obss))
-        last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
+        values, _ = value_ts.apply_fn(value_ts.params, jnp.array(obss))
+        last_values, _ = value_ts.apply_fn(value_ts.params, jnp.array(last_obs))
 
         returns, advantages = jax.vmap(
             self.compute_returns_and_advantage, in_axes=(1, 1, 1, 0, 0)
@@ -327,7 +331,7 @@ class PPO(Config):
         return _actor_ts, _value_ts, key, info
 
     @staticmethod
-    def main(config: Config):
+    def learn(config: Config):
         ppo_agent = PPO(buffer_size=config.rollout_steps, **config.__dict__)
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 
@@ -384,12 +388,12 @@ class PPO(Config):
         )
 
         actor_ts = TrainState.create(
-            apply_fn=actor_net.apply,
+            apply_fn=actor_net.apply_w_features,
             params=actor_net.init(actor_key, last_obs),
             tx=opt,
         )
         value_ts = TrainState.create(
-            apply_fn=value_net.apply,
+            apply_fn=value_net.apply_w_features,
             params=value_net.init(value_key, last_obs),
             tx=opt,
         )
@@ -407,7 +411,7 @@ class PPO(Config):
                 key,
             )
 
-            current_global_step += ppo_agent.rollout_steps
+            current_global_step += ppo_agent.rollout_steps * ppo_agent.n_envs
 
             actor_ts, value_ts, key, training_info = ppo_agent.outer_loop(
                 key, actor_ts, value_ts, rollout
@@ -438,7 +442,7 @@ class PPO(Config):
 
 if __name__ == "__main__":
     config = tyro.cli(Config)
-    PPO.main(config)
+    PPO.learn(config)
 
 # Alternative minibatch gen for mem-constrained devices
 # def get_minibatch(data, idxs):
