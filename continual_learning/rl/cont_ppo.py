@@ -91,7 +91,7 @@ class ContPPO(PPO, ContConfig):
     # @jaxtyped(typechecker=typechecker)
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
     def actor_loss(self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch):
-        dist = apply_fn(actor_params, obs_batch)
+        dist, features = apply_fn(actor_params, obs_batch)
         log_prob = dist.log_prob(action_batch)
         entropy = dist.entropy()
         ratio = jnp.exp(log_prob - old_log_prob_batch)
@@ -104,18 +104,18 @@ class ContPPO(PPO, ContConfig):
                 adv_batch * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range),
             ).mean()
             - jnp.mean(entropy) * self.ent_coef
-        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean())
+        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean()), features
 
 
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
     def value_loss(self, value_params, apply_fn, obs_batch, ret_batch, old_val_batch):
-        new_values = apply_fn(value_params, obs_batch)
+        new_values, features = apply_fn(value_params, obs_batch)
         v_clipped = old_val_batch + jnp.clip(
             new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
         )
         return self.vf_coef * jnp.mean(
             jnp.maximum((ret_batch - new_values) ** 2, (ret_batch - v_clipped) ** 2)
-        ), new_values.mean()
+        ), new_values.mean(), features
         # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
 
 
@@ -147,7 +147,7 @@ class ContPPO(PPO, ContConfig):
             adv_norm = (advantages[i] - advantages[i].mean()) / (advantages[i].std() + 1e-8)
 
             (
-                (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean)),
+                (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean), actor_features),
                 actor_grads,
             ) = jax.value_and_grad(self.actor_loss, has_aux=True)(
                 actor_ts.params,
@@ -160,10 +160,10 @@ class ContPPO(PPO, ContConfig):
             actor_ts = actor_ts.apply_gradients(grads=actor_grads)
             actor_loss_total += actor_loss_v
 
-            (value_loss_v, value_mean), value_grads = jax.value_and_grad(
+            (value_loss_v, value_mean, value_features), value_grads = jax.value_and_grad(
                 self.value_loss, has_aux=True
             )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
-            value_ts = value_ts.apply_gradients(grads=value_grads)
+            value_ts = value_ts.apply_gradients(grads=value_grads, features=value_features)
 
             value_loss_total += value_loss_v
             value_total += value_mean

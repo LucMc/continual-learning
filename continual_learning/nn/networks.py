@@ -10,26 +10,38 @@ TODO:
 '''
 # Reinforcement Learning base
 class ValueNet(nn.Module):
+    h_size: int = 128 # Size of hidden dimension
+
     @nn.compact
     def __call__(self, x) -> Array:
+        layer_names: list = ["dense1", "dense2"]
         intermediates = {}
-        x = nn.Dense(128)(x)
-        x = nn.relu(x)
-        x = nn.Dense(64)(x)
-        x = nn.relu(x)
-        q_value = nn.Dense(1, name="out_layer")(x)
-        return q_value
+
+        for i, layer_name in enumerate(layer_names):
+            x = nn.Dense(features=self.h_size, name=layer_name)(x)
+            x = nn.relu(x)
+            intermediates[layer_name] = x
+
+        value = nn.Dense(1, name="out_layer")(x)
+
+        self.sow("intermediates", "activations", intermediates)
+        return value
 
 
 class ActorNet(nn.Module):
     n_actions: int
+    h_size: int = 64 # Size of hidden dimension
 
     @nn.compact
     def __call__(self, x) -> distrax.Distribution:
-        x = nn.Dense(64)(x)
-        x = nn.relu(x)
-        x = nn.Dense(64)(x)
-        x = nn.relu(x)
+        layer_names: list = ["dense1", "dense2"]
+        intermediates = {}
+
+        for i, layer_name in enumerate(layer_names):
+            x = nn.Dense(features=self.h_size, name=layer_name)(x)
+            x = nn.relu(x)
+            intermediates[layer_name] = x
+
         mean = nn.Dense(self.n_actions, name="out_layer")(x)
         log_std = self.param(
             "log_std",
@@ -42,6 +54,8 @@ class ActorNet(nn.Module):
         logstd_batch = jnp.broadcast_to(
             log_std, mean.shape
         )  # Make logstd the same shape as actions
+
+        self.sow("intermediates", "activations", intermediates)
         return distrax.MultivariateNormalDiag(
             loc=mean, scale_diag=jnp.exp(logstd_batch)
         )
