@@ -25,10 +25,11 @@ from continual_learning.rl.ppo import PPO, Config
 @dataclass(frozen=True)
 class BraxConfig(Config):
     env_id: str = "ant" # BRAX env name
-    # training_steps: int = 500_000*64  # total training time-steps
-    # n_envs: int = 1*32  # number of parralel training envs
-    # rollout_steps: int = 64 * 20 * 16  # env steps per rollout
-    # batch_size: int = 64*3  # minibatch size
+    training_steps: int = 500_000*256  # total training time-steps
+    n_envs: int = 32  # number of parralel training envs
+    rollout_steps: int = 1024 * 16  # env steps per rollout
+    batch_size: int = 64*4  # minibatch size
+
 
 @dataclass(frozen=True)
 class BraxPPO(PPO, BraxConfig):
@@ -47,7 +48,8 @@ class BraxPPO(PPO, BraxConfig):
             states, key = carry
 
             action_key, key = random.split(key)
-            action_dist = actor_ts.apply_fn(actor_ts.params, jnp.array(states.obs))
+            (mean, scale), _ = actor_ts.apply_fn(actor_ts.params, jnp.array(states.obs))
+            action_dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=scale)
             actions = action_dist.sample(seed=action_key)
             log_prob = action_dist.log_prob(actions)
 
@@ -70,8 +72,8 @@ class BraxPPO(PPO, BraxConfig):
             )
         )
 
-        values = value_ts.apply_fn(value_ts.params, jnp.array(obss))
-        last_values = value_ts.apply_fn(value_ts.params, jnp.array(last_states.obs))
+        values, _ = value_ts.apply_fn(value_ts.params, jnp.array(obss))
+        last_values, _ = value_ts.apply_fn(value_ts.params, jnp.array(last_states.obs))
 
         returns, advantages = jax.vmap(
             self.compute_returns_and_advantage, in_axes=(1, 1, 1, 0, 0)
@@ -150,31 +152,7 @@ class BraxPPO(PPO, BraxConfig):
         states = env.reset(initial_reset_keys)
         current_global_step = 0
 
-        actor_net = ActorNet(env.action_size)
-        value_net = ValueNet()
-        opt = optax.chain(
-            optax.clip_by_global_norm(ppo_agent.max_grad_norm),
-            optax.inject_hyperparams(optax.adamw)(
-                learning_rate=optax.linear_schedule(
-                    init_value=ppo_agent.learning_rate,
-                    end_value=ppo_agent.learning_rate / 10,
-                    transition_steps=ppo_agent.training_steps,
-                ),
-            ),
-        )
-
-        actor_ts = TrainState.create(
-            apply_fn=actor_net.apply,
-            params=actor_net.init(actor_key, states.obs),
-            tx=opt,
-        )
-        value_ts = TrainState.create(
-            apply_fn=value_net.apply,
-            params=value_net.init(value_key, states.obs),
-            tx=opt,
-        )
-
-        last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
+        actor_ts, value_ts = setup_network_trainstates(states.obs, env.action_size, actor_key, value_key):
 
         while current_global_step < ppo_agent.training_steps:
             print("\ncurrent_global_step:", current_global_step)
@@ -196,19 +174,21 @@ class BraxPPO(PPO, BraxConfig):
             if ppo_agent.log:
                 wandb.log(full_logs, step=current_global_step)
 
-                if current_global_step % 100_000 == 0:
+                if current_global_step % 100_000 * ppo_agent.n_envs == 0:
                     wandb.save(ckpt_path)
+        ppo_agent.cleanup()
 
+    def cleanup():
         # Close stuff
         if ppo_agent.log:
-            if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
+            # if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
+            if ppo_agent.log_video_every > 0:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
                 print(r"[x] Uploading Videos ...")
 
             wandb.finish()
-        envs.close()
 
 
 if __name__ == "__main__":

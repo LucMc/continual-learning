@@ -13,13 +13,13 @@ TODO:
 # Reinforcement Learning base
 class ValueNet(nn.Module):
     h_size: int = 128 # Size of hidden dimension
+    layer_names: tuple = ("dense1", "dense2")
 
     @nn.compact
     def __call__(self, x) -> Array:
-        layer_names: list = ["dense1", "dense2"]
         intermediates = {}
 
-        for i, layer_name in enumerate(layer_names):
+        for i, layer_name in enumerate(self.layer_names):
             x = nn.Dense(features=self.h_size, name=layer_name)(x)
             x = nn.relu(x)
             intermediates[layer_name] = x
@@ -37,13 +37,13 @@ class ValueNet(nn.Module):
 class ActorNet(nn.Module):
     n_actions: int
     h_size: int = 64 # Size of hidden dimension
+    layer_names: tuple = ("dense1", "dense2")
 
     @nn.compact
     def __call__(self, x) -> distrax.Distribution:
-        layer_names: list = ["dense1", "dense2"]
         intermediates = {}
 
-        for i, layer_name in enumerate(layer_names):
+        for i, layer_name in enumerate(self.layer_names):
             x = nn.Dense(features=self.h_size, name=layer_name)(x)
             x = nn.relu(x)
             intermediates[layer_name] = x

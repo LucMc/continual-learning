@@ -31,6 +31,7 @@ import continual_learning.optim.utils as utils
 TODO:
  * Clip ages
  * Reset adam/optim state for reset nodes
+ * FIX LOGGING
 
 Count = 15
 
@@ -73,7 +74,8 @@ class CBPOptimState:
     decay_rate: float = 0.9
     maturity_threshold: int = 100
     accumulate: bool = False
-    logs: dict = field(default_factory=dict)
+    logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
+
 
 
 # -------------- Overall optimizer TrainState ---------------
@@ -325,7 +327,7 @@ def continual_backprop(
             )
 
             new_params = {}
-            _logs = {k: {} for k in bias.keys()}
+            _logs = { k: 0 for k in state.logs} # TODO: kinda sucks for adding logs
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
@@ -334,10 +336,10 @@ def continual_backprop(
                     "kernel": _weights[layer_name],
                     "bias": _bias[layer_name],
                 }
-                _logs[layer_name]["avg_age"] = avg_ages[layer_name]
-                _logs[layer_name]["nodes_reset"] = reset_logs[layer_name]["nodes_reset"]
+                _logs["avg_age"] += avg_ages[layer_name]
+                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(ages=_ages, rng=new_rng, logs=_logs, utilities=_utility)
+            new_state = state.replace(ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility)
             new_params.update(excluded)  # TODO
 
             return {"params": new_params}, (new_state,)

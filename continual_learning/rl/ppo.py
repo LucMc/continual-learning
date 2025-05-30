@@ -17,20 +17,23 @@ import tyro
 import os
 from pathlib import Path
 from continual_learning.nn import ActorNet, ValueNet
+from continual_learning.utils.miscellaneous import compute_plasticity_metrics
 
 """
 Base PPO class with networks in ../networks/nn.py modified to pass features to optimiser
 """
 
+
 @dataclass(frozen=True)
 class Config:
     """All the options for the experiment, these are all loaded into 'self' in PPO class"""
+
     seed: int = 0  # Random seed
-    training_steps: int = 500_000*2  # total training time-steps
-    n_envs: int = 1*2  # number of parralel training envs
-    rollout_steps: int = 64 * 20*2  # env steps per rollout
+    training_steps: int = 500_000 * 2  # total training time-steps
+    n_envs: int = 1 * 2  # number of parralel training envs
+    rollout_steps: int = 64 * 20 * 2  # env steps per rollout
     env_id: str = "Ant-v5"
-    batch_size: int = 64*2  # minibatch size
+    batch_size: int = 64 * 2  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
     max_grad_norm: float = 0.5  # maximum gradient norm
@@ -49,8 +52,10 @@ class PPO(Config):
     buffer_size: int = 2048
 
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
-    def actor_loss(self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch):
-        (mean, scale), features = apply_fn(actor_params, obs_batch)
+    def actor_loss(
+        self, actor_params, apply_fn, obs_batch, action_batch, old_log_prob_batch, adv_batch
+    ):
+        (mean, scale), actor_features = apply_fn(actor_params, obs_batch)
         dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=scale)
         log_prob = dist.log_prob(action_batch)
         entropy = dist.entropy()
@@ -64,19 +69,18 @@ class PPO(Config):
                 adv_batch * jnp.clip(ratio, 1 - self.clip_range, 1 + self.clip_range),
             ).mean()
             - jnp.mean(entropy) * self.ent_coef
-        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean())
+        ), (log_prob.mean(), approx_kl.mean(), clip_fraction.mean(), actor_features)
 
     @partial(jax.jit, static_argnames=["self", "apply_fn"])
     def value_loss(self, value_params, apply_fn, obs_batch, ret_batch, old_val_batch):
-        new_values, features = apply_fn(value_params, obs_batch)
+        new_values, value_features = apply_fn(value_params, obs_batch)
         v_clipped = old_val_batch + jnp.clip(
             new_values - old_val_batch, -self.vf_clip_range, self.vf_clip_range
         )
         return self.vf_coef * jnp.mean(
             jnp.maximum((ret_batch - new_values) ** 2, (ret_batch - v_clipped) ** 2)
-        ), new_values.mean()
+        ), (new_values.mean(), value_features)
         # Alternatively unclipped (default inf bounds anyway) -- return 0.5 * jnp.mean((ret_batch - new_values) ** 2)  # vf coef
-
 
     @partial(jax.jit, static_argnames=["self"])
     def update(
@@ -91,7 +95,6 @@ class PPO(Config):
         returns: Float[Array, "#n_minibatches #batch_size"],
     ):
         # Shuffle idxs
-        # TODO: Add pre/postfix to indicate debug/logging variables?
         n_minibatches = obss.shape[0]
 
         actor_loss_total = 0
@@ -106,7 +109,7 @@ class PPO(Config):
             adv_norm = (advantages[i] - advantages[i].mean()) / (advantages[i].std() + 1e-8)
 
             (
-                (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean)),
+                (actor_loss_v, (lp_mean, approx_kl_mean, clip_fraction_mean, actor_features)),
                 actor_grads,
             ) = jax.value_and_grad(self.actor_loss, has_aux=True)(
                 actor_ts.params,
@@ -119,7 +122,7 @@ class PPO(Config):
             actor_ts = actor_ts.apply_gradients(grads=actor_grads)
             actor_loss_total += actor_loss_v
 
-            (value_loss_v, value_mean), value_grads = jax.value_and_grad(
+            (value_loss_v, (value_mean, value_features)), value_grads = jax.value_and_grad(
                 self.value_loss, has_aux=True
             )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
             value_ts = value_ts.apply_gradients(grads=value_grads)
@@ -177,7 +180,9 @@ class PPO(Config):
         for i in range(self.rollout_steps // self.n_envs):
             action_key, key = random.split(key)
             (mean, scale), _ = actor_ts.apply_fn(actor_ts.params, jnp.array(last_obs))
-            action_dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=scale)  # Create here
+            action_dist = distrax.MultivariateNormalDiag(
+                loc=mean, scale_diag=scale
+            )  # Create here
             action = action_dist.sample(seed=action_key)
             log_prob = action_dist.log_prob(action)
 
@@ -276,7 +281,7 @@ class PPO(Config):
             env = gym.make(self.env_id, **env_args)
             # env = gym.wrappers.FlattenObservation(env)
             env = gym.wrappers.RecordEpisodeStatistics(env)
-            # env = gym.wrappers.ClipAction(env)
+            env = gym.wrappers.ClipAction(env)
             # env = gym.wrappers.NormalizeObservation(env)
             # env = gym.wrappers.NormalizeReward(env, gamma=self.gamma) # TODO: replace with actual gamma
             if self.log_video_every and idx == 0:
@@ -320,6 +325,7 @@ class PPO(Config):
                 value_ts,
                 *mb_rollout,
             )
+            
             return (actor_ts, value_ts, key), info
 
         (_actor_ts, _value_ts, key), info = jax.lax.scan(
@@ -327,8 +333,54 @@ class PPO(Config):
         )
 
         # Add other metrics here if needed
-        info = jax.tree.map(lambda x: x.mean(), info)
+        act_plasticity = compute_plasticity_metrics(
+            actor_ts.params, _actor_ts.params, self.learning_rate, label="actor"
+        )
+        val_plasticity = compute_plasticity_metrics(
+            value_ts.params, _value_ts.params, self.learning_rate, label="critic"
+        )
+
+        info = jax.tree.map(lambda x: x.mean(), info) | act_plasticity | val_plasticity
         return _actor_ts, _value_ts, key, info
+
+    def setup_network_trainstates(
+        self,
+        obs,
+        act_shape,
+        actor_key,
+        value_key,
+        actor_net_cls=ActorNet,
+        value_net_cls=ValueNet,
+        trainstate_cls=TrainState,
+        act_ts_kwargs={},
+        val_ts_kwargs={}
+    ):
+        actor_net = actor_net_cls(act_shape)
+        value_net = value_net_cls()
+        opt = optax.chain(
+            optax.clip_by_global_norm(self.max_grad_norm),
+            optax.inject_hyperparams(optax.adamw)(
+                learning_rate=optax.linear_schedule(
+                    init_value=self.learning_rate,
+                    end_value=self.learning_rate / 10,
+                    transition_steps=self.training_steps,
+                ),
+            ),
+        )
+
+        actor_ts = trainstate_cls.create(
+            apply_fn=actor_net.apply_w_features,
+            params=actor_net.init(actor_key, obs),
+            tx=opt,
+            **act_ts_kwargs
+        )
+        value_ts = trainstate_cls.create(
+            apply_fn=value_net.apply_w_features,
+            params=value_net.init(value_key, obs),
+            tx=opt,
+            **val_ts_kwargs
+        )
+        return actor_ts, value_ts
 
     @staticmethod
     def learn(config: Config):
@@ -373,35 +425,12 @@ class PPO(Config):
         current_global_step = 0
 
         actor_key, value_key, key = random.split(key, num=3)
-
-        actor_net = ActorNet(envs.single_action_space.shape[0])
-        value_net = ValueNet()
-        opt = optax.chain(
-            optax.clip_by_global_norm(ppo_agent.max_grad_norm),
-            optax.inject_hyperparams(optax.adamw)(
-                learning_rate=optax.linear_schedule(
-                    init_value=ppo_agent.learning_rate,
-                    end_value=ppo_agent.learning_rate / 10,
-                    transition_steps=ppo_agent.training_steps,
-                ),
-            ),
+        actor_ts, value_ts = ppo_agent.setup_network_trainstates(
+            last_obs, envs.single_action_space.shape[0], actor_key, value_key
         )
-
-        actor_ts = TrainState.create(
-            apply_fn=actor_net.apply_w_features,
-            params=actor_net.init(actor_key, last_obs),
-            tx=opt,
-        )
-        value_ts = TrainState.create(
-            apply_fn=value_net.apply_w_features,
-            params=value_net.init(value_key, last_obs),
-            tx=opt,
-        )
-
         last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
 
         while current_global_step < ppo_agent.training_steps:
-            print("\ncurrent_global_step:", current_global_step)
             rollout, rollout_info, env_infos = ppo_agent.get_rollout(
                 actor_ts,
                 value_ts,
@@ -425,19 +454,23 @@ class PPO(Config):
             if ppo_agent.log:
                 wandb.log(full_logs, step=current_global_step)
 
-                if current_global_step % 100_000 == 0:
+                if current_global_step % 100_000 * ppo_agent.n_envs == 0:
                     wandb.save(ckpt_path)
 
+        ppo_agent.cleanup()
+
+    @staticmethod
+    def cleanup():
         # Close stuff
         if ppo_agent.log:
-            if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
+            # if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
+            if ppo_agent.log_video_every > 0:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
                 print(r"[x] Uploading Videos ...")
 
             wandb.finish()
-        envs.close()
 
 
 if __name__ == "__main__":
