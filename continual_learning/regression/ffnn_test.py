@@ -7,7 +7,6 @@ from flax.training.train_state import TrainState
 
 # from continual_learning.nn.continual_dense import ContinualDense
 from continual_learning.optim.continual_backprop import (
-    continual_backprop,
     CBPTrainState,
 )
 
@@ -37,7 +36,6 @@ class FFNN(nn.Module):
             "intermediates", "activations", intermediates
         )  # Only really want to reset layers after an activation
 
-
         return x
 
     # @jax.jit
@@ -65,13 +63,16 @@ def test_optim():
     # )
     tx_adam = optax.adam(0)
 
-    net_ts = CBPTrainState.create(apply_fn=net_custom.predict, params=params, tx=tx_adam, maturity_threshold=4)
-    net_ts_adam = TrainState.create(
-        apply_fn=net_custom.predict, params=params, tx=tx_adam
+    net_ts = CBPTrainState.create(
+        apply_fn=net_custom.predict, params=params, tx=tx_adam, maturity_threshold=4
     )
+    net_ts_adam = TrainState.create(apply_fn=net_custom.predict, params=params, tx=tx_adam)
 
     # print weight layer sizes
-    for name, param in net_ts.params["params"].items(): print(name, param["kernel"].shape)
+    for name, param in net_ts.params["params"].items():
+        kernel = param["kernel"]
+        assert isinstance(kernel, jnp.ndarray)
+        print(name, kernel.shape)
 
     # Test backwards pass
     def loss_fn(params, inputs, labels):
@@ -81,9 +82,7 @@ def test_optim():
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
-    (loss, (logits, features)), grads = grad_fn(
-        net_ts.params, dummy_input, dummy_labels
-    )
+    (loss, (logits, features)), grads = grad_fn(net_ts.params, dummy_input, dummy_labels)
 
     # Update parameters
     initial_weights = net_ts.params["params"]["dense1"]["kernel"]
@@ -105,6 +104,10 @@ def test_optim():
     #     print(f"Feature {i} shape: {feat.shape}")
 
     # Print weight changes
+    assert isinstance(updated_weights, jnp.ndarray)
+    assert isinstance(updated_weights_adam, jnp.ndarray)
+    assert isinstance(initial_weights, jnp.ndarray)
+
     weight_diff = jnp.abs(updated_weights - initial_weights)
     weight_diff_adam = jnp.abs(updated_weights_adam - initial_weights)
 

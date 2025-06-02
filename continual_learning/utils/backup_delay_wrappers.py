@@ -1,15 +1,8 @@
-
-from collections import deque
-from random import sample
 import random
-import itertools
 
 import gymnasium as gym
-from gymnasium.core import Env
-from gymnasium.spaces import Tuple, Discrete, Box, Dict
-
 import numpy as np
-from typing import Literal
+from gymnasium.spaces import Box, Dict, Discrete, Tuple
 
 
 class NoneWrapper(gym.Wrapper):
@@ -23,6 +16,7 @@ class NoneWrapper(gym.Wrapper):
         PD=False,
     ):
         super().__init__(env)
+
 
 class UnseenRandomDelayWrapper(RandomDelayWrapper):
     """
@@ -41,9 +35,7 @@ class UnseenRandomDelayWrapper(RandomDelayWrapper):
         return t[0], reset_info
 
     def step(self, action):
-        t, *aux = super().step(
-            action
-        )  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
+        t, *aux = super().step(action)  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
         return (t[0], *aux)
 
 
@@ -98,9 +90,7 @@ class AugmentedRandomDelayWrapper(RandomDelayWrapper):
 
     # Make this more efficient
     def step(self, action):
-        t, *aux = super().step(
-            action
-        )  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
+        t, *aux = super().step(action)  # t: (m, tuple(self.past_actions), alpha, kappa, beta)
         if self.HER:
             # print("step",t[0]['observation'].shape)
             if (
@@ -116,6 +106,7 @@ class AugmentedRandomDelayWrapper(RandomDelayWrapper):
             aug_state = np.append(t[0], t[1])  # Combine action buffer and state
 
         return (aug_state, *aux)
+
 
 class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
     def __init__(
@@ -191,9 +182,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         match self.interval_emb_type:
             case "two_hot":
                 int_emb_len = (
-                    len(self.overall_act_delay_range)
-                    + len(self.overall_obs_delay_range)
-                    - 2
+                    len(self.overall_act_delay_range) + len(self.overall_obs_delay_range) - 2
                 )
             case "float":
                 int_emb_len = 4
@@ -205,9 +194,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         match self.delay_emb_type:
             case "one_hot":
                 delay_emb_len = (
-                    len(self.overall_act_delay_range)
-                    + len(self.overall_obs_delay_range)
-                    - 2
+                    len(self.overall_act_delay_range) + len(self.overall_obs_delay_range) - 2
                 )
             case "float":
                 delay_emb_len = 4
@@ -288,9 +275,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         rel_act_min = self.act_delay_range.start - self.overall_act_delay_range.start
         rel_act_max = self.act_delay_range.stop - self.overall_act_delay_range.start
 
-        if (
-            self.interval_emb_type == "two_hot"
-        ):  # provides the delays as a two hot embedding
+        if self.interval_emb_type == "two_hot":  # provides the delays as a two hot embedding
             two_hot_obs = np.zeros(
                 self.n_obs_delays - 1
             )  # -1 since we cant get max only min when using range()
@@ -324,9 +309,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         action_buffer = obs[
             1
         ]  # Can be variable length based on delay interval so needs padding
-        act_buf_max = (
-            self.overall_act_delay_range.stop + self.overall_obs_delay_range.stop - 1
-        )
+        act_buf_max = self.overall_act_delay_range.stop + self.overall_obs_delay_range.stop - 1
         action_buffer += (0,) * (act_buf_max - len(action_buffer))
 
         # get delays
@@ -354,12 +337,8 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
         elif self.delay_emb_type == "float":
             # Provide as float, relative to the overall interval
 
-            obs_emb = [
-                (obs_delay - self.overall_obs_delay_range.start) / self.n_obs_delays
-            ]
-            act_emb = [
-                (act_delay - self.overall_act_delay_range.start) / self.n_act_delays
-            ]
+            obs_emb = [(obs_delay - self.overall_obs_delay_range.start) / self.n_obs_delays]
+            act_emb = [(act_delay - self.overall_act_delay_range.start) / self.n_act_delays]
             kappa_emb = [
                 (kappa_delay - self.overall_obs_delay_range.start) / self.n_obs_delays
             ]
@@ -368,9 +347,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
 
         # print(obs[0].shape, obs[1][0].shape, obs_emb.shape, act_emb.shape, kappa_emb.shape)
         if self.give_kappa:
-            new_obs = np.concatenate(
-                (obs[0], obs[1], obs_emb, act_emb, kappa_emb), axis=0
-            )
+            new_obs = np.concatenate((obs[0], obs[1], obs_emb, act_emb, kappa_emb), axis=0)
         else:
             new_obs = np.concatenate(
                 (obs[0], np.concatenate(obs[1]), obs_emb, act_emb), axis=0
@@ -386,8 +363,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
             - 1
         )
         padding = tuple(
-            np.zeros_like([recieved_obs[1][-1]]).squeeze()
-            for _ in range(n_padding_needed)
+            np.zeros_like([recieved_obs[1][-1]]).squeeze() for _ in range(n_padding_needed)
         )
         padded_act_buf = padding + recieved_obs[1]
 
@@ -409,9 +385,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
                     *recieved_obs[2:],
                 )
             else:
-                (obs_min, obs_max), (act_min, act_max) = (
-                    self.get_delay_interval_embedding()
-                )
+                (obs_min, obs_max), (act_min, act_max) = self.get_delay_interval_embedding()
                 recieved_obs = (
                     np.concatenate(
                         (

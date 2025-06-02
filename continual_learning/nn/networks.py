@@ -1,18 +1,20 @@
-from flax.linen.module import capture_call_intermediates
-from jaxtyping import Array
+from functools import partial
+
 import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from functools import partial
+from jaxtyping import Array
 
-'''
+"""
 TODO:
  - Compare pre and post activation normalisation as different sources say differently i.e. Disentangling the causes of plasticity in NNs paper
-'''
+"""
+
+
 # Reinforcement Learning base
 class ValueNet(nn.Module):
-    h_size: int = 128 # Size of hidden dimension
+    h_size: int = 128  # Size of hidden dimension
     layer_names: tuple = ("dense1", "dense2")
 
     @nn.compact
@@ -36,11 +38,11 @@ class ValueNet(nn.Module):
 
 class ActorNet(nn.Module):
     n_actions: int
-    h_size: int = 64 # Size of hidden dimension
+    h_size: int = 64  # Size of hidden dimension
     layer_names: tuple = ("dense1", "dense2")
 
     @nn.compact
-    def __call__(self, x) -> distrax.Distribution:
+    def __call__(self, x) -> tuple[jax.Array, jax.Array]:
         intermediates = {}
 
         for i, layer_name in enumerate(self.layer_names):
@@ -68,12 +70,6 @@ class ActorNet(nn.Module):
     def apply_w_features(self, params, x):
         return self.apply(params, x, capture_intermediates=True)
 
-    # @partial(jax.jit, static_argnames="self")
-    # def apply_w_features(self, params, x):
-    #     (mean, scale), features = partial(self.apply, capture_intermediates=True)(params, x)
-    #     return distrax.MultivariateNormalDiag(
-    #             loc=mean, scale_diag=scale
-    #         ), features
 
 # Reinforcement Learning Layer Norm
 class ActorNetLayerNorm(nn.Module):
@@ -83,10 +79,10 @@ class ActorNetLayerNorm(nn.Module):
     def __call__(self, x) -> distrax.Distribution:
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        x = nn.LayerNorm(name=f"layer_norm_1")(x)
+        x = nn.LayerNorm(name="layer_norm_1")(x)
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        x = nn.LayerNorm(name=f"layer_norm_2")(x)
+        x = nn.LayerNorm(name="layer_norm_2")(x)
 
         mean = nn.Dense(self.n_actions, name="mu")(x)
         log_std = self.param(
@@ -100,23 +96,22 @@ class ActorNetLayerNorm(nn.Module):
         logstd_batch = jnp.broadcast_to(
             log_std, mean.shape
         )  # Make logstd the same shape as actions
-        return distrax.MultivariateNormalDiag(
-            loc=mean, scale_diag=jnp.exp(logstd_batch)
-        )
+        return distrax.MultivariateNormalDiag(loc=mean, scale_diag=jnp.exp(logstd_batch))
 
     @partial(jax.jit, static_argnames="self")
     def apply_w_features(self, params, x):
         return self.apply(params, x, capture_intermediates=True)
+
 
 class ValueNetLayerNorm(nn.Module):
     @nn.compact
     def __call__(self, x) -> Array:
         x = nn.Dense(128)(x)
         x = nn.relu(x)
-        x = nn.LayerNorm(name=f"layer_norm_1")(x)
+        x = nn.LayerNorm(name="layer_norm_1")(x)
         x = nn.Dense(64)(x)
         x = nn.relu(x)
-        x = nn.LayerNorm(name=f"layer_norm_2")(x)
+        x = nn.LayerNorm(name="layer_norm_2")(x)
         q_value = nn.Dense(1)(x)
         return q_value
 
@@ -124,36 +119,8 @@ class ValueNetLayerNorm(nn.Module):
     def apply_w_features(self, params, x):
         return self.apply(params, x, capture_intermediates=True)
 
+
 class SimpleNet(nn.Module):
-    n_out: int = 1
-    h_size: int = 128
-
-    @nn.compact
-    def __call__(self, x):
-        intermediates = {}
-
-        layers = [
-            "dense1",
-            "dense2",
-            "dense3",
-        ]
-
-        for i, layer_name in enumerate(layers):
-            x = nn.Dense(features=self.h_size, name=layer_name)(x)
-            x = nn.relu(x)
-            intermediates[layer_name] = x
-
-        x = nn.Dense(features=self.n_out, name="out_layer")(x)
-        # intermediates["out_layer"] = x
-
-        self.sow("intermediates", "activations", intermediates)
-        return x
-
-    @jax.jit
-    def predict(self, params, x):
-        return self.apply({"params": params}, x, capture_intermediates=True)
-
-class OnlineNormNet(nn.Module):
     n_out: int = 1
     h_size: int = 128
 
@@ -283,5 +250,3 @@ class SimpleTestNet(nn.Module):
     @jax.jit
     def predict(self, params, x):
         return self.apply({"params": params}, x, capture_intermediates=True)
-
-

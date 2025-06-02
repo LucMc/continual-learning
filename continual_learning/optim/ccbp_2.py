@@ -1,38 +1,27 @@
-from cgitb import reset
-from flax import struct
+from functools import partial
+from typing import Tuple
+
 import flax.linen as nn
+import jax
+import jax.numpy as jnp
+import jax.random as random
+import optax
+from flax import struct
 from flax.core import FrozenDict
-from flax.typing import FrozenVariableDict
-from jax.random import PRNGKey
-from jaxlib.mlir.dialects.sparse_tensor import out
+from flax.training.train_state import TrainState
 from jaxtyping import (
     Array,
-    Float,
     Bool,
+    Float,
+    Int,
     PRNGKeyArray,
     PyTree,
-    jaxtyped,
-    TypeCheckError,
-    Scalar,
-    Int,
 )
-from beartype import beartype as typechecker
-from flax.training.train_state import TrainState
-from typing import Tuple
-from chex import dataclass
-import optax
-import jax
-import jax.random as random
-import jax.numpy as jnp
-from copy import deepcopy
-from functools import partial
-from dataclasses import field
 
 import continual_learning.optim.utils as utils
 from continual_learning.optim.continual_backprop import (
-    get_out_weights_mag,
-    process_params,
     CBPOptimState,
+    process_params,
 )
 
 """
@@ -42,6 +31,7 @@ lower utility gets more decay/noise essentially.
 Does moving out towards 0 and in towards initial actually help or should both be towards initial?
 
 """
+
 
 # -------------- Overall optimizer TrainState ---------------
 class CCBP2TrainState(TrainState):
@@ -96,7 +86,7 @@ class CCBP2TrainState(TrainState):
 
 # -------------- CCBP Weight reset ---------------
 def reset_weights(
-    reset_mask: PyTree[Float[Array, "#neurons"]], 
+    reset_mask: PyTree[Float[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
     key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
@@ -117,7 +107,10 @@ def reset_weights(
         stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
             (1 - replacement_rate) * layer_w[in_layer]
         )
-        stepped_util_in_weights = utilities[in_layer]*layer_w[in_layer] + (1-utilities[in_layer])*stepped_in_weights
+        stepped_util_in_weights = (
+            utilities[in_layer] * layer_w[in_layer]
+            + (1 - utilities[in_layer]) * stepped_in_weights
+        )
         _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
 
         stepped_out_weights = (replacement_rate * zero_out_weights) + (
@@ -125,14 +118,17 @@ def reset_weights(
         )
 
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        stepped_util_out_weights = utilities[out_layer]*layer_w[out_layer] + (1-utilities[out_layer])*stepped_out_weights
+        stepped_util_out_weights = (
+            utilities[out_layer] * layer_w[out_layer]
+            + (1 - utilities[out_layer]) * stepped_out_weights
+        )
 
         _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
 
         layer_w[in_layer] = _in_layer_w
         layer_w[out_layer] = _out_layer_w
 
-        logs[in_layer] = {"nodes_reset": 0} # n_reset no longer applicable
+        logs[in_layer] = {"nodes_reset": 0}  # n_reset no longer applicable
     logs[out_layer] = {"nodes_reset": 0}
     return layer_w, logs
 
@@ -223,7 +219,12 @@ def continuous_continual_backprop2(
 
             # reset weights given mask
             _weights, reset_logs = reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights, _utility, state.replacement_rate
+                reset_mask,
+                weights,
+                key_tree,
+                state.initial_weights,
+                _utility,
+                state.replacement_rate,
             )
 
             # reset bias given mask

@@ -1,15 +1,12 @@
-from typing import Optional, Tuple, Any
-from functools import partial
 import os
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any, Optional, Tuple
 
 import gymnasium as gym
-from gymnasium.envs.mujoco.ant_v5 import AntEnv
-import jax.random as random
 import jax.numpy as jnp
-
-import continual_learning.envs
+import jax.random as random
+from gymnasium.envs.mujoco.ant_v5 import AntEnv
 
 # Register the environment such that it can easily be used w/ gym.make
 gym.register(
@@ -53,6 +50,7 @@ class SlipperyAntEnv(AntEnv):
 
 class ContinualAntEnv(gym.Env):
     """This continual learning Ant-v5 environment changes the friction every `change_every` timesteps"""
+
     def __init__(
         self,
         min_friction: float = 0.1,
@@ -92,7 +90,9 @@ class ContinualAntEnv(gym.Env):
         self.local_time_steps += 1
         return self.env.step(*args, **kwargs)
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
+    def reset(
+        self, *, seed: Optional[int] = None, options: Optional[dict] = None
+    ) -> Tuple[Any, dict]:
         super().reset(seed=seed)
         if (self.local_time_steps / self.change_every) > 1:
             print(f"[Randomising] @ {self.local_time_steps}")
@@ -108,8 +108,3 @@ class ContinualAntEnv(gym.Env):
 
     def render(self):
         return self.env.render()
-
-
-if __name__ == "__main__":
-    env = ContinualAnt(change_every=1000)
-    obs, _ = env.reset()

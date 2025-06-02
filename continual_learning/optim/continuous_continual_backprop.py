@@ -1,36 +1,26 @@
+from functools import partial
+from typing import Tuple
+
+import jax
+import jax.numpy as jnp
+import jax.random as random
+import optax
 from flax import struct
 from flax.core import FrozenDict
-from flax.core.lift import C
-from flax.typing import FrozenVariableDict
-from jax.random import PRNGKey
+from flax.training.train_state import TrainState
 from jaxtyping import (
     Array,
-    Float,
     Bool,
+    Float,
+    Int,
     PRNGKeyArray,
     PyTree,
-    jaxtyped,
-    TypeCheckError,
-    Scalar,
-    Int,
 )
-from beartype import beartype as typechecker
-from flax.training.train_state import TrainState
-from typing import Tuple
-from chex import dataclass
-import optax
-import jax
-import jax.random as random
-import jax.numpy as jnp
-from copy import deepcopy
-from functools import partial
-from dataclasses import field
 
 import continual_learning.optim.utils as utils
 from continual_learning.optim.continual_backprop import (
-    get_out_weights_mag,
-    process_params,
     CBPOptimState,
+    process_params,
 )
 
 

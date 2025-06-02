@@ -1,29 +1,22 @@
+from functools import partial
+from typing import Tuple
+
+import jax
+import jax.numpy as jnp
+import jax.random as random
+import optax
+from chex import dataclass
 from flax import struct
 from flax.core import FrozenDict
-from flax.typing import FrozenVariableDict
-from jax.random import PRNGKey
+from flax.training.train_state import TrainState
 from jaxtyping import (
     Array,
-    Float,
     Bool,
+    Float,
+    Int,
     PRNGKeyArray,
     PyTree,
-    jaxtyped,
-    TypeCheckError,
-    Scalar,
-    Int,
 )
-from beartype import beartype as typechecker
-from flax.training.train_state import TrainState
-from typing import Tuple
-from chex import dataclass
-import optax
-import jax
-import jax.random as random
-import jax.numpy as jnp
-from copy import deepcopy
-from functools import partial
-from dataclasses import field
 
 import continual_learning.optim.utils as utils
 
@@ -135,7 +128,7 @@ def reset_weights(
     layer_w: PyTree[Float[Array, "..."]],
     key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = None,
+    replacement_rate: Float[Array, ""] | None = None,
 ):
     layer_names = list(reset_mask.keys())
     logs = {}
@@ -222,11 +215,11 @@ def process_params(params: PyTree):
 
     for layer_name in params.keys():
         # For layer norm etc
-        if type(params[layer_name]) != dict:
+        if not isinstance(params[layer_name], dict):
             excluded.update({layer_name: params[layer_name]})
             continue
 
-        elif not ("kernel" in params[layer_name].keys()):
+        elif "kernel" not in params[layer_name].keys():
             excluded.update({layer_name: params[layer_name]})
             continue
 
@@ -326,7 +319,7 @@ def continual_backprop(
             )
 
             new_params = {}
-            _logs = { k: 0 for k in state.logs} # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
@@ -338,7 +331,9 @@ def continual_backprop(
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility)
+            new_state = state.replace(
+                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+            )
             new_params.update(excluded)  # TODO
 
             return {"params": new_params}, (new_state,)
@@ -346,154 +341,3 @@ def continual_backprop(
         return _continual_backprop(updates)
 
     return optax.GradientTransformation(init=init, update=update)
-
-
-""" old code snippets:
-    
-    # Why are exactly half the same?? How can I manage multiple utilities with the same value?
-    # zeros = jnp.zeros_like(k_masked_utility)
-    # twos = jnp.ones_like(k_masked_utility) * 2
-    # new_mask = jnp.where(k_masked_utility, twos, zeros) # 2=reset inp,1=reset out,0=Nothing
-
-            # reflect_mask(reset_mask, weights)
-            # next_layer_mask = jnp.roll(reset_mask, shift=1)
-
-            # Ensure this optimiser is running
-            # cbp_update = reset_params(reset_mask, weights, bias, state.ages, features, key_tree)
-            # cbp_update = jax.tree.map(
-            #     reset_params,
-            #     reset_mask,
-            #     weights,
-            #     bias,
-            #     state.ages,
-            #     features,
-            #     key_tree,
-            # )  # This is the mask for incoming weights, we need to reflect it for outgoing weights too
-            # , next_layer_weight_sum) # Instead of applying to each neuron we split it into layers now
-            # age_split = jax.vmap(lambda x: x, in_axes=(0,))(cbp_update)
-
-    # utilities=_utilities,
-    # mean_feature_act=_mean_feature_act,
-    # util_type_id=_util_type_id,
-    # accumulated_features_to_replace=_accumulated_features_to_replace,
-    # step_size=_step_size,
-    # replacement_rate=_replacement_rate,
-    # decay_rate=_decay_rate,
-    # maturity_threshold=_maturity_threshold,
-    # accumulate=_accumulate,
-
-            # TODO: Replace with vmap/treemap
-            # def split_data(layer):
-            #     # ages = layer.pop("ages")
-            #     logs = layer.pop("logs")
-            #     return layer, logs
-
-            # for key, value in cbp_update.items():
-            #     new_params[key], new_ages[key], new_logs[key] = split_data(value)
-
-            # IDEA: Would generating a rondom number and if it is bellow the threshold then rplace if elegible be better as it introduces more randomness?
-            # num_new_features_to_replace = state.replacement_rate * eligable_features_to_replace
-            # new_accumulated_features_to_replace += features_to_replace
-            # I actually think it's this layers weight sum since this layer weights connect to next
-            # See ""calculate feature utility"" because it looks a little different, certainly need features
-            # bias_correction = 1 - state.decay_rate ** self.ages
-            # bias_correction = jax.tree.map(
-            #     lambda a: 1 - state.decay_rate**a, state.ages
-            # )
-
-            # layerwise_utility = jax.vmap(utility, in_axes=(0, None))(params) # Expect (layer_n, params) and map over layer_n
-            # next_layer_weight_sum = jax.tree.map(lambda layer: layer.sum(), params) # Instead of applying to each neuron we split it into layers now
-            # updated_utility = (state.decay_rate * layer) + (1-state.decay_rate) * jnp.abs(features) * next_layer_weight_sum
-            # idx_nodes_to_reset = lax.top_k_idx(, )
-
-            k_masked_utility = jax.lax.cond(
-                n_to_replace == 0,
-                lambda _: jnp.full_like(sorted_utility, fill_value=False, dtype=bool),
-                lambda _: jnp.asarray(sorted_utility < sorted_utility[n_to_replace - 1], dtype=bool),
-                operand=None
-            )
-
-            # resetting outbound connections [128] per node
-            # if len(idx_nodes_to_reset) > 0:
-            #     _layer_w = layer_w.at[idx_nodes_to_reset].set(
-            #         random.uniform(key, layer_w.shape[1], float, -bound, bound)
-            #     )
-            #     _ages = ages.at[idx_nodes_to_reset].set(0.0)
-            #     _layer_b = layer_b.at[idx_nodes_to_reset].set(0.0)
-            # else:
-            #     _layer_w = layer_w
-            #     _layer_b = layer_b
-            #     _ages = ages + 1
-
-            # mature_utils = updated_utility[:, maturity_mask]
-            #
-            # idx_nodes_to_reset = mature_utils[
-            #     jnp.argsort(mature_utils)[-n_to_replace:][::-1]
-            # ]
-        # util_functions = [
-        #     lambda x: output_weight_mag, # weight
-        #     lambda x: weight_mag * features.abs().mean(dim=1), # contribution
-        # lambda x: x, # adaptation
-        # lambda x: x, # zero_contribution
-        # lambda x: x, # adaptable_contribution
-        # lambda x: x, # feature_by_input
-        # ]
-        # Calculate new_util based on util_type
-        # util_function =
-
-        # new_params_after_cbp = new_params_from_tx # THIS MAKES IT EQUAL ADAM THEREFORE NEWPARAMS ARNT THE SAME?
-
-        ## debug -- Add to testing, only with --no-jit
-        # if self.cbp_state.replacement_rate == 0:
-        # equal_leaves = jax.tree_util.tree_map(lambda x, y: jnp.array_equal(x, y), params_after_tx, params_after_cbp)
-        # flat, _ = jax.tree_flatten(equal_leaves)
-        # assert jnp.all(jnp.array(flat)), f"Tree has changed: {breakpoint()}"
-
-        # assert jax.tree_util.tree_structure(params_after_tx) == jax.tree_util.tree_structure(params_after_cbp)
-        # assert jax.tree.map(lambda p1, p2: jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
-        #
-        # elif self.cbp_state.maturity_threshold == 0:
-        #     assert jax.tree.map(lambda p1, p2: not jnp.all(p1==p2), new_params_after_cbp, new_params_from_tx), f"old params != new params: \nOld Params['dense_1']:\n{params_for_cbp['dense_1']}\nNew Params['dense_1']:\n{new_params['dense_1']}"
-
-    # out_tree = {
-    #     "dense1": w_mags["dense2"],  # [128,]
-    #     "dense2": w_mags["dense3"],  # [128,]
-    #     "dense3": w_mags["out_layer"],
-    # }  # [128,]
-    # for k in w_mags.keys()[-1:]:
-    # _, unravel_fn = jax.flatten_util.ravel_pytree(w_mags)
-    # first_layer = w_mags.pop(w_mags.keys()[0]) # Pop first layer
-    # return unravel_fn(jnp.concatenate((flat_ws[1:], jnp.array([jnp.nan])))) # Offset and nan last layer as no weights out of output layer
-
-# @jaxtyped(typechecker=typechecker)
-def process_params_old(params: PyTree):
-    out_layer_name = "out_layer"
-
-    _params = deepcopy(params)  # ["params"]
-
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
-
-    for layer_name in _params.keys():
-        # For layer norm etc
-        if not ("kernel" in _params[layer_name].keys()):
-            excluded.update({layer_name: _params[layer_name]})
-            continue
-
-        bias[layer_name] = _params[layer_name].pop("bias")
-        weights[layer_name] = _params[layer_name].pop("kernel")
-
-    out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, out_w_mag, excluded
-
-
-"""
