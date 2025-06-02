@@ -77,7 +77,6 @@ class CBPOptimState:
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
 
 
-
 # -------------- Overall optimizer TrainState ---------------
 class CBPTrainState(TrainState):
     cbp_state: optax.OptState = struct.field(pytree_node=True)
@@ -136,7 +135,7 @@ def reset_weights(
     layer_w: PyTree[Float[Array, "..."]],
     key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
-    bound: Float[Array, ""] = 0.01,
+    replacement_rate: Float[Array, ""] = None,
 ):
     layer_names = list(reset_mask.keys())
     logs = {}

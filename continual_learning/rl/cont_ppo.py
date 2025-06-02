@@ -305,7 +305,7 @@ class ContPPO(PPO, ContConfig):
             match ppo_agent.dormant_reset_method:
                 case "cbp": trainstate_cls = CBPTrainState
                 case "ccbp": trainstate_cls = CCBPTrainState
-                case "redo": trainstate_cls = None # TODO
+                case "redo": trainstate_cls = None
 
             act_ts_kwargs = dict(rng=cbp_actor_key)
             val_ts_kwargs = dict(rng=cbp_value_key)

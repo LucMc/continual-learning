@@ -1,5 +1,6 @@
 from flax import struct
 from flax.core import FrozenDict
+from flax.core.lift import C
 from flax.typing import FrozenVariableDict
 from jax.random import PRNGKey
 from jaxtyping import (
@@ -26,26 +27,11 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.optim.utils as utils
-from continual_learning.optim.continual_backprop import get_out_weights_mag, process_params, get_reset_mask
-
-@dataclass
-# @jaxtyped(typechecker=typechecker)
-class CCBPOptimState:
-    initial_weights: PyTree[Float[Array, "..."]]
-    utilities: Float[Array, "#n_layers"]
-    mean_feature_act: Float[Array, ""]
-    ages: Array
-    util_type_id: int
-    accumulated_features_to_replace: int
-
-    rng: PRNGKeyArray  # = random.PRNGKey(0)
-    step_size: float = 0.001
-    replacement_rate: float = 0.01
-    decay_rate: float = 0.9
-    maturity_threshold: int = 100
-    accumulate: bool = False
-    logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
-
+from continual_learning.optim.continual_backprop import (
+    get_out_weights_mag,
+    process_params,
+    CBPOptimState,
+)
 
 
 # -------------- Overall optimizer TrainState ---------------
@@ -100,13 +86,12 @@ class CCBPTrainState(TrainState):
 
 
 # -------------- CCBP Weight reset ---------------
-# @jaxtyped(typechecker=typechecker)
 def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
     key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
-    bound: Float[Array, ""] = 0.01,
+    replacement_rate: Float[Array, ""] = 0.01,
 ):
     layer_names = list(reset_mask.keys())
     logs = {}
@@ -125,9 +110,16 @@ def reset_weights(
 
         # TODO: Check this is resetting the correct row and columns
         in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-        # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
-        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
 
+        # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
+        stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
+            (1 - replacement_rate) * layer_w[in_layer]
+        )
+        _in_layer_w = jnp.where(in_reset_mask, stepped_in_weights, layer_w[in_layer])
+
+        stepped_out_weights = (replacement_rate * zero_out_weights) + (
+            (1 - replacement_rate) * layer_w[out_layer]
+        )
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
         _out_layer_w = jnp.where(out_reset_mask, zero_out_weights, layer_w[out_layer])
         n_reset = reset_mask[in_layer].sum()
@@ -140,7 +132,6 @@ def reset_weights(
     return layer_w, logs
 
 
-# @jaxtyped(typechecker=typechecker)
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
@@ -155,7 +146,6 @@ def get_updated_utility(  # Add batch dim
 
 
 # -------------- mature only mask ---------------
-# @jaxtyped(typechecker=typechecker)
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
@@ -170,7 +160,6 @@ def get_reset_mask(
 
 
 # -------------- Main CCBP Optimiser body ---------------
-# @jaxtyped(typechecker=typechecker)
 def continuous_continual_backprop(
     util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
@@ -182,7 +171,7 @@ def continuous_continual_backprop(
 
         del params  # Delete params?
 
-        return CCBPOptimState(
+        return CBPOptimState(
             initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
@@ -198,13 +187,13 @@ def continuous_continual_backprop(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: CCBPOptimState,
+        state: CBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
-    ) -> tuple[optax.Updates, CCBPOptimState]:
+    ) -> tuple[optax.Updates, CBPOptimState]:
         def _continuous_continual_backprop(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CCBPOptimState]:
+        ) -> Tuple[optax.Updates, CBPOptimState]:
             weights, bias, out_w_mag, excluded = process_params(params)
 
             new_rng, util_key = random.split(state.rng)
@@ -232,7 +221,7 @@ def continuous_continual_backprop(
 
             # reset weights given mask
             _weights, reset_logs = reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights
+                reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
             )
 
             # reset bias given mask
@@ -252,7 +241,7 @@ def continuous_continual_backprop(
             )
 
             new_params = {}
-            _logs = { k: 0 for k in state.logs} # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
@@ -264,7 +253,9 @@ def continuous_continual_backprop(
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility)
+            new_state = state.replace(
+                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+            )
             new_params.update(excluded)  # TODO
 
             return {"params": new_params}, (new_state,)
@@ -272,4 +263,3 @@ def continuous_continual_backprop(
         return _continuous_continual_backprop(updates)
 
     return optax.GradientTransformation(init=init, update=update)
-
