@@ -40,6 +40,7 @@ from continual_learning.nn import (
 )
 from continual_learning.optim.continual_backprop import CBPTrainState
 from continual_learning.optim.continuous_continual_backprop import CCBPTrainState
+from continual_learning.optim.ccbp_2 import CCBP2TrainState
 from continual_learning.utils.miscellaneous import compute_plasticity_metrics
 from continual_learning.utils.wrappers_rd import (
     # ContinualRandomIntervalDelayWrapper,
@@ -76,7 +77,7 @@ class ContConfig(Config):
 
     # New params
     layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
-    dormant_reset_method: Literal["cbp", "ccbp", "redo", "none"] = (
+    dormant_reset_method: Literal["cbp", "ccbp", "ccbp2", "redo", "none"] = (
         "none"  # Dormant neuron reactivation method
     )
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
@@ -220,6 +221,8 @@ class ContPPO(PPO, ContConfig):
             buffer_size=config.rollout_steps,
             **config.__dict__,
         )
+        cbp_params = {} # Change cbp options here i.e. "maturity_threshold": jnp.inf
+
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
         pprint(ppo_agent.__dict__)
         env_args = {}
@@ -296,19 +299,23 @@ class ContPPO(PPO, ContConfig):
         if ppo_agent.optim == "adamw": tx = optax.adamw
         if ppo_agent.optim == "sgd": tx = optax.sgd
         if ppo_agent.optim == "muon": tx = optax.contrib.muon
-        if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.0001)
+        if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
+        # For some reason loads of decay seems to work better...
         # fmt: on
 
         # Continual backpropergation
         if ppo_agent.dormant_reset_method != "none":
             cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
             match ppo_agent.dormant_reset_method:
-                case "cbp": trainstate_cls = CBPTrainState
-                case "ccbp": trainstate_cls = CCBPTrainState
-                case "redo": trainstate_cls = None
+                case "cbp":
+                    trainstate_cls = CBPTrainState
+                case "ccbp":
+                    trainstate_cls = CCBPTrainState
+                case "ccbp2":
+                    trainstate_cls = CCBP2TrainState
 
-            act_ts_kwargs = dict(rng=cbp_actor_key)
-            val_ts_kwargs = dict(rng=cbp_value_key)
+            act_ts_kwargs = dict(rng=cbp_actor_key) | cbp_params
+            val_ts_kwargs = dict(rng=cbp_value_key) | cbp_params
         else:
             trainstate_cls = TrainState
             act_ts_kwargs = {}
