@@ -18,7 +18,7 @@ do
     for reset_method in "${dormant_reset_methods[@]}"
     do
         echo "Running with seed: $seed, dormant-reset-method: $reset_method"
-        python "$python_script" --seed "$seed" --dormant-reset-method "$reset_method"
+        python "$python_script" --seed "$seed" --dormant-reset-method "$reset_method --log"
         
         echo "Seed $seed with reset method $reset_method completed successfully"
         echo "-----------------------------------"
