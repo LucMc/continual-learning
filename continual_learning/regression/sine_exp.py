@@ -16,7 +16,7 @@ from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
 )
-import continual_learning.nn.utils as utils
+import continual_learning.utils.metrics as metrics
 from continual_learning.nn import SimpleNet, SimpleNetLayerNorm
 
 import tyro
@@ -365,7 +365,7 @@ def continual_sine_learning(
                 else current_params
             )
             current_params_dict[name] = param_dict  # Store for potential reuse
-            plasticity_metrics[name] = utils.compute_plasticity_metrics(
+            plasticity_metrics[name] = metrics.compute_plasticity_metrics_regression(
                 initial_params[name], param_dict
             )
 
@@ -398,13 +398,13 @@ def continual_sine_learning(
 
             # Compute overall forgetting metrics
             for name in method_names:
-                forgetting_metrics[name] = utils.compute_forgetting_metrics(
+                forgetting_metrics[name] = metrics.compute_forgetting_metrics(
                     all_current_losses[name], all_best_losses[name]
                 )
 
         # --- Compute Tradeoff and Store Metrics ---
         for name in method_names:
-            tradeoff_metrics[name] = utils.stability_plasticity_tradeoff(
+            tradeoff_metrics[name] = metrics.stability_plasticity_tradeoff(
                 adaptation_metrics[name], forgetting_metrics[name]["avg_forgetting"]
             )
 
@@ -478,7 +478,7 @@ def continual_sine_learning(
         # --- Save and Plot Results Periodically ---
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
             # Unpack the metrics dictionary for the plotting function
-            utils.plot_results(
+            metrics.plot_results(
                 all_metrics=all_metrics,
                 # [all_metrics[name] for name in method_names], # Pass lists in order
                 # method_names=method_names, # Pass names for labels
@@ -489,7 +489,7 @@ def continual_sine_learning(
             # or ensure the order matches what plot_results expects.
 
     # --- Final Analysis ---
-    utils.print_summary_metrics(
+    metrics.print_summary_metrics(
         all_metrics=all_metrics
         # *[all_metrics[name] for name in method_names],
         # method_names=method_names # Also pass names here

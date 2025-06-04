@@ -6,13 +6,40 @@ import polars as pl
 import pandas as pd
 import os
 import numpy as np
+from functools import partial
+from flax.traverse_util import ModelParamTraversal
 
 
 def name_prefix(module: nn.Module) -> str:
     return module.name + "_" if module.name else ""
 
+@partial(jax.jit, static_argnames=["learning_rate", "label"])
+def compute_plasticity_metrics(old_params, new_params, learning_rate, label="net"):
+    """Compute neural plasticity metrics, normalised by learning rate"""
+    metrics = {}
 
-def compute_plasticity_metrics(old_params, new_params):
+    # Calculate weight changes for each layer
+    total_abs_change = 0
+    total_weights = 0
+    kernel_traversal = ModelParamTraversal(lambda path_str, _: path_str.endswith('/kernel'))
+    
+    # Consider scan to reduce compile time for large networks
+    for old_weights, new_weights in zip(kernel_traversal.iterate(old_params), kernel_traversal.iterate(new_params)):
+        
+        # Calculate changes
+        abs_changes = jnp.abs(new_weights - old_weights)
+
+        # Update totals
+        total_abs_change += jnp.sum(abs_changes)
+        total_weights += old_weights.size
+
+    # Overall metrics
+    normalised_change = total_abs_change / learning_rate
+
+    return {f"{label}_plasticity": normalised_change / total_weights }
+
+
+def compute_plasticity_metrics_regression(old_params, new_params):
     """Compute metrics related to neural plasticity."""
     metrics = {}
 

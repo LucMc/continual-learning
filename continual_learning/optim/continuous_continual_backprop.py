@@ -26,7 +26,7 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.optim.utils as utils
+import continual_learning.utils.optim as utils
 from continual_learning.optim.continual_backprop import (
     get_out_weights_mag,
     process_params,
@@ -132,22 +132,8 @@ def reset_weights(
     return layer_w, logs
 
 
-def get_updated_utility(  # Add batch dim
-    out_w_mag: Float[Array, "#weights"],
-    utility: Float[Array, "#neurons"],
-    features: Float[Array, "#batch #neurons"],
-    decay_rate: Float[Array, ""] = 0.9,
-):
-    # Remove batch dim from some inputs just in case
-    updated_utility = (
-        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features) * out_w_mag
-    ).flatten()  # Arr[#neurons]
-    return updated_utility
-
-
 # -------------- mature only mask ---------------
 def get_reset_mask(
-    updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
     maturity_threshold: Int[Array, ""] = 100,
     replacement_rate: Float[Array, ""] = 0.01,
@@ -199,30 +185,21 @@ def continuous_continual_backprop(
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            # vmap utility calculation over batch
-            batched_util_calculation = jax.vmap(
-                partial(get_updated_utility, decay_rate=state.decay_rate),
-                in_axes=(None, None, 0),
-            )
-            _utility_batch = jax.tree.map(
-                batched_util_calculation, out_w_mag, state.utilities, features
-            )
-            _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
-
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
                     maturity_threshold=state.maturity_threshold,
                     replacement_rate=state.replacement_rate,
                 ),
-                _utility,
                 state.ages,
             )
 
             # reset weights given mask
-            _weights, reset_logs = reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
-            )
+            # _weights, reset_logs = reset_weights(
+            #     reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
+            # )
+            _weights = weights
+            reset_logs = {}
 
             # reset bias given mask
             _bias = jax.tree.map(
@@ -230,6 +207,7 @@ def continuous_continual_backprop(
                 reset_mask,
                 bias,
             )
+            _bias = bias
 
             # Update ages
             _ages = jax.tree.map(
@@ -241,7 +219,7 @@ def continuous_continual_backprop(
             )
 
             new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: Improve logging
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
@@ -254,7 +232,7 @@ def continuous_continual_backprop(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+                ages=_ages, rng=new_rng, logs=FrozenDict(_logs)
             )
             new_params.update(excluded)  # TODO
 

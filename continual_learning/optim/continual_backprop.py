@@ -25,7 +25,7 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.optim.utils as utils
+import continual_learning.utils.optim as utils
 
 """
 TODO:

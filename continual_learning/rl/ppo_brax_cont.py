@@ -1,17 +1,5 @@
-"""
-LayerNorm reduces grads, so increase lr, delay increases grads so decrease lr
-would be nice to adjust lr automatically to get the same grad curve under each condition...
-
-TODO:
- - Remember the total delay subtly influences things as it affects the total action buf size
- - Change from calculating mini-batches based on batch_size to using n_mini_batches a
- param directly (less to change when chaning n_envs/ more intuitive)
- - Test w/ multiple envs?
- - Test w/ changing constant delays too
- - Add logs for env delay/ friction - i.e. in info and add info
-"""
-
 import enum
+import brax.envs
 from typing import Tuple, Literal, override
 from chex import dataclass
 import jax
@@ -41,12 +29,13 @@ from continual_learning.nn import (
 from continual_learning.optim.continual_backprop import CBPTrainState
 from continual_learning.optim.continuous_continual_backprop import CCBPTrainState
 from continual_learning.optim.ccbp_2 import CCBP2TrainState
-from continual_learning.utils.metrics import compute_plasticity_metrics
+from continual_learning.utils.miscellaneous import compute_plasticity_metrics
 from continual_learning.utils.wrappers_rd import (
     # ContinualRandomIntervalDelayWrapper,
     ContinualIntervalDelayWrapper,
 )
-from continual_learning.rl.ppo import PPO, Config
+from continual_learning.rl.cont_ppo import ContConfig
+from continual_learning.rl.ppo_brax import BraxPPO, BraxConfig
 import gymnasium_robotics
 
 # import time
@@ -56,40 +45,18 @@ from beartype import beartype as typechecker
 
 
 @dataclass(frozen=True)
-class ContConfig(Config):
-    """Only need to specify new params, over overwrite existing defaults in ppo.py"""
+class BraxContConfig(ContConfig, BraxConfig):  # Inherit for defaults
+    """Only need to specify new params, or overwrite existing defaults in ppo.py"""
 
-    # Changed defaults
-    # training_steps: int = 2_000_000  # total training time-steps
-    # n_envs: int = 1  # number of parralel training envs
-    # rollout_steps: int = 64 * 20  # env steps per rollout
-    # env_id: str = "ContinualAnt-v0"
-    # batch_size: int = 64  # minibatch size
-    # clip_range: float = 0.2  # policy clip range
-    # epochs: int = 10  # number of epochs for fitting mini-batches
-    # max_grad_norm: float = 0.5  # maximum gradient norm
-    # gamma: float = 0.99  # discount factor
-    # vf_clip_range: float = np.inf  # vf clipping (typically higher than clip_range)
-    # ent_coef: float = 0.0  # how much exploration?
-    # gae_lambda: float = 0.95  # bias-variance tradeoff in gae
-    # learning_rate: float = 3e-4  # lr for both actor and critic
-    # vf_coef: float = 0.5  # balance vf loss magnitude
-
-    # New params
-    layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
-    dormant_reset_method: Literal["cbp", "ccbp", "ccbp2", "redo", "none"] = (
-        "none"  # Dormant neuron reactivation method
-    )
-    optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
-    run_name: str = ""  # Postfix name for training run
-    delay_type: Literal["none", "random", "random_incremental", "constant", "incremental"] = (
-        "none"
-    )
-    changes: int = 10  # How many env changes for continual learning (if using ContinualAnt-v0 or delay=True)
+    env_id: str = "ant"  # BRAX env name
+    training_steps: int = 500_000 * 256  # total training time-steps
+    n_envs: int = 32  # number of parralel training envs
+    rollout_steps: int = 1024 * 16  # env steps per rollout
+    batch_size: int = 64 * 4  # minibatch size
 
 
 @dataclass(frozen=True)
-class ContPPO(PPO, ContConfig):
+class BraxContPPO(BraxPPO, BraxContConfig):
     buffer_size: int = 2048
 
     @partial(jax.jit, static_argnames=["self"])
@@ -175,57 +142,19 @@ class ContPPO(PPO, ContConfig):
             },
         )
 
-    def make_env(self: PPO, idx: int, video_folder: str = None, env_args: dict = {}):
-        def thunk():
-            if self.delay_type != "none":
-                print(":: Added continual time delays ::")
-                change_every = env_args.pop("change_every")
-                env = gym.make(self.env_id, **env_args)
-                # env = ContinualRandomIntervalDelayWrapper(
-                env = ContinualIntervalDelayWrapper(
-                    env,
-                    change_every=change_every,
-                    obs_delay_range=range(0, 4),
-                    act_delay_range=range(0, 4),
-                    delay_type=self.delay_type,
-                )
-
-            else:
-                env = gym.make(self.env_id, **env_args)
-
-            # env = gym.wrappers.FlattenObservation(env)
-            env = gym.wrappers.RecordEpisodeStatistics(env)
-            env = gym.wrappers.ClipAction(env)
-            # env = gym.wrappers.NormalizeObservation(env)
-            # env = gym.wrappers.NormalizeReward(env, gamma=0.99) # TODO: replace with actual gamma
-            if isinstance(env.observation_space, gym.spaces.Dict):
-                print(f":: Original observation space: {env.observation_space}")
-                env = gym.wrappers.FlattenObservation(env)
-                print(f":: Flattened observation space: {env.observation_space}")
-
-            if self.log_video_every > 0 and idx == 0:
-                print(":: Recording Videos ::")
-                env = gym.wrappers.RecordVideo(
-                    env,
-                    video_folder,
-                    lambda t: t % self.log_video_every == 0,
-                )
-            return env
-
-        return thunk
+    def make_env(self, video_folder: str = None, env_args: dict = {}):
+        # TODO: Add wrappers
+        return brax.envs.wrappers.training.wrap(brax.envs.get_environment(self.env_id))
 
     @override
     @staticmethod
-    def learn(config: ContConfig):
-        ppo_agent = ContPPO(
-            buffer_size=config.rollout_steps,
-            **config.__dict__,
-        )
-        cbp_params = {} # Change cbp options here i.e. "maturity_threshold": jnp.inf
+    def learn(config: BraxContConfig):
+        ppo_agent = BraxContPPO(buffer_size=config.rollout_steps, **config.__dict__)
+        cbp_params = {}  # Change cbp options here i.e. "maturity_threshold": jnp.inf
+        env_args = {}
 
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
         pprint(ppo_agent.__dict__)
-        env_args = {}
 
         if ppo_agent.log_video_every > 0:
             base_video_dir = Path("videos")
@@ -260,29 +189,21 @@ class ContPPO(PPO, ContConfig):
             )
 
         # Specific to this setup, should probably add a config file for env_args?
-        if (
-            ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay_type != "none"
-        ):  # Add change every as param?
-            env_args.update(
-                {"change_every": ppo_agent.training_steps // ppo_agent.changes}
-            )  # should be 10
+        if ppo_agent.env_id == "ContinualAnt-v0" or ppo_agent.delay_type != "none":
+            env_args.update({"change_every": ppo_agent.training_steps // ppo_agent.changes})
 
         ckpt_path = "./checkpoints"
-        assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (  # TODO: Make adaptive
-            "Must have rollout steps divisible into batches"
+        assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (
+            "rollout steps indivisible into batches"
         )
 
-        envs = gym.vector.SyncVectorEnv(
-            [
-                ppo_agent.make_env(i, video_folder=video_folder, env_args=env_args)
-                for i in range(ppo_agent.n_envs)
-            ]
-        )
-        dummy_obs, _ = envs.reset(seed=ppo_agent.seed)
         key = random.PRNGKey(ppo_agent.seed)
-        current_global_step = 0
+        env_keys, actor_key, value_key, key = random.split(key, num=4)
+        initial_reset_keys = random.split(env_keys, num=ppo_agent.n_envs)
+        env = ppo_agent.make_env(video_folder=video_folder, env_args=env_args)
 
-        actor_key, value_key, key = random.split(key, num=3)
+        states = env.reset(initial_reset_keys)
+        current_global_step = 0
 
         if ppo_agent.layer_norm:
             print(":: Using LayerNorm layers ::")
@@ -296,23 +217,20 @@ class ContPPO(PPO, ContConfig):
         # Select optimiser
         # fmt: off
         if ppo_agent.optim == "adam": tx = optax.adam
-        if ppo_agent.optim == "adamw": tx = optax.adamw
-        if ppo_agent.optim == "sgd": tx = optax.sgd
-        if ppo_agent.optim == "muon": tx = optax.contrib.muon
-        if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
-        # For some reason loads of decay seems to work better...
-        # fmt: on
+        elif ppo_agent.optim == "adamw": tx = optax.adamw
+        elif ppo_agent.optim == "sgd": tx = optax.sgd
+        elif ppo_agent.optim == "muon": tx = optax.contrib.muon
+        elif ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
+        else: raise "Unsupported optimiser"
 
         # Continual backpropergation
         if ppo_agent.dormant_reset_method != "none":
             cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
+
             match ppo_agent.dormant_reset_method:
-                case "cbp":
-                    trainstate_cls = CBPTrainState
-                case "ccbp":
-                    trainstate_cls = CCBPTrainState
-                case "ccbp2":
-                    trainstate_cls = CCBP2TrainState
+                case "cbp": trainstate_cls = CBPTrainState
+                case "ccbp": trainstate_cls = CCBPTrainState
+                case "ccbp2": trainstate_cls = CCBP2TrainState
 
             act_ts_kwargs = dict(rng=cbp_actor_key) | cbp_params
             val_ts_kwargs = dict(rng=cbp_value_key) | cbp_params
@@ -321,13 +239,13 @@ class ContPPO(PPO, ContConfig):
             act_ts_kwargs = {}
             val_ts_kwargs = {}
 
-        last_obs, first_info = envs.reset()
+        # fmt: on
         last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
 
         # Create trainstates
         actor_ts, value_ts = ppo_agent.setup_network_trainstates(
-            last_obs,
-            envs.single_action_space.shape[0],
+            states.obs,
+            env.action_size,
             actor_key,
             value_key,
             actor_net_cls=actor_net_cls,
@@ -338,13 +256,8 @@ class ContPPO(PPO, ContConfig):
         )
 
         while current_global_step < ppo_agent.training_steps:
-            rollout, rollout_info, env_infos = ppo_agent.get_rollout(
-                actor_ts,
-                value_ts,
-                envs,
-                last_obs,
-                last_episode_starts,
-                key,
+            states, rollout, rollout_info, env_infos = ppo_agent.get_rollout(
+                actor_ts, value_ts, env, states, key
             )
 
             current_global_step += ppo_agent.rollout_steps * ppo_agent.n_envs
@@ -371,51 +284,9 @@ class ContPPO(PPO, ContConfig):
                         print("Checkpoint failed")
                         breakpoint()
 
-        # Upload videos and close
-        if ppo_agent.log:
-            if ppo_agent.log_video_every > 0:
-                print("[ ] Uploading Videos ...", end="\r")
-                for video_name in os.listdir(video_folder):
-                    print("Check line bellow")
-                    wandb.log({video_name: wandb.Video(str(video_folder / video_name))})
-                print(r"[x] Uploading Videos ...")
-
-            wandb.finish()
-        envs.close()
+        ppo_agent.cleanup()
 
 
 if __name__ == "__main__":
-    config = tyro.cli(ContConfig)
-    ContPPO.learn(config)
-
-# _reward = np.where(truncated, self.gamma * value_ts.apply_fn(value_ts.params, jnp.array(_obs)).item(), reward) # should be added to r anyway
-#
-# @partial(jax.jit, static_argnames="self")
-# def compute_returns_and_advantage(  # TODO: Replace loop with scan keeping advs ass carry instead of at/set
-#     self, rewards, values, episode_starts, last_value: Array, done: np.ndarray
-# ) -> None:
-#     buffer_size = values.shape[0]
-#     advantages = jnp.ones(buffer_size)
-#
-#     last_gae_lam = 0
-#     for step in reversed(range(buffer_size)):
-#         if step == buffer_size - 1:
-#             next_non_terminal = 1.0 - done.astype(np.float32)
-#             next_values = last_value
-#         else:
-#             next_non_terminal = 1.0 - episode_starts[step + 1]
-#             next_values = values[step + 1]
-#         # next values shape (1024, 4, 4 1) check sbx and logic
-#         delta = (
-#             rewards[step]
-#             + self.gamma * next_values * next_non_terminal
-#             - values[step]
-#         )
-#         last_gae_lam = (
-#             delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-#         )
-#         advantages = advantages.at[step].set(last_gae_lam[0])
-#
-#     returns = advantages + values
-#     return returns, advantages
-#
+    config = tyro.cli(BraxContConfig)
+    BraxContPPO.learn(config)

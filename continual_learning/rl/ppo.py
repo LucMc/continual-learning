@@ -17,7 +17,7 @@ import tyro
 import os
 from pathlib import Path
 from continual_learning.nn import ActorNet, ValueNet
-from continual_learning.utils.miscellaneous import compute_plasticity_metrics
+from continual_learning.utils.metrics import compute_plasticity_metrics
 
 """
 Base PPO class with networks in ../networks/nn.py modified to pass features to optimiser
@@ -459,19 +459,18 @@ class PPO(Config):
 
         ppo_agent.cleanup()
 
-    @staticmethod
-    def cleanup():
+
+    def cleanup(self):
         # Close stuff
-        if ppo_agent.log:
+        if self.log:
             # if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
-            if ppo_agent.log_video_every > 0:
+            if self.log_video_every > 0:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
                 print(r"[x] Uploading Videos ...")
 
             wandb.finish()
-
 
 if __name__ == "__main__":
     config = tyro.cli(Config)
