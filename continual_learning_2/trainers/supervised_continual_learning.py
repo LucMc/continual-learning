@@ -13,17 +13,20 @@ class Network(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        x = x.reshape(x.shape[0], -1)
+        x /= 255
         x = nn.Dense(256)(x)
-        x = nn.relu(x)
+        x = jax.nn.relu(x)
         x = nn.Dense(256)(x)
-        x = nn.relu(x)
+        x = jax.nn.relu(x)
         x = nn.Dense(self.num_classes)(x)
         return x
 
 
+@jax.jit
 def update_network(network_state: TrainState, x, y) -> tuple[float, TrainState]:
     def loss_fn(params):
-        logits = network_state.apply_fn(params, x.reshape(x.shape[0], -1))
+        logits = network_state.apply_fn(params, x)
         return optax.softmax_cross_entropy(logits, y).mean()
 
     loss, grads = jax.value_and_grad(loss_fn)(network_state.params)
@@ -35,7 +38,7 @@ def train(dataset: ContinualLearningDataset):
     key = jax.random.PRNGKey(42)
 
     network = Network(dataset.NUM_CLASSES)
-    optimizer = optax.adam(learning_rate=0.001)
+    optimizer = optax.adam(learning_rate=3e-4)
     init_params = network.init(
         key, jnp.ones((1, 28 * 28))
     )  # TODO: Find a way to get this from the dataset lol
@@ -53,11 +56,11 @@ def train(dataset: ContinualLearningDataset):
                 print(f"Step: {steps}, Loss: {loss}")
             steps += 1
 
-        logs = dataset.evaluate(network_state.apply_fn, forgetting=False)
+        logs = dataset.evaluate(lambda x: network_state.apply_fn(network_state.params, x), forgetting=False)
         print("Task: ", task)
         print(logs)
 
 
 if __name__ == "__main__":
-    dataset = SplitMNIST(seed=42, num_tasks=5, num_epochs=20, batch_size=512)
+    dataset = SplitMNIST(seed=42, num_tasks=5, num_epochs=5, batch_size=32)
     train(dataset)

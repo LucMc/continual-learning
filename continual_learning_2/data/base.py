@@ -1,10 +1,8 @@
 import abc
-from typing import TYPE_CHECKING, Generator
+from typing import Generator
 
 from continual_learning_2.types import LogDict, PredictorModel
-
-if TYPE_CHECKING:
-    import grain.python as grain
+import grain.python as grain
 
 
 class ContinualLearningDataset(abc.ABC):

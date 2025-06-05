@@ -64,17 +64,18 @@ class SplitMNIST(ContinualLearningDataset):
             for task in range(self.CURRENT_TASK):
                 test_set = self._get_task_test(task)
                 metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
-        metrics["accuracy"] = self._eval_task(model, self._test_loader)
+        metrics["accuracy"] = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
 
     def _eval_task(self, model: PredictorModel, test_set: grain.IterDataset) -> float:
-        accuracy = 0.0
+        accuracies = []
         for data in test_set:
             x, y = data
             pred = model(x)
-            accuracy += (pred.argmax() == y.argmax()).sum().item()
-        return accuracy / len(test_set)
+            breakpoint()
+            accuracies.append((pred.argmax(axis=1) == y.argmax(axis=1)).mean().item())
+        return np.mean(accuracies)
 
     def _get_task(self, task_id: int) -> grain.IterDataset:
         if task_id < 0 or task_id >= self.num_tasks:
@@ -144,17 +145,17 @@ class PermutedMNIST(ContinualLearningDataset):
             for task in range(self.CURRENT_TASK):
                 test_set = self._get_task_test(task)
                 metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
-        metrics["accuracy"] = self._eval_task(model, self._test_loader)
+        metrics["accuracy"] = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
 
     def _eval_task(self, model: PredictorModel, test_set: grain.IterDataset) -> float:
-        accuracy = 0.0
+        accuracies = []
         for data in test_set:
             x, y = data
             pred = model(x)
-            accuracy += (pred.argmax() == y.argmax()).sum().item()
-        return accuracy / len(test_set)
+            accuracies.append((pred.argmax(axis=1) == y.argmax(axis=1)).mean().item())
+        return np.mean(accuracies)
 
     def _get_task(self, task_id: int) -> grain.IterDataset:
         if task_id < 0 or task_id >= self.num_tasks:
