@@ -1,12 +1,14 @@
 # pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
 import abc
+import sys
 from typing import Generator
 
 import datasets
 import grain.python as grain
 import numpy as np
+from jaxtyping import Array, Int32
 
-from continual_learning_2.types import LogDict, PredictorModel
+from continual_learning_2.types import DatasetItem, LogDict, PredictorModel
 
 
 class ContinualLearningDataset(abc.ABC):
@@ -120,6 +122,121 @@ class SplitDataset(ContinualLearningDataset):
             ),
             operations=[
                 *self.OPERATIONS,
+                grain.Batch(batch_size=self.batch_size),
+            ],
+            worker_count=self.num_workers,
+        )
+
+
+class PermuteInputs(grain.MapTransform):
+    permutation: Int32[Array, " data_dim"]
+
+    def __init__(self, permutation: Int32[Array, " data_dim"]):
+        self.permutation = permutation
+
+    def map(self, element: DatasetItem) -> DatasetItem:
+        x, y = element
+        x = x.reshape(-1)[self.permutation].reshape(x.shape)
+        return x, y
+
+
+class PermutedDataset(ContinualLearningDataset):
+    CURRENT_TASK: int
+    NUM_CLASSES: int
+
+    DATA_DIM: int
+
+    DATASET_PATH: str
+    OPERATIONS: list[grain.Transformation] = []
+
+    def __init__(
+        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
+    ):
+        self.num_tasks = num_tasks
+        self.num_epochs = num_epochs
+        self.batch_size = batch_size
+        self.seed = seed
+        self.num_workers = num_workers
+        self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
+        assert isinstance(self.dataset, datasets.DatasetDict)
+
+        self.rng = np.random.default_rng(seed)
+        self.permutations = [
+            self.rng.permutation(self.DATA_DIM) for _ in range(self.num_tasks)
+        ]
+        self.seeds = [self.rng.integers(0, sys.maxsize) for _ in range(self.num_tasks)]
+
+        self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
+
+    @property
+    def tasks(self) -> Generator[grain.DataLoader, None, None]:
+        for task_id in range(self.num_tasks):
+            self.CURRENT_TASK = task_id
+            yield self._get_task(task_id)
+
+    def evaluate(self, model: PredictorModel, forgetting: bool = False) -> LogDict:
+        metrics = {}
+        if forgetting:
+            for task in range(self.CURRENT_TASK):
+                test_set = self._get_task_test(task)
+                print(f"- Evaluating on task {task}")
+                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
+        print(f"- Evaluating on task {self.CURRENT_TASK}")
+        metrics["accuracy"] = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
+        metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
+        return metrics
+
+    def _eval_task(self, model: PredictorModel, test_set: grain.DataLoader) -> float:
+        accuracies = []
+        for data in test_set:
+            x, y = data
+            pred = model(x)
+            accuracies.append((pred.argmax(axis=1) == y.argmax(axis=1)).mean().item())
+        return float(np.mean(accuracies))
+
+    def _get_task(self, task_id: int) -> grain.DataLoader:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+
+        permutation = self.permutations[task_id]
+        seed = self.seeds[task_id]
+
+        ds = self._dataset_train
+
+        return grain.DataLoader(
+            data_source=ds,
+            sampler=grain.IndexSampler(
+                num_records=len(ds),
+                shuffle=True,
+                num_epochs=self.num_epochs,
+                seed=seed,
+            ),
+            operations=[
+                *self.OPERATIONS,
+                PermuteInputs(permutation),
+                grain.Batch(batch_size=self.batch_size, drop_remainder=True),
+            ],
+            worker_count=self.num_workers,
+        )
+
+    def _get_task_test(self, task_id: int) -> grain.DataLoader:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+        permutation = self.permutations[task_id]
+        seed = self.seeds[task_id]
+
+        ds = self._dataset_test
+
+        return grain.DataLoader(
+            data_source=ds,
+            sampler=grain.IndexSampler(
+                num_records=len(ds),
+                shuffle=True,
+                seed=seed,
+            ),
+            operations=[
+                *self.OPERATIONS,
+                PermuteInputs(permutation),
                 grain.Batch(batch_size=self.batch_size),
             ],
             worker_count=self.num_workers,
