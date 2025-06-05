@@ -73,7 +73,6 @@ class SplitMNIST(ContinualLearningDataset):
         for data in test_set:
             x, y = data
             pred = model(x)
-            breakpoint()
             accuracies.append((pred.argmax(axis=1) == y.argmax(axis=1)).mean().item())
         return np.mean(accuracies)
 
