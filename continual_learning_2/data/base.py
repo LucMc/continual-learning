@@ -1,4 +1,4 @@
-# pyright: reportArgumentType=false
+# pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
 import abc
 from typing import Generator
 
@@ -14,7 +14,7 @@ class ContinualLearningDataset(abc.ABC):
 
     @abc.abstractmethod
     def __init__(
-        self, seed: int, num_tasks: int = 5, num_epochs: int = 20, batch_size: int = 32
+        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
     ): ...
 
     @abc.abstractproperty
@@ -31,7 +31,9 @@ class SplitDataset(ContinualLearningDataset):
     DATASET_PATH: str
     OPERATIONS: list[grain.Transformation] = []
 
-    def __init__(self, seed: int, num_tasks: int, num_epochs: int, batch_size: int):
+    def __init__(
+        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
+    ):
         if not self.NUM_CLASSES % num_tasks == 0:
             raise ValueError(
                 f"Number of classes ({self.NUM_CLASSES}) must be divisible by number of tasks ({num_tasks})."
@@ -40,6 +42,7 @@ class SplitDataset(ContinualLearningDataset):
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.seed = seed
+        self.num_workers = num_workers
         self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
@@ -56,7 +59,9 @@ class SplitDataset(ContinualLearningDataset):
         if forgetting:
             for task in range(self.CURRENT_TASK):
                 test_set = self._get_task_test(task)
+                print(f"- Evaluating on task {task}")
                 metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
+        print(f"- Evaluating on task {self.CURRENT_TASK}")
         metrics["accuracy"] = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
@@ -92,6 +97,7 @@ class SplitDataset(ContinualLearningDataset):
                 *self.OPERATIONS,
                 grain.Batch(batch_size=self.batch_size, drop_remainder=True),
             ],
+            worker_count=self.num_workers,
         )
 
     def _get_task_test(self, task_id: int) -> grain.DataLoader:
@@ -116,4 +122,5 @@ class SplitDataset(ContinualLearningDataset):
                 *self.OPERATIONS,
                 grain.Batch(batch_size=self.batch_size),
             ],
+            worker_count=self.num_workers,
         )
