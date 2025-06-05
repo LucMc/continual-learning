@@ -21,6 +21,10 @@ type DatasetItem = tuple[Input, Label]
 
 type PredictorModel = Callable[[DatasetItem], Label]
 
+LayerActivations = Float[Array, "batch_size layer_dim"]
+type LayerActivationsDict = dict[str, Float[Array, "batch_size layer_dim"]]
+type Intermediates = dict[str, tuple[LayerActivations, ...] | "Intermediates"]
+
 
 class Histogram(flax.struct.PyTreeNode):
     data: Float[npt.NDArray | Array, "..."] | None = None
