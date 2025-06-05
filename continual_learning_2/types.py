@@ -1,5 +1,5 @@
 import enum
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 import flax.linen
 import flax.struct
@@ -18,6 +18,8 @@ type LogDict = dict[str, float | Float[Array, ""] | Histogram]
 type Input = Float[np.ndarray, " ... *input_dim"]
 type Label = Float[np.ndarray, " ... num_classes"]
 type DatasetItem = tuple[Input, Label]
+
+type PredictorModel = Callable[[DatasetItem], Label]
 
 
 class Histogram(flax.struct.PyTreeNode):

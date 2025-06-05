@@ -1,14 +1,13 @@
 # pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
-from typing import Callable, Generator
+from typing import Generator
 
 import datasets
 import grain.python as grain
 import numpy as np
 from jaxtyping import Array, Int32
 
-from continual_learning_2.types import DatasetItem, Label, LogDict
-
-type Model = Callable[[DatasetItem], Label]
+from continual_learning_2.data.base import ContinualLearningDataset
+from continual_learning_2.types import DatasetItem, LogDict, PredictorModel
 
 
 class ProcessMNIST(grain.MapTransform):
@@ -32,7 +31,7 @@ class PermuteMNIST(grain.MapTransform):
         return x, y
 
 
-class SplitMNIST:
+class SplitMNIST(ContinualLearningDataset):
     CURRENT_TASK: int
     NUM_CLASSES: int = 10
 
@@ -59,7 +58,7 @@ class SplitMNIST:
             self.CURRENT_TASK = task_id
             yield self._get_task(task_id)
 
-    def evaluate(self, model: Model, forgetting: bool = False) -> LogDict:
+    def evaluate(self, model: PredictorModel, forgetting: bool = False) -> LogDict:
         metrics = {}
         if forgetting:
             for task in range(self.CURRENT_TASK):
@@ -69,7 +68,7 @@ class SplitMNIST:
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
 
-    def _eval_task(self, model: Model, test_set: grain.IterDataset) -> float:
+    def _eval_task(self, model: PredictorModel, test_set: grain.IterDataset) -> float:
         accuracy = 0.0
         for data in test_set:
             x, y = data
@@ -105,7 +104,7 @@ class SplitMNIST:
         return train, test
 
 
-class PermutedMNIST:
+class PermutedMNIST(ContinualLearningDataset):
     CURRENT_TASK: int
     NUM_CLASSES: int = 10
 
@@ -131,7 +130,7 @@ class PermutedMNIST:
             self.CURRENT_TASK = task_id
             yield self._get_task(task_id)
 
-    def evaluate(self, model: Model, forgetting: bool = False) -> LogDict:
+    def evaluate(self, model: PredictorModel, forgetting: bool = False) -> LogDict:
         metrics = {}
         if forgetting:
             for task in range(self.CURRENT_TASK):
@@ -141,7 +140,7 @@ class PermutedMNIST:
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
 
-    def _eval_task(self, model: Model, test_set: grain.IterDataset) -> float:
+    def _eval_task(self, model: PredictorModel, test_set: grain.IterDataset) -> float:
         accuracy = 0.0
         for data in test_set:
             x, y = data
