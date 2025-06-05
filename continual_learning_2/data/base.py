@@ -8,6 +8,7 @@ import grain.python as grain
 import numpy as np
 from jaxtyping import Array, Int32
 
+from continual_learning_2.configs import DatasetConfig
 from continual_learning_2.types import DatasetItem, LogDict, PredictorModel
 
 
@@ -33,18 +34,16 @@ class SplitDataset(ContinualLearningDataset):
     DATASET_PATH: str
     OPERATIONS: list[grain.Transformation] = []
 
-    def __init__(
-        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
-    ):
-        if not self.NUM_CLASSES % num_tasks == 0:
+    def __init__(self, config: DatasetConfig):
+        if not self.NUM_CLASSES % config.num_tasks == 0:
             raise ValueError(
-                f"Number of classes ({self.NUM_CLASSES}) must be divisible by number of tasks ({num_tasks})."
+                f"Number of classes ({self.NUM_CLASSES}) must be divisible by number of tasks ({config.num_tasks})."
             )
-        self.num_tasks = num_tasks
-        self.num_epochs = num_epochs
-        self.batch_size = batch_size
-        self.seed = seed
-        self.num_workers = num_workers
+        self.num_tasks = config.num_tasks
+        self.num_epochs = config.num_epochs_per_task
+        self.batch_size = config.batch_size
+        self.seed = config.seed
+        self.num_workers = config.num_workers
         self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
@@ -149,18 +148,16 @@ class PermutedDataset(ContinualLearningDataset):
     DATASET_PATH: str
     OPERATIONS: list[grain.Transformation] = []
 
-    def __init__(
-        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
-    ):
-        self.num_tasks = num_tasks
-        self.num_epochs = num_epochs
-        self.batch_size = batch_size
-        self.seed = seed
-        self.num_workers = num_workers
+    def __init__(self, config: DatasetConfig):
+        self.num_tasks = config.num_tasks
+        self.num_epochs = config.num_epochs_per_task
+        self.batch_size = config.batch_size
+        self.seed = config.seed
+        self.num_workers = config.num_workers
         self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
-        self.rng = np.random.default_rng(seed)
+        self.rng = np.random.default_rng(self.seed)
         self.permutations = [
             self.rng.permutation(self.DATA_DIM) for _ in range(self.num_tasks)
         ]
