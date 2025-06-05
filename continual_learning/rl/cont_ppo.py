@@ -41,6 +41,7 @@ from continual_learning.nn import (
 from continual_learning.optim.continual_backprop import CBPTrainState
 from continual_learning.optim.continuous_continual_backprop import CCBPTrainState
 from continual_learning.optim.ccbp_2 import CCBP2TrainState
+from continual_learning.optim.redo import RedoTrainState
 from continual_learning.utils.metrics import compute_plasticity_metrics
 from continual_learning.utils.wrappers_rd import (
     # ContinualRandomIntervalDelayWrapper,
@@ -301,18 +302,15 @@ class ContPPO(PPO, ContConfig):
         if ppo_agent.optim == "muon": tx = optax.contrib.muon
         if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
         # For some reason loads of decay seems to work better...
-        # fmt: on
 
         # Continual backpropergation
         if ppo_agent.dormant_reset_method != "none":
             cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
             match ppo_agent.dormant_reset_method:
-                case "cbp":
-                    trainstate_cls = CBPTrainState
-                case "ccbp":
-                    trainstate_cls = CCBPTrainState
-                case "ccbp2":
-                    trainstate_cls = CCBP2TrainState
+                case "cbp": trainstate_cls = CBPTrainState
+                case "ccbp": trainstate_cls = CCBPTrainState
+                case "ccbp2": trainstate_cls = CCBP2TrainState
+                case "redo": trainstate_cls = RedoTrainState
 
             act_ts_kwargs = dict(rng=cbp_actor_key) | cbp_params
             val_ts_kwargs = dict(rng=cbp_value_key) | cbp_params
@@ -321,6 +319,7 @@ class ContPPO(PPO, ContConfig):
             act_ts_kwargs = {}
             val_ts_kwargs = {}
 
+        # fmt: on
         last_obs, first_info = envs.reset()
         last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
 

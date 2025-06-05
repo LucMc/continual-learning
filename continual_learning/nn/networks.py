@@ -68,12 +68,6 @@ class ActorNet(nn.Module):
     def apply_w_features(self, params, x):
         return self.apply(params, x, capture_intermediates=True)
 
-    # @partial(jax.jit, static_argnames="self")
-    # def apply_w_features(self, params, x):
-    #     (mean, scale), features = partial(self.apply, capture_intermediates=True)(params, x)
-    #     return distrax.MultivariateNormalDiag(
-    #             loc=mean, scale_diag=scale
-    #         ), features
 
 # Reinforcement Learning Layer Norm
 class ActorNetLayerNorm(nn.Module):
@@ -153,35 +147,6 @@ class SimpleNet(nn.Module):
     def predict(self, params, x):
         return self.apply({"params": params}, x, capture_intermediates=True)
 
-class OnlineNormNet(nn.Module):
-    n_out: int = 1
-    h_size: int = 128
-
-    @nn.compact
-    def __call__(self, x):
-        intermediates = {}
-
-        layers = [
-            "dense1",
-            "dense2",
-            "dense3",
-        ]
-
-        for i, layer_name in enumerate(layers):
-            x = nn.Dense(features=self.h_size, name=layer_name)(x)
-            x = nn.relu(x)
-            intermediates[layer_name] = x
-
-        x = nn.Dense(features=self.n_out, name="out_layer")(x)
-        # intermediates["out_layer"] = x
-
-        self.sow("intermediates", "activations", intermediates)
-        return x
-
-    @jax.jit
-    def predict(self, params, x):
-        return self.apply({"params": params}, x, capture_intermediates=True)
-
 
 class SimpleNetLayerNorm(nn.Module):
     n_out: int = 1
@@ -204,36 +169,6 @@ class SimpleNetLayerNorm(nn.Module):
             intermediates[layer_name] = x
 
         # x = nn.LayerNorm(name=f"layer_norm_out")(x)
-        x = nn.Dense(features=self.n_out, name="out_layer")(x)
-        # intermediates["out_layer"] = x
-
-        self.sow("intermediates", "activations", intermediates)
-        return x
-
-    @jax.jit
-    def predict(self, params, x):
-        return self.apply({"params": params}, x, capture_intermediates=True)
-
-
-class OnlineNormNet(nn.Module):
-    n_out: int = 1
-    h_size: int = 128
-
-    @nn.compact
-    def __call__(self, x):
-        intermediates = {}
-
-        layers = [
-            "dense1",
-            "dense2",
-            "dense3",
-        ]
-
-        for i, layer_name in enumerate(layers):
-            x = nn.Dense(features=self.h_size, name=layer_name)(x)
-            x = nn.relu(x)
-            intermediates[layer_name] = x
-
         x = nn.Dense(features=self.n_out, name="out_layer")(x)
         # intermediates["out_layer"] = x
 

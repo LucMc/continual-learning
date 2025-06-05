@@ -12,6 +12,7 @@ import time
 from typing import Dict, Any, Tuple, List, Callable, Literal
 from dataclasses import dataclass, field
 
+from continual_learning.optim.redo import RedoTrainState
 from continual_learning.optim.continual_backprop import (
     continual_backprop,
     CBPTrainState,
@@ -22,6 +23,7 @@ from continual_learning.nn import SimpleNet, SimpleNetLayerNorm
 import tyro
 
 METHODS = [
+    "redo",
     "cbp",
     "cbp_adamw",
     "sgd",
@@ -125,6 +127,19 @@ def continual_sine_learning(
 
     # --- Define Method Configurations ---
     method_configs = []
+
+    if "redo" in methods:
+        method_configs.append(
+            MethodConfig(
+                name="ReDo",
+                net=SimpleNet,
+                optimizer_fn=optax.adamw,
+                optimizer_kwargs={"learning_rate": learning_rate},
+                state_class=RedoTrainState,
+                state_kwargs={"rng": cbp_kwargs["rng"]},
+                train_step_fn=cbp_train_step,
+            )
+        )
 
     if "cbp" in methods:
         method_configs.append(
@@ -507,7 +522,7 @@ class Args:
     debug: bool = False
     shifts: int = 20_000
     epochs: int = 100
-    batch_size: int = 1
+    batch_size: int = 2
     lr: float = 1e-3
     wd: float = 0.01
     save_interval: int = 1000

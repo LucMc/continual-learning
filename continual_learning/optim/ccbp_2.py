@@ -28,7 +28,7 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.optim.utils as utils
+import continual_learning.utils.optim as utils
 from continual_learning.optim.continual_backprop import (
     get_out_weights_mag,
     process_params,
