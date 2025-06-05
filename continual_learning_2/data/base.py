@@ -8,13 +8,15 @@ if TYPE_CHECKING:
 
 
 class ContinualLearningDataset(abc.ABC):
+    NUM_CLASSES: int
+
     @abc.abstractmethod
     def __init__(
         self, seed: int, num_tasks: int = 5, num_epochs: int = 20, batch_size: int = 32
     ): ...
 
     @abc.abstractproperty
-    def tasks(self) -> Generator[tuple[grain.IterDataset, grain.IterDataset], None, None]: ...
+    def tasks(self) -> Generator[grain.IterDataset, None, None]: ...
 
     @abc.abstractmethod
     def evaluate(self, model: PredictorModel, forgetting: bool = False) -> LogDict: ...

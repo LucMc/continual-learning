@@ -53,7 +53,7 @@ class SplitMNIST(ContinualLearningDataset):
         self._test_loader = grain.MapDataset.source(self.dataset["test"]).seed(self.seed)
 
     @property
-    def tasks(self) -> Generator[tuple[grain.IterDataset, grain.IterDataset], None, None]:
+    def tasks(self) -> Generator[grain.IterDataset, None, None]:
         for task_id in range(self.num_tasks):
             self.CURRENT_TASK = task_id
             yield self._get_task(task_id)
@@ -62,8 +62,8 @@ class SplitMNIST(ContinualLearningDataset):
         metrics = {}
         if forgetting:
             for task in range(self.CURRENT_TASK):
-                _, test = self._get_task(task)
-                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test)
+                test_set = self._get_task_test(task)
+                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
         metrics["accuracy"] = self._eval_task(model, self._test_loader)
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
@@ -76,7 +76,7 @@ class SplitMNIST(ContinualLearningDataset):
             accuracy += (pred.argmax() == y.argmax()).sum().item()
         return accuracy / len(test_set)
 
-    def _get_task(self, task_id: int) -> tuple[grain.IterDataset, grain.IterDataset]:
+    def _get_task(self, task_id: int) -> grain.IterDataset:
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
@@ -85,7 +85,7 @@ class SplitMNIST(ContinualLearningDataset):
             range(num_classes_in_task * task_id, num_classes_in_task * (task_id + 1))
         )
 
-        train = (
+        return (
             self._train_loader.filter(lambda x: x["label"] in classes_in_task)
             .map(ProcessMNIST())
             .shuffle()
@@ -93,15 +93,23 @@ class SplitMNIST(ContinualLearningDataset):
             .to_iter_dataset()
             .batch(self.batch_size, drop_remainder=True)
         )
-        test = (
+
+    def _get_task_test(self, task_id: int) -> grain.IterDataset:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+
+        num_classes_in_task = self.NUM_CLASSES // self.num_tasks
+        classes_in_task = list(
+            range(num_classes_in_task * task_id, num_classes_in_task * (task_id + 1))
+        )
+
+        return (
             self._test_loader.filter(lambda x: x["label"] in classes_in_task)
             .map(ProcessMNIST())
             .shuffle()
             .to_iter_dataset()
             .batch(self.batch_size)
         )
-
-        return train, test
 
 
 class PermutedMNIST(ContinualLearningDataset):
@@ -125,7 +133,7 @@ class PermutedMNIST(ContinualLearningDataset):
         self._test_loader = grain.MapDataset.source(self.dataset["test"]).seed(self.seed)
 
     @property
-    def tasks(self) -> Generator[tuple[grain.IterDataset, grain.IterDataset], None, None]:
+    def tasks(self) -> Generator[grain.IterDataset, None, None]:
         for task_id in range(self.num_tasks):
             self.CURRENT_TASK = task_id
             yield self._get_task(task_id)
@@ -134,8 +142,8 @@ class PermutedMNIST(ContinualLearningDataset):
         metrics = {}
         if forgetting:
             for task in range(self.CURRENT_TASK):
-                _, test = self._get_task(task)
-                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test)
+                test_set = self._get_task_test(task)
+                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
         metrics["accuracy"] = self._eval_task(model, self._test_loader)
         metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
         return metrics
@@ -148,13 +156,13 @@ class PermutedMNIST(ContinualLearningDataset):
             accuracy += (pred.argmax() == y.argmax()).sum().item()
         return accuracy / len(test_set)
 
-    def _get_task(self, task_id: int) -> tuple[grain.IterDataset, grain.IterDataset]:
+    def _get_task(self, task_id: int) -> grain.IterDataset:
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
         permutation = self.permutations[task_id]
 
-        train = (
+        return (
             self._train_loader.map(ProcessMNIST())
             .map(PermuteMNIST(permutation))
             .shuffle()
@@ -162,12 +170,17 @@ class PermutedMNIST(ContinualLearningDataset):
             .to_iter_dataset()
             .batch(self.batch_size, drop_remainder=True)
         )
-        test = (
+
+    def _get_task_test(self, task_id: int) -> grain.IterDataset:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+
+        permutation = self.permutations[task_id]
+
+        return (
             self._test_loader.map(ProcessMNIST())
             .map(PermuteMNIST(permutation))
             .shuffle()
             .to_iter_dataset()
             .batch(self.batch_size)
         )
-
-        return train, test
