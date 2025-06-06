@@ -26,13 +26,6 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-from continual_learning.optim.base import reset_weights
-
-"""
-This file implements ReDo: 
-https://github.com/google/dopamine/blob/master/dopamine/labs/redo/weight_recyclers.py
-as an optax optimizer
-"""
 
 
 @dataclass
@@ -40,10 +33,10 @@ class RedoOptimState:
     initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
+    accumulated_features_to_replace: int
 
     rng: PRNGKeyArray  # = random.PRNGKey(0)
     time_step: int = 0
-    scale: float = 1.0
     step_size: float = 0.001
     replacement_rate: float = 0.01
     decay_rate: float = 0.9
@@ -101,57 +94,59 @@ class RedoTrainState(TrainState):
 
 
 # -------------- Redo Weight reset ---------------
-# def reset_weights(
-#     reset_mask: PyTree[Bool[Array, "#neurons"]],
-#     layer_w: PyTree[Float[Array, "..."]],
-#     key_tree: PyTree[PRNGKeyArray],
-#     initial_weights: PyTree[Float[Array, "..."]],
-#     replacement_rate: Float[Array, ""] = None,
-# ):
-#     layer_names = list(reset_mask.keys())
-#     logs = {}
-#
-#     for i in range(len(layer_names) - 1):
-#         in_layer = layer_names[i]
-#         out_layer = layer_names[i + 1]
-#
-#         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-#         assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
-#             f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
-#         )
-#
-#         in_reset_mask = reset_mask[in_layer].reshape(-1)  # [1, out_size]
-#         _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-#
-#         _out_layer_w = jnp.where(
-#             in_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
-#         )
-#         n_reset = reset_mask[in_layer].sum()
-#
-#         layer_w[in_layer] = _in_layer_w
-#         layer_w[out_layer] = _out_layer_w
-#
-#         logs[in_layer] = {"nodes_reset": n_reset}
-#
-#     logs[out_layer] = {"nodes_reset": 0}
-#
-#     return layer_w, logs
+def reset_weights(
+    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
+    key_tree: PyTree[PRNGKeyArray],
+    initial_weights: PyTree[Float[Array, "..."]],
+    replacement_rate: Float[Array, ""] = None,
+):
+    layer_names = list(reset_mask.keys())
+    logs = {}
+
+    for i in range(len(layer_names) - 1):
+        in_layer = layer_names[i]
+        out_layer = layer_names[i + 1]
+
+        assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
+
+        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
+        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
+
+        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
+        _out_layer_w = jnp.where(
+            out_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
+        )
+        n_reset = reset_mask[in_layer].sum()
+
+        layer_w[in_layer] = _in_layer_w
+        layer_w[out_layer] = _out_layer_w
+
+        logs[in_layer] = {"nodes_reset": n_reset}
+
+    logs[out_layer] = {"nodes_reset": 0}
+
+    return layer_w, logs
 
 
 def get_score(  # averages over a batch
+    # out_w_mag: Float[Array, "#weights"],
+    # utility: Float[Array, "#neurons"],
     features: Float[Array, "#batch #neurons"],
+    # decay_rate: Float[Array, ""] = 0.9,
 ) -> Float[Array, "#neurons"]:
-    # Avg over batches
+    # Remove batch dim from some inputs just in case
     mean_act_per_neuron = jnp.mean(jnp.abs(features), axis=0)  # Arr[#neurons]
     score = mean_act_per_neuron / (
         jnp.mean(mean_act_per_neuron) + 1e-8
     )  # Arr[#neurons] / Scalar
     return score
 
+
 # -------------- lowest utility mask ---------------
 def get_reset_mask(
     scores: Float[Array, "#neurons"],
-    score_threshold: Int[Array, ""] = 0.1,
+    score_threshold: Int[Array, ""] = 0.2,
 ) -> Bool[Array, "#neurons"]:
     score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
     return score_mask
@@ -201,6 +196,7 @@ def redo(**kwargs) -> optax.GradientTransformation:
             initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
+            accumulated_features_to_replace=0,
             # rng=random.PRNGKey(0), # Seed passed in through kwargs?
             **kwargs,
         )
@@ -222,7 +218,17 @@ def redo(**kwargs) -> optax.GradientTransformation:
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            scores = jax.tree.map(get_score, features)  # Scores, avged over batches: # PyTree[#neurons]
+            # vmap score calculation over batch
+            batched_score_calculation = jax.vmap(
+                get_score,
+                in_axes=0,
+            )
+            scores_batch = jax.tree.map(
+                batched_score_calculation, features
+            )  # Get each batch scores
+            scores = jax.tree.map(
+                lambda x: x.mean(axis=0), scores_batch
+            )  # Avg scores into single batch: Arr[#neurons]
 
             reset_mask = jax.tree.map(get_reset_mask, scores)
 

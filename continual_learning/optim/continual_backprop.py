@@ -26,41 +26,31 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
+from continual_learning.optim.base import BaseOptimState, BaseTrainState, reset_weights
 
 """
 TODO:
  * Clip ages
  * Reset adam/optim state for reset nodes
- * FIX LOGGING
+ * fix logging
 
 Count = 15
 
 :: Testing ::
   * See testing list in test_reset.py
 
-:: Experiments ::
-  * Implement SGDW as for some reason it's not in https://optax.readthedocs.io/en/latest/api/optimizers.html
-  * Make continual task sequence sequential i.e. [1,2,3] instead of random [1,3,2] (SlipperyAnt and sine exp)
-  * Test the ppo continual env more/ guage performance of base agent in comparison to lop results
-  * Make cont sine regression graphs better and log to wandb, seperate out methods and add sgd
-
 :: Implementation ::
   * Implement accumulated nodes to reset for inexact division by replacement rate
-  * Additional logging
-  * Link with continual time-delays
 
 :: Errors ::
-  * Replacement rate of 0 gives worse loss than adam, should be equal
   * Assert statements throughout, check mask is always false when replacement rate is 0 and n_to_replace is also always zero etc same with maturity_threshold
-
-:: Errors ::
- * Is utility a good measure/ do we outperform random weight reinitialisation?
+  * Is utility a good measure/ do we outperform random weight reinitialisation?
 """
 
 
 @dataclass
 # @jaxtyped(typechecker=typechecker)
-class CBPOptimState:
+class CBPOptimState(BaseOptimState):
     initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
@@ -77,7 +67,7 @@ class CBPOptimState:
 
 
 # -------------- Overall optimizer TrainState ---------------
-class CBPTrainState(TrainState):
+class CBPTrainState(BaseTrainState):
     cbp_state: optax.OptState = struct.field(pytree_node=True)
 
     @classmethod
@@ -151,13 +141,11 @@ def reset_weights(
 
         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
 
-        # TODO: Check this is resetting the correct row and columns
-        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-        # _in_layer_w = jnp.where(in_reset_mask, random_in_weights, layer_w[in_layer])
+        in_reset_mask = reset_mask[in_layer].flatten()  # [1, out_size]
         _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
 
-        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        _out_layer_w = jnp.where(out_reset_mask, zero_out_weights, layer_w[out_layer])
+        # out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
+        _out_layer_w = jnp.where(in_reset_mask, zero_out_weights, layer_w[out_layer])
         n_reset = reset_mask[in_layer].sum()
 
         layer_w[in_layer] = _in_layer_w

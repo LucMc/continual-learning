@@ -26,7 +26,6 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-from continual_learning.optim.base import reset_weights
 
 """
 This file implements ReDo: 
@@ -101,41 +100,44 @@ class RedoTrainState(TrainState):
 
 
 # -------------- Redo Weight reset ---------------
-# def reset_weights(
-#     reset_mask: PyTree[Bool[Array, "#neurons"]],
-#     layer_w: PyTree[Float[Array, "..."]],
-#     key_tree: PyTree[PRNGKeyArray],
-#     initial_weights: PyTree[Float[Array, "..."]],
-#     replacement_rate: Float[Array, ""] = None,
-# ):
-#     layer_names = list(reset_mask.keys())
-#     logs = {}
-#
-#     for i in range(len(layer_names) - 1):
-#         in_layer = layer_names[i]
-#         out_layer = layer_names[i + 1]
-#
-#         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-#         assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
-#             f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
-#         )
-#
-#         in_reset_mask = reset_mask[in_layer].reshape(-1)  # [1, out_size]
-#         _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-#
-#         _out_layer_w = jnp.where(
-#             in_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
-#         )
-#         n_reset = reset_mask[in_layer].sum()
-#
-#         layer_w[in_layer] = _in_layer_w
-#         layer_w[out_layer] = _out_layer_w
-#
-#         logs[in_layer] = {"nodes_reset": n_reset}
-#
-#     logs[out_layer] = {"nodes_reset": 0}
-#
-#     return layer_w, logs
+def reset_weights(
+    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
+    key_tree: PyTree[PRNGKeyArray],
+    initial_weights: PyTree[Float[Array, "..."]],
+    replacement_rate: Float[Array, ""] = None,
+):
+    layer_names = list(reset_mask.keys())
+    logs = {}
+
+    for i in range(len(layer_names) - 1):
+        in_layer = layer_names[i]
+        out_layer = layer_names[i + 1]
+
+        assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
+        assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
+            f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
+        )
+
+        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
+        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
+
+        out_reset_mask = reset_mask[in_layer].reshape(
+            -1, 1
+        )  # Corresponding outbound [in_size, 1]
+        _out_layer_w = jnp.where(
+            out_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
+        )
+        n_reset = reset_mask[in_layer].sum()
+
+        layer_w[in_layer] = _in_layer_w
+        layer_w[out_layer] = _out_layer_w
+
+        logs[in_layer] = {"nodes_reset": n_reset}
+
+    logs[out_layer] = {"nodes_reset": 0}
+
+    return layer_w, logs
 
 
 def get_score(  # averages over a batch
