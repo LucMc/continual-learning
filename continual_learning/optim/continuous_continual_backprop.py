@@ -34,57 +34,6 @@ from continual_learning.optim.continual_backprop import (
 )
 
 
-# -------------- Overall optimizer TrainState ---------------
-class CCBPTrainState(TrainState):
-    cbp_state: optax.OptState = struct.field(pytree_node=True)
-
-    @classmethod
-    def create(cls, *, apply_fn, params, tx, **kwargs):
-        """Creates a new instance with ``step=0`` and initialized ``opt_state``."""
-        # We exclude OWG params when present because they do not need opt states.
-        # params_with_opt = (
-        #   params['params'] if OVERWRITE_WITH_GRADIENT in params else params
-        # )
-        opt_state = tx.init(params)
-        cbp_state = continuous_continual_backprop().init(params, **kwargs)
-        return cls(
-            step=0,
-            apply_fn=apply_fn,
-            params=params,
-            tx=tx,
-            opt_state=opt_state,
-            cbp_state=cbp_state,
-        )
-
-    def apply_gradients(self, *, grads, features, **kwargs):
-        """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
-
-        # Get updates from optimizer
-        tx_updates, new_opt_state = self.tx.update(
-            grads, self.opt_state, self.params
-        )  # tx first then reset so we don't change reset params based on old grads
-        params_after_tx = optax.apply_updates(self.params, tx_updates)
-
-        # Update with continual backprop
-        params_after_cbp, new_cbp_state = continuous_continual_backprop().update(
-            grads["params"],
-            self.cbp_state,
-            params_after_tx["params"],
-            features=features["intermediates"]["activations"][0],
-        )
-
-        # utils.check_tree_shapes(params_after_tx, params_after_cbp)
-        # utils.check_tree_shapes(self.params, params_after_cbp)
-
-        return self.replace(
-            step=self.step + 1,
-            params=params_after_cbp,
-            opt_state=new_opt_state,
-            cbp_state=new_cbp_state[0],
-            **kwargs,
-        )
-
-
 # -------------- CCBP Weight reset ---------------
 def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
@@ -147,12 +96,8 @@ def get_reset_mask(
 
 # -------------- Main CCBP Optimiser body ---------------
 def continuous_continual_backprop(
-    util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
     def init(params: optax.Params, **kwargs):
-        assert util_type in utils.UTIL_TYPES, ValueError(
-            f"Invalid util type, select from ({'|'.join(utils.UTIL_TYPES)})"
-        )
         weights, bias, _, _ = process_params(params["params"])
 
         del params  # Delete params?
@@ -162,9 +107,6 @@ def continuous_continual_backprop(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
-            util_type_id=utils.UTIL_TYPES.index(
-                util_type
-            ),  # Replace with util function directly?
             accumulated_features_to_replace=0,
             # rng=random.PRNGKey(0), # Seed passed in through kwargs?
             **kwargs,
@@ -195,11 +137,10 @@ def continuous_continual_backprop(
             )
 
             # reset weights given mask
-            # _weights, reset_logs = reset_weights(
-            #     reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
-            # )
+            _weights, reset_logs = reset_weights(
+                reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
+            )
             _weights = weights
-            reset_logs = {}
 
             # reset bias given mask
             _bias = jax.tree.map(

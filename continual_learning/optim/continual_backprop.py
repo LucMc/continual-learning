@@ -26,7 +26,7 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-from continual_learning.optim.base import BaseOptimState, BaseTrainState, reset_weights
+from continual_learning.optim.base import BaseOptimState
 
 """
 TODO:
@@ -49,7 +49,6 @@ Count = 15
 
 
 @dataclass
-# @jaxtyped(typechecker=typechecker)
 class CBPOptimState(BaseOptimState):
     initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
@@ -64,57 +63,6 @@ class CBPOptimState(BaseOptimState):
     maturity_threshold: int = 10
     accumulate: bool = False
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
-
-
-# -------------- Overall optimizer TrainState ---------------
-class CBPTrainState(BaseTrainState):
-    cbp_state: optax.OptState = struct.field(pytree_node=True)
-
-    @classmethod
-    def create(cls, *, apply_fn, params, tx, **kwargs):
-        """Creates a new instance with ``step=0`` and initialized ``opt_state``."""
-        # We exclude OWG params when present because they do not need opt states.
-        # params_with_opt = (
-        #   params['params'] if OVERWRITE_WITH_GRADIENT in params else params
-        # )
-        opt_state = tx.init(params)
-        cbp_state = continual_backprop().init(params, **kwargs)
-        return cls(
-            step=0,
-            apply_fn=apply_fn,
-            params=params,
-            tx=tx,
-            opt_state=opt_state,
-            cbp_state=cbp_state,
-        )
-
-    def apply_gradients(self, *, grads, features, **kwargs):
-        """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
-
-        # Get updates from optimizer
-        tx_updates, new_opt_state = self.tx.update(
-            grads, self.opt_state, self.params
-        )  # tx first then reset so we don't change reset params based on old grads
-        params_after_tx = optax.apply_updates(self.params, tx_updates)
-
-        # Update with continual backprop
-        params_after_cbp, new_cbp_state = continual_backprop().update(
-            grads["params"],
-            self.cbp_state,
-            params_after_tx["params"],
-            features=features["intermediates"]["activations"][0],
-        )
-
-        # utils.check_tree_shapes(params_after_tx, params_after_cbp)
-        # utils.check_tree_shapes(self.params, params_after_cbp)
-
-        return self.replace(
-            step=self.step + 1,
-            params=params_after_cbp,
-            opt_state=new_opt_state,
-            cbp_state=new_cbp_state[0],
-            **kwargs,
-        )
 
 
 # -------------- CBP Weight reset ---------------

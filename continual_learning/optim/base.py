@@ -15,7 +15,7 @@ from jaxtyping import (
 )
 from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
-from typing import Tuple
+from typing import Tuple, Callable
 from chex import dataclass
 import optax
 import jax
@@ -47,8 +47,8 @@ class BaseOptimState:
 
 
 # -------------- Overall optimizer TrainState ---------------
-class ResttingTrainState(TrainState):
-    reset_method: BaseOptimiser
+class ResettingTrainState(TrainState):
+    reset_method: Callable = struct.field(pytree_node=False)
     cbp_state: optax.OptState = struct.field(pytree_node=True)
 
     # TODO: Investigate if we can OVERWRITE_WITH_GRADIENT and GradientTransformationExtraArgs
@@ -68,6 +68,7 @@ class ResttingTrainState(TrainState):
             tx=tx,
             opt_state=opt_state,
             cbp_state=cbp_state,
+            reset_method=reset_method
         )
 
     def apply_gradients(self, *, grads, features, **kwargs):
@@ -140,22 +141,21 @@ class BaseOptimiser(abc.ABC):
         logs[out_layer] = {"nodes_reset": 0}
         return layer_w, logs
 
-    @abstractmethod
     @staticmethod
     def reset_method(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CBPOptimState]:
+        ) -> Tuple[optax.Updates, BaseOptimState]:
 
-        @abstractmethod
+        @abc.abstractmethod
         def init(params: optax.Params, **kwargs):
             pass
 
-        @abstractmethod
+        @abc.abstractmethod
         def update(
             updates: optax.Updates,  # Gradients
             state: CBPOptimState,
             params: optax.Params | None = None,
             features: Array | None = None,
-        )->tuple[optax.Updates, BaseOptimState]::
+        )->tuple[optax.Updates, BaseOptimState]:
             pass
 

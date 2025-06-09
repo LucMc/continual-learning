@@ -166,9 +166,6 @@ def continuous_continual_backprop2(
     util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
     def init(params: optax.Params, **kwargs):
-        assert util_type in utils.UTIL_TYPES, ValueError(
-            f"Invalid util type, select from ({'|'.join(utils.UTIL_TYPES)})"
-        )
         weights, bias, _, _ = process_params(params["params"])
 
         del params  # Delete params?
@@ -178,9 +175,6 @@ def continuous_continual_backprop2(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
-            util_type_id=utils.UTIL_TYPES.index(
-                util_type
-            ),  # Replace with util function directly?
             accumulated_features_to_replace=0,
             # rng=random.PRNGKey(0), # Seed passed in through kwargs?
             **kwargs,
