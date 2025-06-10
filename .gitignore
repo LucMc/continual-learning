@@ -208,3 +208,7 @@ wandb/
 .nvim*
 continual_learning.egg-info/
 .pytest_cache/
+.direnv
+flake.lock
+flake.nix
+.envrc

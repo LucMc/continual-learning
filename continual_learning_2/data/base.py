@@ -116,12 +116,12 @@ class SplitDataset(ContinualLearningDataset):
             data_source=ds,
             sampler=grain.IndexSampler(
                 num_records=len(ds),
-                shuffle=True,
-                seed=self.seed,
+                shuffle=False,
+                num_epochs=1,
             ),
             operations=[
                 *self.OPERATIONS,
-                grain.Batch(batch_size=self.batch_size),
+                grain.Batch(batch_size=self.batch_size, drop_remainder=False),
             ],
             worker_count=self.num_workers,
         )

@@ -3,8 +3,8 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax.training.train_state import TrainState
-from tqdm import tqdm
 
+from continual_learning_2.configs.dataset import DatasetConfig
 from continual_learning_2.data import ContinualLearningDataset, SplitMNIST
 
 
@@ -12,9 +12,7 @@ class Network(nn.Module):
     num_classes: int
 
     @nn.compact
-    def __call__(self, x):
-        x = x.reshape(x.shape[0], -1)
-        x /= 255
+    def __call__(self, x: jax.Array) -> jax.Array:
         x = nn.Dense(256)(x)
         x = jax.nn.relu(x)
         x = nn.Dense(256)(x)
@@ -39,8 +37,8 @@ def train(dataset: ContinualLearningDataset):
 
     network = Network(dataset.NUM_CLASSES)
     optimizer = optax.adam(learning_rate=3e-4)
-    init_params = network.init(
-        key, jnp.ones((1, 28 * 28))
+    init_params = network.lazy_init(
+        key, jax.ShapeDtypeStruct((1, 28 * 28), jnp.float32)
     )  # TODO: Find a way to get this from the dataset lol
 
     network_state = TrainState.create(
@@ -49,7 +47,7 @@ def train(dataset: ContinualLearningDataset):
 
     steps = 0
     for task in dataset.tasks:
-        for batch in tqdm(task):
+        for batch in task:
             x, y = batch
             loss, network_state = update_network(network_state, x, y)
             if steps % 100 == 0:
@@ -62,5 +60,11 @@ def train(dataset: ContinualLearningDataset):
 
 
 if __name__ == "__main__":
-    dataset = SplitMNIST(seed=42, num_tasks=5, num_epochs=5, batch_size=32)
+    dataset_config = DatasetConfig(
+        num_tasks=5,
+        num_epochs_per_task=5,
+        batch_size=32,
+        seed=42
+    )
+    dataset = SplitMNIST(dataset_config)
     train(dataset)

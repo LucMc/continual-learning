@@ -12,7 +12,7 @@ from continual_learning_2.types import DatasetItem
 class ProcessMNIST(grain.MapTransform):
     def map(self, element: dict) -> DatasetItem:
         x, y = element["image"], element["label"]
-        x = np.array(x, dtype=np.int32)
+        x = np.array(x, dtype=np.float32).flatten() / 255
         y_one_hot = np.zeros(10, dtype=np.float32)
         y_one_hot[y] = 1.0
         return x, y_one_hot
