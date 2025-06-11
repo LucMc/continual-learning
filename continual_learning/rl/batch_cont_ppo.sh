@@ -6,21 +6,25 @@ set -e
 # --- 0. Usage Function ---
 # A function to print help/usage information
 usage() {
-    echo "Usage: $0 -s <number_of_runs> [-m <method1> <method2> ...]"
+    echo "Usage: $0 -s <number_of_runs> [-m <method1> <method2> ...] [--log]"
     echo ""
     echo "Options:"
-    echo "  -s <number>   (Required) The number of seeds to run, from 1 to 20."
-    echo "  -m <methods>  (Optional) A space-separated list of methods to run."
-    echo "                If not provided, all default methods will be run."
+    echo "  -s <number>     (Required) The number of seeds to run, from 1 to 20."
+    echo "  -m <methods>    (Optional) A space-separated list of methods to run."
+    echo "                  If not provided, all default methods will be run."
+    echo "  --log           (Optional) Enable logging. Default: disabled."
+    echo "  -h, --help      Display this help and exit."
     echo ""
     echo "Default Methods: cbp ccbp ccbp2 none"
     echo "Example: $0 -s 5"
     echo "Example: $0 -s 3 -m cbp none"
+    echo "Example: $0 -s 5 --log"
     exit 1
 }
 
 # --- 1. Define Defaults and Initialize Variables ---
 num_runs=""
+log_enabled=false # Default logging to false
 # Define the full array of available methods
 all_methods=("cbp" "ccbp" "ccbp2" "none")
 # This array will hold the methods we actually run (either all or a subset)
@@ -46,6 +50,10 @@ while [[ $# -gt 0 ]]; do
                 methods_to_run+=("$1")
                 shift
             done
+            ;;
+        --log)
+            log_enabled=true
+            shift # Move past the flag
             ;;
         -h|--help)
             usage
@@ -78,6 +86,12 @@ fi
 
 echo "Preparing to run experiments for the first $num_runs seed(s)..."
 echo "Methods to run: ${methods_to_run[*]}"
+# Report logging status
+if [ "$log_enabled" = true ]; then
+    echo "Logging: Enabled"
+else
+    echo "Logging: Disabled"
+fi
 echo ""
 
 
@@ -101,7 +115,17 @@ do
     for reset_method in "${methods_to_run[@]}"
     do
         echo "Running with seed: $seed, dormant-reset-method: $reset_method"
-        python "$python_script" --seed "$seed" --dormant-reset-method "$reset_method" --log
+        
+        # Build command arguments in an array for safety
+        cmd_args=("$python_script" --seed "$seed" --dormant-reset-method "$reset_method")
+        
+        # Add the --log flag to the command if it was enabled
+        if [ "$log_enabled" = true ]; then
+            cmd_args+=("--log")
+        fi
+        
+        # Execute the python script with the constructed arguments
+        python "${cmd_args[@]}"
         
         echo "Seed $seed with reset method $reset_method completed successfully"
         echo "-----------------------------------"

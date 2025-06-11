@@ -26,9 +26,10 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-from continual_learning.optim.base import BaseOptimState
 
 """
+This is an implementation of continual back propergation (CBP): https://www.nature.com/articles/s41586-024-07711-7
+
 TODO:
  * Clip ages
  * Reset adam/optim state for reset nodes
@@ -49,14 +50,14 @@ Count = 15
 
 
 @dataclass
-class CBPOptimState(BaseOptimState):
+class CBPOptimState:
     initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
     accumulated_features_to_replace: int
 
-    rng: PRNGKeyArray  # = random.PRNGKey(0)
+    rng: jax.Array = field(default_factory=lambda: jax.random.PRNGKey(0))
     step_size: float = 0.001
     replacement_rate: float = 0.5
     decay_rate: float = 0.9
@@ -64,45 +65,92 @@ class CBPOptimState(BaseOptimState):
     accumulate: bool = False
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
 
+# Define parameter partitioning functions
+def is_kernel(path, value):
+    return path[-1].key == 'kernel'
+
+def is_bias(path, value):
+    return path[-1].key == 'bias'
+
+def reset_optim_params(tx_state, reset_mask):
+    # Adam: tuple -> scale by adam @ tx_state[0]
+    # Adam: PartitionState -> scale by adam @ tx_state[0]
+
+    def composite(tx_state):
+        new_state = {}
+        for name, txs in tx_state.inner_states.items():
+            new_state[name] = reset_optim_params(txs.inner_state, reset_mask)
+
+        return new_state
+    
+    def reset_params(tx_state):
+        
+        if hasattr(tx_state, "mu"):
+            mu = tx_state.mu
+            # reset_transform = optax.multi_transform({"kernel": lambda k: k, "bias": lambda b: b})
+            # optax.multi_transform
+            # breakpoint()
+            # reset_mu = jax.tree.map(
+            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
+            #     {"params": reset_mask},
+            #     mu)
+
+        if hasattr(tx_state, "nu"):
+            nu = tx_state.nu
+            # reset_nu = jax.tree.map(
+            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
+            #     {"params": reset_mask},
+            #     nu)
+            
+        return tx_state
+    
+    # Check if it has the inner_states attribute
+    is_partition_state = hasattr(tx_state, 'inner_states')
+    
+    if is_partition_state:
+        return composite(tx_state)
+    else:
+        return reset_params(tx_state[0])
+
 
 # -------------- CBP Weight reset ---------------
-# @jaxtyped(typechecker=typechecker)
-def reset_weights(
-    reset_mask: PyTree[Bool[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    key_tree: PyTree[PRNGKeyArray],
-    initial_weights: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = None,
-):
-    layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(layer_names) - 1):
-        in_layer = layer_names[i]
-        out_layer = layer_names[i + 1]
-
-        # Generate random weights for resets
-        # random_in_weights = random.uniform(
-        #     key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
-        # )
-        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
-
-        assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-
-        in_reset_mask = reset_mask[in_layer].flatten()  # [1, out_size]
-        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-
-        # out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        _out_layer_w = jnp.where(in_reset_mask, zero_out_weights, layer_w[out_layer])
-        n_reset = reset_mask[in_layer].sum()
-
-        layer_w[in_layer] = _in_layer_w
-        layer_w[out_layer] = _out_layer_w
-
-        logs[in_layer] = {"nodes_reset": n_reset}
-    logs[out_layer] = {"nodes_reset": 0}
-    return layer_w, logs
-
+# def reset_weights(
+#     reset_mask: PyTree[Bool[Array, "#neurons"]],
+# # @jaxtyped(typechecker=typechecker)
+#     layer_w: PyTree[Float[Array, "..."]],
+#     key_tree: PyTree[PRNGKeyArray],
+#     initial_weights: PyTree[Float[Array, "..."]],
+#     replacement_rate: Float[Array, ""] = None,
+# ):
+#     layer_names = list(reset_mask.keys())
+#     logs = {}
+#
+#     for i in range(len(layer_names) - 1):
+#         in_layer = layer_names[i]
+#         out_layer = layer_names[i + 1]
+#
+#         # Generate random weights for resets
+#         # random_in_weights = random.uniform(
+#         #     key_tree[in_layer], layer_w[in_layer].shape, float, -bound, bound
+#         # )
+#         zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
+#
+#         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
+#
+#         in_reset_mask = reset_mask[in_layer].flatten()  # [1, out_size]
+#         _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
+#
+#         # out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
+#         _out_layer_w = jnp.where(in_reset_mask, zero_out_weights, layer_w[out_layer])
+#         n_reset = reset_mask[in_layer].sum()
+#
+#         layer_w[in_layer] = _in_layer_w
+#         layer_w[out_layer] = _out_layer_w
+#
+#         logs[in_layer] = {"nodes_reset": n_reset}
+#     logs[out_layer] = {"nodes_reset": 0}
+#     return layer_w, logs
+#
 
 # @jaxtyped(typechecker=typechecker)
 def get_updated_utility(  # Add batch dim
@@ -148,7 +196,6 @@ def get_out_weights_mag(weights):
 def process_params(params: PyTree):
     out_layer_name = "out_layer"
     # Removed deep copy of params however be careful as changes to `weights` and `bias` are
-
     excluded = {
         out_layer_name: params[out_layer_name]
     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
@@ -180,8 +227,12 @@ def process_params(params: PyTree):
 
 # -------------- Main CBP Optimiser body ---------------
 # @jaxtyped(typechecker=typechecker)
-def continual_backprop(
-) -> optax.GradientTransformation:
+def cbp(
+    replacement_rate: float = 0.5,  # Update to paper hyperparams
+    decay_rate: float = 0.9,
+    maturity_threshold: int = 10,
+    rng: Array = random.PRNGKey(0),
+) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _, _ = process_params(params["params"])
 
@@ -192,8 +243,8 @@ def continual_backprop(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
+            rng=rng,
             accumulated_features_to_replace=0,
-            # rng=random.PRNGKey(0), # Seed passed in through kwargs?
             **kwargs,
         )
 
@@ -203,37 +254,41 @@ def continual_backprop(
         state: CBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
+        tx_state: Array | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
-        def _continual_backprop(
+        def _cbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            weights, bias, out_w_mag, excluded = process_params(params)
+            assert features, "Features must be provided in update"
+            _features = features["intermediates"]["activations"][0]
 
-            new_rng, util_key = random.split(state.rng)
+            weights, bias, out_w_mag, excluded = process_params(params["params"])
+
+            new_rng, util_key = random.split(rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
             # vmap utility calculation over batch
             batched_util_calculation = jax.vmap(
-                partial(get_updated_utility, decay_rate=state.decay_rate),
+                partial(get_updated_utility, decay_rate=decay_rate),
                 in_axes=(None, None, 0),
             )
             _utility_batch = jax.tree.map(
-                batched_util_calculation, out_w_mag, state.utilities, features
+                batched_util_calculation, out_w_mag, state.utilities, _features
             )
             _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
 
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
-                    maturity_threshold=state.maturity_threshold,
-                    replacement_rate=state.replacement_rate,
+                    maturity_threshold=maturity_threshold,
+                    replacement_rate=replacement_rate,
                 ),
                 _utility,
                 state.ages,
             )
 
             # reset weights given mask
-            _weights, reset_logs = reset_weights(
+            _weights, reset_logs = utils.reset_weights(
                 reset_mask, weights, key_tree, state.initial_weights
             )
 
@@ -254,10 +309,14 @@ def continual_backprop(
             )
 
             new_params = {}
-            _logs = { k: 0 for k in state.logs} # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
+            # Reset optim, o.e. Adamw params
+            reset_optim_params(tx_state, reset_mask)
+
+            # Logging
             for layer_name in bias.keys():
                 new_params[layer_name] = {
                     "kernel": _weights[layer_name],
@@ -266,14 +325,20 @@ def continual_backprop(
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility)
+            new_state = state.replace(
+                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+            )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, (new_state,)
+            return (
+                {"params": new_params},
+                new_state,
+                tx_state,
+            )  # {"params": new_params}, (new_state,)
 
-        return _continual_backprop(updates)
+        return _cbp(updates)
 
-    return optax.GradientTransformation(init=init, update=update)
+    return optax.GradientTransformationExtraArgs(init=init, update=update)
 
 
 """ old code snippets:

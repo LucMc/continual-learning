@@ -29,7 +29,7 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-from continual_learning.optim.continual_backprop import (
+from continual_learning.optim.cbp import (
     get_out_weights_mag,
     process_params,
     CBPOptimState,
@@ -162,7 +162,7 @@ def get_reset_mask(
 
 
 # -------------- Main CCBP Optimiser body ---------------
-def continuous_continual_backprop2(
+def ccbp2(
     util_type: str = "contribution", **kwargs
 ) -> optax.GradientTransformation:
     def init(params: optax.Params, **kwargs):
@@ -187,7 +187,7 @@ def continuous_continual_backprop2(
         params: optax.Params | None = None,
         features: Array | None = None,
     ) -> tuple[optax.Updates, CBPOptimState]:
-        def _continuous_continual_backprop2(
+        def _ccbp2(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
             weights, bias, out_w_mag, excluded = process_params(params)
@@ -256,6 +256,6 @@ def continuous_continual_backprop2(
 
             return {"params": new_params}, (new_state,)
 
-        return _continuous_continual_backprop2(updates)
+        return _ccbp2(updates)
 
     return optax.GradientTransformation(init=init, update=update)
