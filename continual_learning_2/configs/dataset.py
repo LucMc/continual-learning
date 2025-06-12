@@ -16,4 +16,4 @@ class DatasetConfig:
     """The number of continual learning tasks."""
 
     num_workers: int = 0
-    """The number of workers to use for data loading. 0 = all available."""
+    """The number of workers to use for data loading. 0 = no multi-processing."""

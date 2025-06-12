@@ -30,6 +30,7 @@ metal = ["jax<=0.5.0", "jax-metal>=0.1.0; sys_platform == 'darwin'"]
 cuda12 = ["jax[cuda12]>=0.5.0"]
 tpu = ["jax[tpu]>=0.5.0"]
 testing = ["chex>=0.1.89", "pytest>=8.3.5"]
+profile = ["tensorflow-cpu>=2.19.0", "tensorboard>=2.19.0"]
 
 [tool.uv]
 prerelease = "allow"

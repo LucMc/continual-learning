@@ -30,6 +30,7 @@ class ContinualLearningDataset(abc.ABC):
 class SplitDataset(ContinualLearningDataset):
     CURRENT_TASK: int
     NUM_CLASSES: int
+    KEEP_IN_MEMORY: bool | None = None
 
     DATASET_PATH: str
     OPERATIONS: list[grain.Transformation] = []
@@ -44,7 +45,9 @@ class SplitDataset(ContinualLearningDataset):
         self.batch_size = config.batch_size
         self.seed = config.seed
         self.num_workers = config.num_workers
-        self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
+        self.dataset = datasets.load_dataset(
+            self.DATASET_PATH, keep_in_memory=self.KEEP_IN_MEMORY
+        ).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]

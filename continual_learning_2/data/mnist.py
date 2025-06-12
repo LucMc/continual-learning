@@ -21,11 +21,13 @@ class ProcessMNIST(grain.MapTransform):
 class SplitMNIST(SplitDataset):
     NUM_CLASSES: int = 10
     DATASET_PATH: str = "mnist"
+    KEEP_IN_MEMORY: bool | None = True
     OPERATIONS = [ProcessMNIST()]
 
 
 class PermutedMNIST(PermutedDataset):
     NUM_CLASSES: int = 10
     DATASET_PATH: str = "mnist"
+    KEEP_IN_MEMORY: bool | None = True
     OPERATIONS = [ProcessMNIST()]
     DATA_DIM: int = 28 * 28
