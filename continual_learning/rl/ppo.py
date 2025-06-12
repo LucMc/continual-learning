@@ -36,7 +36,7 @@ class Config:
     batch_size: int = 64 * 2  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
-    max_grad_norm: float = 0.5  # maximum gradient norm
+    max_grad_norm: float = 0.8  # maximum gradient norm
     gamma: float = 0.99  # discount factor
     vf_clip_range: float = np.inf  # vf clipping (typically higher than clip_range)
     ent_coef: float = 0.0  # how much exploration?

@@ -44,56 +44,6 @@ Does moving out towards 0 and in towards initial actually help or should both be
 """
 
 # -------------- Overall optimizer TrainState ---------------
-class CCBP2TrainState(TrainState):
-    cbp_state: optax.OptState = struct.field(pytree_node=True)
-
-    @classmethod
-    def create(cls, *, apply_fn, params, tx, **kwargs):
-        """Creates a new instance with ``step=0`` and initialized ``opt_state``."""
-        # We exclude OWG params when present because they do not need opt states.
-        # params_with_opt = (
-        #   params['params'] if OVERWRITE_WITH_GRADIENT in params else params
-        # )
-        opt_state = tx.init(params)
-        cbp_state = continuous_continual_backprop2().init(params, **kwargs)
-        return cls(
-            step=0,
-            apply_fn=apply_fn,
-            params=params,
-            tx=tx,
-            opt_state=opt_state,
-            cbp_state=cbp_state,
-        )
-
-    def apply_gradients(self, *, grads, features, **kwargs):
-        """TrainState that gives intermediates to optimizer and overwrites params with updates directly"""
-
-        # Get updates from optimizer
-        tx_updates, new_opt_state = self.tx.update(
-            grads, self.opt_state, self.params
-        )  # tx first then reset so we don't change reset params based on old grads
-        params_after_tx = optax.apply_updates(self.params, tx_updates)
-
-        # Update with continual backprop
-        params_after_cbp, new_cbp_state = continuous_continual_backprop2().update(
-            grads["params"],
-            self.cbp_state,
-            params_after_tx["params"],
-            features=features["intermediates"]["activations"][0],
-        )
-
-        # utils.check_tree_shapes(params_after_tx, params_after_cbp)
-        # utils.check_tree_shapes(self.params, params_after_cbp)
-
-        return self.replace(
-            step=self.step + 1,
-            params=params_after_cbp,
-            opt_state=new_opt_state,
-            cbp_state=new_cbp_state[0],
-            **kwargs,
-        )
-
-
 # -------------- CCBP Weight reset ---------------
 def reset_weights(
     reset_mask: PyTree[Float[Array, "#neurons"]], 
@@ -103,6 +53,7 @@ def reset_weights(
     utilities: PyTree[Float[Array, "..."]],
     replacement_rate: Float[Array, ""] = 0.01,
 ):
+    # TODO: Combine with other reset weights method or at least flatten like it
     layer_names = list(reset_mask.keys())
     logs = {}
 
@@ -163,12 +114,15 @@ def get_reset_mask(
 
 # -------------- Main CCBP Optimiser body ---------------
 def ccbp2(
-    util_type: str = "contribution", **kwargs
-) -> optax.GradientTransformation:
+    replacement_rate: float = 0.5,  # Update to paper hyperparams
+    decay_rate: float = 0.9,
+    maturity_threshold: int = 10,
+    rng: Array = random.PRNGKey(0),
+) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _, _ = process_params(params["params"])
 
-        del params  # Delete params?
+        del params
 
         return CBPOptimState(
             initial_weights=weights,
@@ -176,7 +130,10 @@ def ccbp2(
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             accumulated_features_to_replace=0,
-            # rng=random.PRNGKey(0), # Seed passed in through kwargs?
+            replacement_rate=replacement_rate,
+            decay_rate=decay_rate,
+            maturity_threshold=maturity_threshold,
+            rng=rng,
             **kwargs,
         )
 
@@ -186,11 +143,15 @@ def ccbp2(
         state: CBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
+        tx_state: optax.OptState | None = None
     ) -> tuple[optax.Updates, CBPOptimState]:
         def _ccbp2(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            weights, bias, out_w_mag, excluded = process_params(params)
+            assert features, "Features must be provided in update"
+            _features = features["intermediates"]["activations"][0]
+
+            weights, bias, out_w_mag, excluded = process_params(params["params"])
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
@@ -201,7 +162,7 @@ def ccbp2(
                 in_axes=(None, None, 0),
             )
             _utility_batch = jax.tree.map(
-                batched_util_calculation, out_w_mag, state.utilities, features
+                batched_util_calculation, out_w_mag, state.utilities, _features
             )
             _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
 
@@ -254,8 +215,8 @@ def ccbp2(
             )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, (new_state,)
+            return {"params": new_params}, new_state, tx_state
 
         return _ccbp2(updates)
 
-    return optax.GradientTransformation(init=init, update=update)
+    return optax.GradientTransformationExtraArgs(init=init, update=update)

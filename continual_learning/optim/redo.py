@@ -52,46 +52,7 @@ class RedoOptimState:
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
-
 # -------------- Redo Weight reset ---------------
-# class Redo(BaseOptimiser):
-# def reset_weights(
-#     reset_mask: PyTree[Bool[Array, "#neurons"]],
-#     layer_w: PyTree[Float[Array, "..."]],
-#     key_tree: PyTree[PRNGKeyArray],
-#     initial_weights: PyTree[Float[Array, "..."]],
-#     replacement_rate: Float[Array, ""] = None,
-# ):
-#     layer_names = list(reset_mask.keys())
-#     logs = {}
-#
-#     for i in range(len(layer_names) - 1):
-#         in_layer = layer_names[i]
-#         out_layer = layer_names[i + 1]
-#
-#         assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-#         assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
-#             f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
-#         )
-#
-#         in_reset_mask = reset_mask[in_layer].reshape(-1)  # [1, out_size]
-#         _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-#
-#         _out_layer_w = jnp.where(
-#             in_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
-#         )
-#         n_reset = reset_mask[in_layer].sum()
-#
-#         layer_w[in_layer] = _in_layer_w
-#         layer_w[out_layer] = _out_layer_w
-#
-#         logs[in_layer] = {"nodes_reset": n_reset}
-#
-#     logs[out_layer] = {"nodes_reset": 0}
-#
-#     return layer_w, logs
-#
-
 def get_score(  # averages over a batch
     features: Float[Array, "#batch #neurons"],
 ) -> Float[Array, "#neurons"]:
@@ -101,6 +62,7 @@ def get_score(  # averages over a batch
         jnp.mean(mean_act_per_neuron) + 1e-8
     )  # Arr[#neurons] / Scalar
     return score
+
 
 # -------------- lowest utility mask ---------------
 def get_reset_mask(
@@ -145,7 +107,10 @@ def process_params(params: PyTree):
 
 
 # -------------- Main Redo Optimiser body ---------------
-def redo(**kwargs) -> optax.GradientTransformation:
+def redo(
+    replacement_rate: float = 0.5,  # Update to paper hyperparams
+    rng: PRNGKeyArray = random.PRNGKey(0),
+) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _ = process_params(params["params"])
 
@@ -155,7 +120,8 @@ def redo(**kwargs) -> optax.GradientTransformation:
             initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
-            # rng=random.PRNGKey(0), # Seed passed in through kwargs?
+            rng=rng,
+            replacement_rate=replacement_rate,
             **kwargs,
         )
 
@@ -163,20 +129,26 @@ def redo(**kwargs) -> optax.GradientTransformation:
     def update(
         updates: optax.Updates,  # Gradients
         state: RedoOptimState,
-        params: optax.Params | None = None,
-        features: Array | None = None,
+        params: optax.Params,
+        features: Array,
+        tx_state: optax.OptState
     ) -> tuple[optax.Updates, RedoOptimState]:
         def no_update(updates):
             new_state = state.replace(time_step=state.time_step + 1)
-            return {"params": params}, (new_state,)
+            return params, new_state, tx_state
 
         def _redo(updates: optax.Updates,) -> Tuple[optax.Updates, RedoOptimState]:  # fmt: skip
-            weights, bias, excluded = process_params(params)
+            
+            _features = features["intermediates"]["activations"][0]
+
+            weights, bias, excluded = process_params(params["params"])
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            scores = jax.tree.map(get_score, features)  # Scores, avged over batches: # PyTree[#neurons]
+            scores = jax.tree.map(
+                get_score, _features
+            )  # Scores, avged over batches: # PyTree[#neurons]
 
             reset_mask = jax.tree.map(get_reset_mask, scores)
 
@@ -193,7 +165,7 @@ def redo(**kwargs) -> optax.GradientTransformation:
             )
 
             new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: Could be improved
 
             for layer_name in bias.keys():
                 new_params[layer_name] = {
@@ -207,10 +179,10 @@ def redo(**kwargs) -> optax.GradientTransformation:
             )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, (new_state,)
+            return {"params": new_params}, new_state, tx_state
 
         return jax.lax.cond(
             state.time_step % state.update_frequency == 0, _redo, no_update, updates
         )
 
-    return optax.GradientTransformation(init=init, update=update)
+    return optax.GradientTransformationExtraArgs(init=init, update=update)

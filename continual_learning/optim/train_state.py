@@ -34,12 +34,24 @@ TODO: Investigate using optax partition as a cleaner solution to applying update
 biases, and potentially ignoring the last layer. Could also consider only layers w features as targets
 """
 
+# Put in utils
+def identity_reset(*args, **kwargs):
+    
+    def init_fn(params, *args, **kwargs):
+        return {}
+    
+    def update_fn(updates, state, params, features, tx_state, *args, **extra_args):
+        return params, state, tx_state
+    
+    return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
 RESET_METHOD_MAP = {"cbp": optim.cbp,
                     "redo": optim.redo,
                     "ccbp": optim.ccbp,
                     "ccbp2": optim.ccbp2,
+                    "none": identity_reset
                     }
+
 
 
 def attach_reset_method(
@@ -60,129 +72,64 @@ def attach_reset_method(
 
     def update_fn(updates, state, params=None, features=None, **extra_args):
         """Updated named chain update from Optax to enable resetting of base optim running stats"""
+
         new_state = {}
-        assert len(transforms) == 2, (
-            "This chain be at the end and chain the optim with the reset method only"
-        )
+        assert len(transforms) == 2, "chain the optim with the reset method only"
         assert "tx" == args[0][0], "'tx' is the first part of this chain"
         assert "reset_method" == args[1][0], "'reset_method' is the second part of this chain"
 
-        # TX Update
+        # TX update
         tx = transforms[0][1]
         reset_method = transforms[1][1]
+
         updates, new_state["tx"] = tx.update(updates, state["tx"], params, **extra_args)
+        new_params_with_opt = optax.apply_updates(params, updates)
 
         # Reset method
-        updates, new_state["reset_method"], new_state["tx"] = reset_method.update(
+        new_params_with_reset, new_state["reset_method"], new_state["tx"] = reset_method.update(
             updates,
             state["reset_method"],
-            params,
+            new_params_with_opt,
             features=features,
-            tx_state=state["tx"],
-            **extra_args,
+            tx_state=new_state["tx"],
         )
 
-        return updates, new_state
+        return new_params_with_reset, new_state
 
     return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
 # -------------- Overall optimizer TrainState ---------------
 class ResettingTrainState(TrainState):
+    """
+    TrainState for attaching dormant neuron resetting methods. Ensure each element in tx
+    is wrapped with optax.with_extra_args_support and take in features to apply_gradients.
+    """
     
     @classmethod
-    def create(cls, *, apply_fn, params, tx, reset_method=None, reset_method_kwargs={}, **kwargs):
-        assert reset_method in RESET_METHOD_MAP.keys(), f"reset method must be one of: {RESET_METHOD_MAP.keys()}"
+    def create(cls, *, apply_fn, params, tx, reset_method, reset_method_kwargs={}, **kwargs):
 
         # Attach reset method
         reset_method_fn = RESET_METHOD_MAP[reset_method](**reset_method_kwargs)
         tx = attach_reset_method(("tx", tx), ("reset_method", reset_method_fn))
-
         opt_state = tx.init(params)
-        ts_args = dict(
+        return cls(
             step=0,
             apply_fn=apply_fn,
             params=params,
-            tx=tx,
             opt_state=opt_state,
+            tx=tx,
             **kwargs)
-        
-        return cls(**ts_args) if reset_method != "none" else TrainState(**ts_args)
 
     def apply_gradients(self, *, grads, features=None, **kwargs):
         assert features, "Features must be provided to apply_gradients()"
 
-        grads_with_opt = grads
-        params_with_opt = self.params
-
-        updates, new_opt_state = self.tx.update(
-            grads_with_opt, self.opt_state, params_with_opt, features=features
+        new_params, new_opt_state = self.tx.update(
+            grads, self.opt_state, self.params, features=features
         )
-        # new_params_with_opt = optax.apply_updates(params_with_opt, updates)
-        new_params_with_opt = updates
-        # Set params with params given by last optim (dormant reset method)
 
-        new_params = new_params_with_opt
         return self.replace(
             step=self.step + 1,
             params=new_params,
             opt_state=new_opt_state,
             **kwargs,
         )
-
-
-# -------------- Weight reset ---------------
-# class BaseOptimiser(abc.ABC):
-#     @staticmethod
-#
-#     def reset_weights(
-#         reset_mask: PyTree[Bool[Array, "#neurons"]],
-#         layer_w: PyTree[Float[Array, "..."]],
-#         key_tree: PyTree[PRNGKeyArray],
-#         initial_weights: PyTree[Float[Array, "..."]],
-#         replacement_rate: Float[Array, ""] = None,
-#     ):
-#         layer_names = list(reset_mask.keys())
-#         logs = {}
-#
-#         for i in range(len(layer_names) - 1):
-#             in_layer = layer_names[i]
-#             out_layer = layer_names[i + 1]
-#
-#             assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-#             assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
-#                 f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
-#             )
-#
-#             in_reset_mask = reset_mask[in_layer].reshape(-1)  # [1, out_size]
-#             _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-#
-#             _out_layer_w = jnp.where(
-#                 in_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
-#             )
-#             n_reset = reset_mask[in_layer].sum()
-#
-#             layer_w[in_layer] = _in_layer_w
-#             layer_w[out_layer] = _out_layer_w
-#
-#             logs[in_layer] = {"nodes_reset": n_reset}
-#
-#         logs[out_layer] = {"nodes_reset": 0}
-#
-#         return layer_w, logs
-#
-#     @staticmethod
-#     def reset_method(
-#         updates: optax.Updates,
-#     ) -> Tuple[optax.Updates, BaseOptimState]:
-#         @abc.abstractmethod
-#         def init(params: optax.Params, **kwargs):
-#             pass
-#
-#         @abc.abstractmethod
-#         def update(
-#             updates: optax.Updates,  # Gradients
-#             state: CBPOptimState,
-#             params: optax.Params | None = None,
-#             features: Array | None = None,
-#         ) -> tuple[optax.Updates, BaseOptimState, Any]:
-#             pass

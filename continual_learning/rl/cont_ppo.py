@@ -134,8 +134,7 @@ class ContPPO(PPO, ContConfig):
                 adv_norm,
             )
             # Apply updates with / without features
-            if self.dormant_reset_method != "none":
-                actor_ts = actor_ts.apply_gradients(grads=actor_grads, features=actor_features)
+            actor_ts = actor_ts.apply_gradients(grads=actor_grads, features=actor_features)
 
             actor_loss_total += actor_loss_v
 
@@ -143,8 +142,7 @@ class ContPPO(PPO, ContConfig):
                 self.value_loss, has_aux=True
             )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
 
-            if self.dormant_reset_method != "none":
-                value_ts = value_ts.apply_gradients(grads=value_grads, features=value_features)
+            value_ts = value_ts.apply_gradients(grads=value_grads, features=value_features)
 
             value_loss_total += value_loss_v
             value_total += value_mean
@@ -221,9 +219,10 @@ class ContPPO(PPO, ContConfig):
             buffer_size=config.rollout_steps,
             **config.__dict__,
         )
-        cbp_kwargs = {} # Change cbp options here i.e. "maturity_threshold": jnp.inf
-
+        key, reset_method_key = random.split(random.PRNGKey(ppo_agent.seed))
+        reset_kwargs = dict(rng=reset_method_key)  # Change cbp options here i.e. "maturity_threshold": jnp.inf
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
+
         pprint(ppo_agent.__dict__)
         env_args = {}
 
@@ -279,7 +278,6 @@ class ContPPO(PPO, ContConfig):
             ]
         )
         dummy_obs, _ = envs.reset(seed=ppo_agent.seed)
-        key = random.PRNGKey(ppo_agent.seed)
         current_global_step = 0
 
         actor_key, value_key, key = random.split(key, num=3)
@@ -300,27 +298,18 @@ class ContPPO(PPO, ContConfig):
         if ppo_agent.optim == "sgd": tx = optax.sgd
         if ppo_agent.optim == "muon": tx = optax.contrib.muon
         if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
+        # fmt: on
         # For some reason loads of decay seems to work better...
 
-        opt = optax.chain(
-            optax.with_extra_args_support(optax.clip_by_global_norm(ppo_agent.max_grad_norm)),
-            optax.with_extra_args_support(
-                optax.inject_hyperparams(tx)(
-                learning_rate=optax.linear_schedule(
-                    init_value=ppo_agent.learning_rate,
-                    end_value=ppo_agent.learning_rate / 10,
-                    transition_steps=ppo_agent.training_steps,
-                    )
+        opt = optax.with_extra_args_support(
+            optax.chain(
+                optax.with_extra_args_support(
+                    optax.clip_by_global_norm(ppo_agent.max_grad_norm)
                 ),
-            ),
+                optax.with_extra_args_support(tx(learning_rate=ppo_agent.learning_rate)),
+            )
         )
-        # opt =  tx(learning_rate=ppo_agent.learning_rate)
 
-        # Continual backpropergation
-        if ppo_agent.dormant_reset_method != "none":
-            cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
-
-        # fmt: on
         last_obs, first_info = envs.reset()
         last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
 
@@ -334,7 +323,8 @@ class ContPPO(PPO, ContConfig):
             actor_net_cls=actor_net_cls,
             value_net_cls=value_net_cls,
             trainstate_cls=ResettingTrainState,
-            reset_method_kwargs=cbp_kwargs,
+            reset_method=ppo_agent.dormant_reset_method,
+            reset_method_kwargs=reset_kwargs,
         )
 
         while current_global_step < ppo_agent.training_steps:

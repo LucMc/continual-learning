@@ -96,7 +96,11 @@ def get_reset_mask(
 
 # -------------- Main CCBP Optimiser body ---------------
 def ccbp(
-) -> optax.GradientTransformation:
+    replacement_rate: float = 0.5,  # Update to paper hyperparams
+    decay_rate: float = 0.9,
+    maturity_threshold: int = 10,
+    rng: Array = random.PRNGKey(0),
+) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _, _ = process_params(params["params"])
 
@@ -108,7 +112,10 @@ def ccbp(
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             accumulated_features_to_replace=0,
-            # rng=random.PRNGKey(0), # Seed passed in through kwargs?
+            replacement_rate=replacement_rate,
+            decay_rate=decay_rate,
+            maturity_threshold=maturity_threshold,
+            rng=rng,
             **kwargs,
         )
 
@@ -118,11 +125,12 @@ def ccbp(
         state: CBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
+        tx_state: optax.OptState | None = None
     ) -> tuple[optax.Updates, CBPOptimState]:
         def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            weights, bias, out_w_mag, excluded = process_params(params)
+            weights, bias, out_w_mag, excluded = process_params(params["params"])
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
@@ -177,8 +185,8 @@ def ccbp(
             )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, (new_state,)
+            return {"params": new_params}, new_state, tx_state
 
         return _ccbp(updates)
 
-    return optax.GradientTransformation(init=init, update=update)
+    return optax.GradientTransformationExtraArgs(init=init, update=update)
