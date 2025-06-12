@@ -26,14 +26,13 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning.utils.optim as utils
-# from continual_learning.optim.base import reset_weights
 
 """
 This file implements ReDo: 
 https://github.com/google/dopamine/blob/master/dopamine/labs/redo/weight_recyclers.py
 as an optax optimizer
 """
-
+# TODO: Remove RNG it doesn't need it at all
 
 @dataclass
 class RedoOptimState:
@@ -144,7 +143,7 @@ def redo(
             weights, bias, excluded = process_params(params["params"])
 
             new_rng, util_key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(util_key, weights)
+            # key_tree = utils.gen_key_tree(util_key, weights)
 
             scores = jax.tree.map(
                 get_score, _features
@@ -154,7 +153,7 @@ def redo(
 
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights
+                reset_mask, weights, state.initial_weights
             )
 
             # reset bias given mask
@@ -179,7 +178,9 @@ def redo(
             )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, new_state, tx_state
+            # Reset optim, i.e. Adamw params
+            _tx_state = utils.reset_optim_params(tx_state, reset_mask)
+            return {"params": new_params}, new_state, _tx_state
 
         return jax.lax.cond(
             state.time_step % state.update_frequency == 0, _redo, no_update, updates

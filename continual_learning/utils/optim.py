@@ -13,7 +13,6 @@ import continual_learning.optim as optim
 def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
-    key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
     replacement_rate: Float[Array, ""] = None,
 ):
@@ -46,14 +45,67 @@ def reset_weights(
 
     return layer_w, logs
 
-def gen_key_tree(key: PRNGKeyArray, tree: PyTree):
-    """
-    Creates a PyTree of random keys such that is can be traversed in the tree map and have
-    a new key for each leaf.
-    """
-    leaves, treedef = jax.tree.flatten(tree)
-    subkeys = jax.random.split(key, len(leaves))
-    return jax.tree.unflatten(treedef, subkeys)
+def reset_optim_params(tx_state, reset_mask):
+    """Reset optimizer params using reset_mask"""
+    
+    def composite(tx_state):
+        # handle optax chains etc
+        new_inner_states = {}
+        for name, txs in tx_state.inner_states.items():
+            new_inner_states[name] = reset_optim_params(txs.inner_state, reset_mask)
+        
+        return tx_state._replace(inner_states=new_inner_states)
+    
+    def reset_params(tx_state):
+        
+        def map_fn(path, value):
+            # resets weights and biases similar to in cbp, but to zero
+            if "kernel" in path:
+                layer_name = path[0].key
+                if layer_name in reset_mask:
+                    mask = reset_mask[layer_name]
+                    mask_expanded = mask[None, :]  # Array: [1, out_features]
+                    return jnp.where(mask_expanded, 0.0, value)
+            elif "bias" in path:
+                layer_name = path[0].key
+                if layer_name in reset_mask:
+                    mask = reset_mask[layer_name]
+                    return jnp.where(mask, 0.0, value)
+            return value
+        
+        new_state_dict = {}
+        
+        if hasattr(tx_state, "mu"):
+            new_state_dict["mu"] = flax.traverse_util.path_aware_map(map_fn, tx_state.mu)
+        
+        if hasattr(tx_state, "nu"):
+            new_state_dict["nu"] = flax.traverse_util.path_aware_map(map_fn, tx_state.nu)
+        
+        # copy other attributes
+        for attr in tx_state._fields:
+            if attr not in ["mu", "nu"] and hasattr(tx_state, attr):
+                new_state_dict[attr] = getattr(tx_state, attr)
+        
+        return type(tx_state)(**new_state_dict)
+    
+    if hasattr(tx_state, "inner_states"):
+        return composite(tx_state)
+    else:
+        # for single optimizer states (i.e. just Adam)
+        if isinstance(tx_state, tuple):
+            # put back into tuple
+            return (reset_params(tx_state[0]),) + tx_state[1:]
+        else:
+            return reset_params(tx_state)
+
+# def gen_key_tree(key: PRNGKeyArray, tree: PyTree):
+#     """
+#     Creates a PyTree of random keys such that is can be traversed in the tree map and have
+#     a new key for each leaf.
+#     """
+#     leaves, treedef = jax.tree.flatten(tree)
+#     subkeys = jax.random.split(key, len(leaves))
+#     return jax.tree.unflatten(treedef, subkeys)
 
 
 def get_bottom_k_mask(values, n_to_replace):

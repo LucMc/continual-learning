@@ -1,3 +1,4 @@
+import flax
 from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
@@ -65,52 +66,16 @@ class CBPOptimState:
     accumulate: bool = False
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
 
+
 # Define parameter partitioning functions
 def is_kernel(path, value):
-    return path[-1].key == 'kernel'
+    return path[-1].key == "kernel"
+
 
 def is_bias(path, value):
-    return path[-1].key == 'bias'
+    return path[-1].key == "bias"
 
-def reset_optim_params(tx_state, reset_mask):
-    # Adam: tuple -> scale by adam @ tx_state[0]
-    # Adam: PartitionState -> scale by adam @ tx_state[0]
 
-    def composite(tx_state):
-        new_state = {}
-        for name, txs in tx_state.inner_states.items():
-            new_state[name] = reset_optim_params(txs.inner_state, reset_mask)
-
-        return new_state
-    
-    def reset_params(tx_state):
-        
-        if hasattr(tx_state, "mu"):
-            mu = tx_state.mu
-            # reset_transform = optax.multi_transform({"kernel": lambda k: k, "bias": lambda b: b})
-            # optax.multi_transform
-            # breakpoint()
-            # reset_mu = jax.tree.map(
-            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
-            #     {"params": reset_mask},
-            #     mu)
-
-        if hasattr(tx_state, "nu"):
-            nu = tx_state.nu
-            # reset_nu = jax.tree.map(
-            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
-            #     {"params": reset_mask},
-            #     nu)
-            
-        return tx_state
-    
-    # Check if it has the inner_states attribute
-    is_partition_state = hasattr(tx_state, 'inner_states')
-    
-    if is_partition_state:
-        return composite(tx_state)
-    else:
-        return reset_params(tx_state[0])
 
 
 # -------------- CBP Weight reset ---------------
@@ -210,7 +175,7 @@ def cbp(
 
     @jax.jit
     def update(
-        updates: optax.Updates, # Gradients
+        updates: optax.Updates,  # Gradients
         state: CBPOptimState,
         params: optax.Params,
         features: Array,
@@ -225,7 +190,7 @@ def cbp(
             weights, bias, out_w_mag, excluded = process_params(params["params"])
 
             new_rng, util_key = random.split(rng)
-            key_tree = utils.gen_key_tree(util_key, weights)
+            # key_tree = utils.gen_key_tree(util_key, weights)
 
             # vmap utility calculation over batch
             batched_util_calculation = jax.vmap(
@@ -249,7 +214,7 @@ def cbp(
 
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights
+                reset_mask, weights, state.initial_weights
             )
 
             # reset bias given mask
@@ -273,9 +238,6 @@ def cbp(
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
-            # Reset optim, o.e. Adamw params
-            reset_optim_params(tx_state, reset_mask)
-
             # Logging
             for layer_name in bias.keys():
                 new_params[layer_name] = {
@@ -290,7 +252,9 @@ def cbp(
             )
             new_params.update(excluded)  # TODO
 
-            return {"params": new_params}, new_state, tx_state
+            # Reset optim, i.e. Adamw params
+            _tx_state = utils.reset_optim_params(tx_state, reset_mask)
+            return {"params": new_params}, new_state, _tx_state
 
         return _cbp(updates)
 
