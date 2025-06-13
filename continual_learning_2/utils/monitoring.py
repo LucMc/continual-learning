@@ -23,13 +23,16 @@ def prefix_dict(prefix: str, d: dict[str, Any]) -> dict[str, Any]:
     return {f"{prefix}/{k}": v for k, v in d.items()}
 
 
-def pytree_histogram(pytree: PyTree, bins: int = 64) -> dict[str, Histogram]:
+def pytree_histogram(pytree: PyTree[Array], bins: int = 64) -> dict[str, Histogram]:
     flat_dict = flax.traverse_util.flatten_dict(pytree, sep="/")
     ret = {}
     for k, v in flat_dict.items():
         if isinstance(v, tuple):  # For activations
             v = v[0]
-        ret[k] = Histogram(np_histogram=jnp.histogram(v, bins=bins))  # pyright: ignore[reportArgumentType]
+        assert isinstance(v, Array) or isinstance(v, np.ndarray)
+        ret[k] = Histogram(
+            total_events=v.reshape(-1).shape[0], np_histogram=jnp.histogram(v, bins=bins)
+        )  # pyright: ignore[reportArgumentType]
     return ret
 
 
@@ -48,7 +51,8 @@ def get_logs(
     if std:
         ret[f"{name}_std"] = jnp.std(data, axis=axis)
     if hist:
-        ret[f"{name}"] = Histogram(data.reshape(-1))
+        data = data.reshape(-1)
+        ret[f"{name}"] = Histogram(data=data, total_events=data.shape[0])
 
     return ret
 
@@ -127,3 +131,45 @@ def get_dormant_neuron_logs(
     )
 
     return logs
+
+
+def average_histograms(histograms: list[Histogram]) -> Histogram:
+    data = [  # counts, edges, total_events
+        (h.np_histogram[0], h.np_histogram[1], h.total_events)
+        for h in histograms
+        if h.np_histogram is not None
+    ]
+
+    global_min = min([h[1][0] for h in data])
+    global_max = max([h[1][-1] for h in data])
+    max_edges = max([len(h[1]) for h in data])
+
+    target_bin_edges = np.linspace(global_min, global_max, 2 * max_edges - 1)
+    target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
+
+    resampled_counts_list, weights = [], []
+    for counts, bin_edges, total_events in data:
+        original_bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        resampled_counts = np.interp(target_bin_centers, original_bin_centers, counts)
+        resampled_counts_list.append(resampled_counts)
+        weights.append(total_events)
+
+    averaged_counts = np.average(
+        np.array(resampled_counts_list), axis=0, weights=np.array(weights)
+    )
+
+    return Histogram(
+        total_events=np.sum(weights),
+        np_histogram=(averaged_counts, target_bin_edges),
+    )
+
+
+def accumulate_metrics(metrics: list[LogDict]) -> LogDict:
+    ret = {}
+    for k in metrics[0]:
+        if not isinstance(metrics[0][k], Histogram):
+            ret[k] = float(np.mean([m[k] for m in metrics]))  # pyright: ignore[reportArgumentType,reportCallIssue]
+        else:
+            ret[k] = average_histograms([m[k] for m in metrics])  # pyright: ignore[reportArgumentType,reportCallIssue]
+
+    return ret

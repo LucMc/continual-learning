@@ -5,26 +5,40 @@ from typing import Generator
 
 import datasets
 import grain.python as grain
+import jax
+import jax.numpy as jnp
 import numpy as np
+import optax
+from flax.training.train_state import TrainState
 from jaxtyping import Array, Int32
 
 from continual_learning_2.configs import DatasetConfig
 from continual_learning_2.types import DatasetItem, LogDict, PredictorModel
+from continual_learning_2.utils.monitoring import accumulate_metrics, prefix_dict
 
 
 class ContinualLearningDataset(abc.ABC):
     NUM_CLASSES: int
 
     @abc.abstractmethod
-    def __init__(
-        self, seed: int, num_tasks: int, num_epochs: int, batch_size: int, num_workers: int = 0
-    ): ...
+    def __init__(self, config: DatasetConfig): ...
 
     @abc.abstractproperty
     def tasks(self) -> Generator[grain.DataLoader, None, None]: ...
 
     @abc.abstractmethod
     def evaluate(self, model: PredictorModel, forgetting: bool = False) -> LogDict: ...
+
+    @abc.abstractproperty
+    def spec(self) -> jax.ShapeDtypeStruct: ...
+
+
+@jax.jit
+def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> LogDict:
+    logits = model.apply_fn({"params": model.params}, x, training=False)
+    loss = optax.softmax_cross_entropy(logits, y).mean()
+    accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
+    return {"eval_loss": loss, "eval_accuracy": accuracy}
 
 
 class SplitDataset(ContinualLearningDataset):
@@ -64,19 +78,22 @@ class SplitDataset(ContinualLearningDataset):
             for task in range(self.CURRENT_TASK):
                 test_set = self._get_task_test(task)
                 print(f"- Evaluating on task {task}")
-                metrics[f"task_{task}_accuracy"] = self._eval_task(model, test_set)
+                metrics.update(
+                    prefix_dict(f"metrics/task_{task}", self._eval_task(model, test_set))
+                )
         print(f"- Evaluating on task {self.CURRENT_TASK}")
-        metrics["accuracy"] = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
-        metrics[f"task_{self.CURRENT_TASK}_accuracy"] = metrics["accuracy"]
+        latest_metrics = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
+        metrics.update(prefix_dict("metrics", latest_metrics))
+        metrics.update(prefix_dict(f"metrics/task_{self.CURRENT_TASK}", latest_metrics))
         return metrics
 
-    def _eval_task(self, model: PredictorModel, test_set: grain.DataLoader) -> float:
-        accuracies = []
+    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> LogDict:
+        logs = []
         for data in test_set:
             x, y = data
-            pred = model(x)
-            accuracies.append((pred.argmax(axis=1) == y.argmax(axis=1)).mean().item())
-        return float(np.mean(accuracies))
+            logs.append(_eval_model(model, x, y))
+
+        return accumulate_metrics(logs)
 
     def _get_task(self, task_id: int) -> grain.DataLoader:
         if task_id < 0 or task_id >= self.num_tasks:

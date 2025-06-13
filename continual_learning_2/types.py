@@ -27,6 +27,7 @@ type Intermediates = dict[str, tuple[LayerActivations, ...] | "Intermediates"]
 
 
 class Histogram(flax.struct.PyTreeNode):
+    total_events: int
     data: Float[npt.NDArray | Array, "..."] | None = None
     np_histogram: tuple | None = None
 

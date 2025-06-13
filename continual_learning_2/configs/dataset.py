@@ -3,6 +3,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DatasetConfig:
+    name: str
+    """The name of the dataset."""
+
     seed: int
     """The seed to use for random shuffling etc."""
 
