@@ -1,5 +1,7 @@
 # pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
 import grain.python as grain
+import jax
+import jax.numpy as jnp
 import numpy as np
 
 from continual_learning_2.data.base import (
@@ -24,6 +26,12 @@ class SplitMNIST(SplitDataset):
     KEEP_IN_MEMORY: bool | None = True
     OPERATIONS = [ProcessMNIST()]
 
+    @property
+    def spec(self) -> jax.ShapeDtypeStruct:
+        # fmt: off
+        return jax.ShapeDtypeStruct((1, 28 * 28), dtype=jnp.float32)
+        # fmt: on
+
 
 class PermutedMNIST(PermutedDataset):
     NUM_CLASSES: int = 10
@@ -31,3 +39,9 @@ class PermutedMNIST(PermutedDataset):
     KEEP_IN_MEMORY: bool | None = True
     OPERATIONS = [ProcessMNIST()]
     DATA_DIM: int = 28 * 28
+
+    @property
+    def spec(self) -> jax.ShapeDtypeStruct:
+        # fmt: off
+        return jax.ShapeDtypeStruct((1, 28 * 28), dtype=jnp.float32)
+        # fmt: on

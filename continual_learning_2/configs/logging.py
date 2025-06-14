@@ -10,3 +10,4 @@ class LoggingConfig:
     interval: int = 100
     save_interval: int = 1000
     eval_interval: int = 1000
+    eval_during_training: bool = False

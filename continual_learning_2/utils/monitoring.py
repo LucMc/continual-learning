@@ -9,10 +9,12 @@ import numpy.typing as npt
 import wandb
 from jaxtyping import Array, Float, PyTree
 
+from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.types import Histogram, Intermediates, LayerActivationsDict, LogDict
 
 
 def log(logs: dict, step: int) -> None:
+    # TODO: probably remove once PPO has been migrated
     for key, value in logs.items():
         if isinstance(value, Histogram):
             logs[key] = wandb.Histogram(value.data, np_histogram=value.np_histogram)  # pyright: ignore[reportArgumentType]
@@ -173,3 +175,65 @@ def accumulate_metrics(metrics: list[LogDict]) -> LogDict:
             ret[k] = average_histograms([m[k] for m in metrics])  # pyright: ignore[reportArgumentType,reportCallIssue]
 
     return ret
+
+
+class Logger:
+    cfg: LoggingConfig
+
+    def __init__(self, logging_config: LoggingConfig, run_config: dict):
+        self.cfg = logging_config
+        self.buffer = []
+        wandb.init(
+            name=self.cfg.run_name,
+            project=self.cfg.wandb_project,
+            entity=self.cfg.wandb_entity,
+            config=run_config,
+            resume="allow",
+        )
+
+    def get_distribution_logs(
+        self,
+        name: str,
+        data: Float[npt.NDArray | Array, "..."],
+        axis: int | None = None,
+        log_histogram: bool = True,
+        log_std: bool = True,
+    ) -> "LogDict":
+        ret: "LogDict" = {
+            f"{name}_mean": jnp.mean(data, axis=axis),
+            f"{name}_min": jnp.min(data, axis=axis),
+            f"{name}_max": jnp.max(data, axis=axis),
+        }
+        if log_std:
+            ret[f"{name}_std"] = jnp.std(data, axis=axis)
+        if log_histogram:
+            data = data.reshape(-1)
+            ret[f"{name}"] = Histogram(data=data, total_events=data.shape[0])
+
+        return ret
+
+    def accumulate(self, logs: LogDict):
+        self.buffer.append(logs)
+
+    def _log(self, logs: LogDict, step: int):
+        for key, value in logs.items():
+            if isinstance(value, Histogram):
+                logs[key] = wandb.Histogram(value.data, np_histogram=value.np_histogram)  # pyright: ignore[reportArgumentType]
+        wandb.log(logs, step=step)
+
+    def push(self, step: int) -> None:
+        if len(self.buffer) == 0:
+            return
+
+        logs = accumulate_metrics(self.buffer)
+        self.buffer.clear()
+        self._log(logs, step)
+
+    def log(self, logs: LogDict, step: int):
+        self._log(logs, step)
+
+    def close(self):
+        wandb.finish()
+
+    def __del__(self):
+        self.close()
