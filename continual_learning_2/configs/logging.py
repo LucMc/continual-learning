@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass
@@ -6,6 +7,7 @@ class LoggingConfig:
     run_name: str
     wandb_entity: str
     wandb_project: str
+    wandb_mode: Literal["online", "offline", "disabled"] = "online"
 
     interval: int = 100
     save_interval: int = 1000

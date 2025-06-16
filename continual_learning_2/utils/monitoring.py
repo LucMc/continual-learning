@@ -69,25 +69,6 @@ def explained_variance(
     return np.nan if var_y == 0 else float(1 - np.var(y_true - y_pred) / var_y)
 
 
-def extract_activations(network_dict: Intermediates) -> LayerActivationsDict:
-    def recursive_extract(
-        d: Intermediates, current_path: list[str] = []
-    ) -> LayerActivationsDict:
-        activations = {}
-        if isinstance(d, dict):
-            for k, v in d.items():
-                if isinstance(v, dict):
-                    sub_activations = recursive_extract(v, current_path + [k])
-                    activations.update(sub_activations)
-                else:
-                    assert isinstance(v, tuple)
-                    # HACK: assuming every module only has 1 output
-                    activations[k] = v[0]
-        return activations
-
-    return recursive_extract(network_dict)
-
-
 def get_dormant_neuron_logs(
     layer_activations: LayerActivationsDict, dormant_neuron_threshold: float = 0.1
 ) -> LogDict:
@@ -133,6 +114,27 @@ def get_dormant_neuron_logs(
     )
 
     return logs
+
+
+def compute_srank(
+    feature_matrix: Float[Array, "num_features feature_dim"], delta: float = 0.01
+) -> Float[Array, ""]:
+    """Compute effective rank (srank) of a feature matrix.
+
+    Args:
+        feature_matrix: Matrix of shape [num_features, feature_dim]
+        delta: Threshold parameter (default: 0.01)
+
+    Returns:
+        Effective rank (srank) value
+    """
+    s = jnp.linalg.svd(feature_matrix, compute_uv=False)
+    cumsum = jnp.cumsum(s)
+    total = jnp.sum(s)
+    ratios = cumsum / total
+    mask = ratios >= (1.0 - delta)
+    srank = jnp.argmax(mask) + 1
+    return srank
 
 
 def average_histograms(histograms: list[Histogram]) -> Histogram:
@@ -188,6 +190,7 @@ class Logger:
             project=self.cfg.wandb_project,
             entity=self.cfg.wandb_entity,
             config=run_config,
+            mode=self.cfg.wandb_mode,
             resume="allow",
         )
 
