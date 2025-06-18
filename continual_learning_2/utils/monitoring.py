@@ -77,39 +77,62 @@ def get_dormant_neuron_logs(
 
     Adapted from https://github.com/google/dopamine/blob/master/dopamine/labs/redo/tfagents/sac_train_eval.py#L563"""
 
-    all_layers_score: LayerActivationsDict = {}
-    dormant_neurons = {}  # To store both mask and count for each layer
+    logs = {}
+    total_dead_neurons, total_hidden_count = 0, 0
 
     for act_key, act_value in layer_activations.items():
-        chex.assert_rank(act_value, 2)
-        neurons_score = jnp.mean(jnp.abs(act_value), axis=0)
-        neurons_score = neurons_score / (jnp.mean(neurons_score) + 1e-9)
-        all_layers_score[act_key] = neurons_score
+        chex.assert_rank(act_value, 2)  # (batch_size, layer_dim)
+        neurons_score = jnp.mean(jnp.abs(act_value), axis=0)  # (layer_dim,)
+        neurons_score = neurons_score / (jnp.mean(neurons_score) + 1e-6)  # (layer_dim,)
 
-        mask = jnp.where(
-            neurons_score <= dormant_neuron_threshold,
-            jnp.ones_like(neurons_score, dtype=jnp.int32),
-            jnp.zeros_like(neurons_score, dtype=jnp.int32),
-        )
-        num_dormant_neurons = jnp.sum(mask)
+        num_dormant_neurons = jnp.sum(neurons_score <= dormant_neuron_threshold)
 
-        dormant_neurons[act_key] = {"mask": mask, "count": num_dormant_neurons}
+        layer_dim = neurons_score.shape[0]
 
-    logs = {}
-
-    total_dead_neurons = 0
-    total_hidden_count = 0
-    for layer_name, layer_score in all_layers_score.items():
-        num_dormant_neurons = dormant_neurons[layer_name]["count"]
-        logs[f"{layer_name}_ratio"] = (num_dormant_neurons / layer_score.shape[0]) * 100
-        logs[f"{layer_name}_count"] = num_dormant_neurons
+        logs[f"{act_key}_ratio"] = (num_dormant_neurons / layer_dim) * 100
+        logs[f"{act_key}_count"] = num_dormant_neurons
         total_dead_neurons += num_dormant_neurons
-        total_hidden_count += layer_score.shape[0]
+        total_hidden_count += layer_dim
 
     logs.update(
         {
             "total_ratio": jnp.array((total_dead_neurons / total_hidden_count) * 100),
             "total_count": total_dead_neurons,
+        }
+    )
+
+    return logs
+
+
+def get_linearised_neuron_logs(layer_preactivations: LayerActivationsDict, linearised_threshold: float = 0.9) -> LogDict:
+    """Compute the linearised neuron ratio per layer.
+    Linearised units are "zombie" units which essentially always activate.
+
+    Concept taken from "Disentangling the Causes of Plasticity Loss in Neural Networks" (Lyle et al., 2024)."""
+
+    logs = {}
+    total_linearised_neurons, total_hidden_count = 0, 0
+
+    for act_key, act_value in layer_preactivations.items():
+        chex.assert_rank(act_value, 2)  # (batch_size, layer_dim)
+        # NOTE: we simply get the percentage of batch items for which the pre-activation value of
+        # a given neuron was positive. This will count activation % for ReLU and similar activations
+        # but probably isn't a good measure for smooth activation functions.
+        # For those we'd need to compute the variance of the pre-activation and then threshold it.
+        activation_percent = jnp.mean(act_value > 0, axis=0)  # (layer_dim,)
+        num_linearised_neurons = jnp.sum(activation_percent >= linearised_threshold)
+
+        layer_dim = activation_percent.shape[0]
+
+        logs[f"{act_key}_ratio"] = (num_linearised_neurons / layer_dim) * 100
+        logs[f"{act_key}_count"] = num_linearised_neurons
+        total_linearised_neurons += num_linearised_neurons
+        total_hidden_count += layer_dim
+
+    logs.update(
+        {
+            "total_ratio": jnp.array((total_linearised_neurons / total_hidden_count) * 100),
+            "total_count": total_linearised_neurons,
         }
     )
 

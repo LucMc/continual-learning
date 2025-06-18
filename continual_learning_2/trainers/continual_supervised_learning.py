@@ -22,7 +22,7 @@ from continual_learning_2.data import ContinualLearningDataset, get_dataset
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import LogDict
-from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, prefix_dict, pytree_histogram, compute_srank
+from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, get_linearised_neuron_logs, prefix_dict, pytree_histogram, compute_srank
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -111,19 +111,24 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         key, dropout_key = jax.random.split(key)
 
         def loss_fn(params):
-            logits, activations = network_state.apply_fn(
+            logits, intermediates = network_state.apply_fn(
                 params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=["intermediates"]
+                mutable=["activations", "preactiations"]
             )
-            return optax.softmax_cross_entropy(logits, y).mean(), (logits, activations["intermediates"])
+            return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
-        (loss, (logits, activations)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
+        activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
         activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
         dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+        preactivations = intermediates["preactivations"]
+        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -142,6 +147,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
                 **prefix_dict("nn/activations", activations_hist_dict),
                 **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
+                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
                 **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
@@ -165,20 +171,25 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         loss_mask = jnp.broadcast_to(active_labels, y.shape)
 
         def loss_fn(params):
-            logits, activations = network_state.apply_fn(
+            logits, intermediates = network_state.apply_fn(
                 params, x, training=True, rngs={"dropout": dropout_key},
-                mutable="intermediates"
+                mutable=["activations", "preactivations"]
             )
             # NOTE:                         we use the mask here vvvvv
-            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (logits, activations["intermediates"])
+            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (logits, intermediates)
 
-        (loss, (logits, activations)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
+        activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
         activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
         dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+        preactivations = intermediates["preactivations"]
+        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -197,6 +208,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
                 **prefix_dict("nn/activations", activations_hist_dict),
                 **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
+                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
                 **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
