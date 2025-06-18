@@ -13,3 +13,4 @@ class LoggingConfig:
     save_interval: int = 1000
     eval_interval: int = 1000
     eval_during_training: bool = False
+    catastrophic_forgetting: bool = False

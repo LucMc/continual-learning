@@ -2,6 +2,7 @@ import abc
 import os
 from functools import partial
 from sys import prefix
+from typing import override
 
 from flax.core import DenyList
 import jax
@@ -9,7 +10,6 @@ import jax.flatten_util
 import jax.numpy as jnp
 import optax
 import flax.traverse_util
-from flax.training.train_state import TrainState
 from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
@@ -24,6 +24,7 @@ from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import LogDict
 from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, get_linearised_neuron_logs, prefix_dict, pytree_histogram, compute_srank
+from continual_learning_2.utils.training import TrainState
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -62,6 +63,8 @@ class CSLTrainerBase(abc.ABC):
             apply_fn=jax.jit(flax_module.apply, static_argnames=("training", "mutable")),
             params=flax_module.lazy_init(model_init_key, self.dataset.spec, training=False, mutable=DenyList(["activations", "preactivations"])),
             tx=optimizer,
+            kernel_init=model_config.kernel_init,
+            bias_init=model_config.bias_init,
         )
 
     @staticmethod
@@ -93,7 +96,7 @@ class CSLTrainerBase(abc.ABC):
 
                 total_steps += 1
 
-            logs = self.dataset.evaluate(self.network, forgetting=True)
+            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
             self.logger.push(total_steps)  # Flush logger
             self.logger.log(logs, step=total_steps)
 
@@ -114,7 +117,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
                 params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=("activations", "preactiations")
+                mutable=("activations", "preactivations")
             )
             return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
@@ -217,6 +220,42 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         )
 
 
+class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
+    @override
+    def train(self):
+        total_steps = 0
+        for i, task in enumerate(self.dataset.tasks):
+            for step, batch in enumerate(task):
+                x, y = batch
+                self.network, self.key, logs = self.update_network(
+                    self.network, self.key, x, y
+                )
+                self.logger.accumulate(logs)
+
+                if step % self.logger.cfg.interval == 0:
+                    self.logger.push(total_steps)
+
+                if (
+                    self.logger.cfg.eval_during_training
+                    and step % self.logger.cfg.eval_interval == 0
+                ):
+                    logs = self.dataset.evaluate(self.network, forgetting=False)
+                    self.logger.log(logs, step=total_steps)
+
+                total_steps += 1
+
+            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
+            self.logger.push(total_steps)  # Flush logger
+            self.logger.log(logs, step=total_steps)
+
+            # NOTE: this is the difference to the base training loop
+            # we reset the last layer of the network
+            self.key, head_reset_key = jax.random.split(self.key, num=2)
+            self.network = self.network.reset_layer(head_reset_key, "output")
+
+        self.logger.close()
+
+
 if __name__ == "__main__":
     import os
     import time
@@ -224,7 +263,7 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
-    trainer = MaskedClassificationCSLTrainer(
+    trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=MLPConfig(output_size=10),
         optimizer_config=AdamConfig(learning_rate=1e-3),
@@ -233,7 +272,7 @@ if __name__ == "__main__":
             seed=SEED,
             batch_size=64,
             num_tasks=5,
-            num_epochs_per_task=10,
+            num_epochs_per_task=1,
             num_workers=(os.cpu_count() or 0) // 2,
         ),
         logging_config=LoggingConfig(
