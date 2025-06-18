@@ -26,7 +26,7 @@ usage() {
 num_runs=""
 log_enabled=false # Default logging to false
 # Define the full array of available methods
-all_methods=("cbp" "ccbp" "ccbp2" "none")
+all_methods=("redo" "cbp" "ccbp" "ccbp2" "none")
 # This array will hold the methods we actually run (either all or a subset)
 methods_to_run=()
 
