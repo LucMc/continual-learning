@@ -261,3 +261,63 @@ class PermutedDataset(ContinualLearningDataset):
             ],
             worker_count=self.num_workers,
         )
+
+
+class ClassIncrementalDataset(SplitDataset):
+    def __init__(self, config: DatasetConfig):
+        if not self.NUM_CLASSES <= config.num_tasks:
+            raise ValueError(
+                f"Number of tasks ({config.num_tasks}) must be less than or equal to the number of classes ({self.NUM_CLASSES})."
+            )
+        self.num_tasks = config.num_tasks
+        self.num_epochs = config.num_epochs_per_task
+        self.batch_size = config.batch_size
+        self.seed = config.seed
+        self.num_workers = config.num_workers
+        self.dataset = datasets.load_dataset(
+            self.DATASET_PATH, keep_in_memory=self.KEEP_IN_MEMORY
+        ).with_format("numpy")
+        assert isinstance(self.dataset, datasets.DatasetDict)
+
+        self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
+
+    def _get_task(self, task_id: int) -> grain.DataLoader:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+
+        ds = self._dataset_train.filter(lambda x: x["label"] in list(range(task_id)))
+
+        return grain.DataLoader(
+            data_source=ds,
+            sampler=grain.IndexSampler(
+                num_records=len(ds),
+                shuffle=True,
+                num_epochs=self.num_epochs,
+                seed=self.seed,
+            ),
+            operations=[
+                *self.OPERATIONS,
+                grain.Batch(batch_size=self.batch_size, drop_remainder=True),
+            ],
+            worker_count=self.num_workers,
+        )
+
+    def _get_task_test(self, task_id: int) -> grain.DataLoader:
+        if task_id < 0 or task_id >= self.num_tasks:
+            raise ValueError(f"Invalid task id: {task_id}")
+
+        ds = self._dataset_test.filter(lambda x: x["label"] in list(range(task_id)))
+
+        return grain.DataLoader(
+            data_source=ds,
+            sampler=grain.IndexSampler(
+                num_records=len(ds),
+                shuffle=False,
+                num_epochs=1,
+            ),
+            operations=[
+                *self.OPERATIONS,
+                grain.Batch(batch_size=self.batch_size, drop_remainder=False),
+            ],
+            worker_count=self.num_workers,
+        )
