@@ -3,6 +3,7 @@ import os
 from functools import partial
 from sys import prefix
 
+from flax.core import DenyList
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
@@ -59,7 +60,7 @@ class CSLTrainerBase(abc.ABC):
         optimizer = get_optimizer(optimizer_config)
         self.network = TrainState.create(
             apply_fn=jax.jit(flax_module.apply, static_argnames=("training", "mutable")),
-            params=flax_module.lazy_init(model_init_key, self.dataset.spec, training=False),
+            params=flax_module.lazy_init(model_init_key, self.dataset.spec, training=False, mutable=DenyList(["activations", "preactivations"])),
             tx=optimizer,
         )
 
@@ -113,7 +114,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
                 params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=["activations", "preactiations"]
+                mutable=("activations", "preactiations")
             )
             return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
@@ -173,7 +174,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
                 params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=["activations", "preactivations"]
+                mutable=("activations", "preactivations")
             )
             # NOTE:                         we use the mask here vvvvv
             return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (logits, intermediates)

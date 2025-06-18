@@ -151,6 +151,9 @@ def compute_srank(
     Returns:
         Effective rank (srank) value
     """
+    # NOTE: jax linalg does not do bfloat16 etc
+    feature_matrix = feature_matrix.astype(jnp.float32)
+
     s = jnp.linalg.svd(feature_matrix, compute_uv=False)
     cumsum = jnp.cumsum(s)
     total = jnp.sum(s)
