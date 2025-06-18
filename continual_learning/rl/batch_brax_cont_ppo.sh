@@ -7,7 +7,7 @@ set -e
 seeds=(1 2 3 4 5)
 
 # Define the array of dormant reset methods
-dormant_reset_methods=("cbp" "ccbp" "ccbp2" "none")
+dormant_reset_methods=("redo" "cbp" "ccbp" "ccbp2" "none")
 
 # Name of your Python script
 python_script="ppo_brax_cont.py"
