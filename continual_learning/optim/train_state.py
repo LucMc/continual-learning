@@ -49,6 +49,7 @@ RESET_METHOD_MAP = {"cbp": optim.cbp,
                     "redo": optim.redo,
                     "ccbp": optim.ccbp,
                     "ccbp2": optim.ccbp2,
+                    "shrink_perturb": optim.shrink_perturb,
                     "none": identity_reset
                     }
 

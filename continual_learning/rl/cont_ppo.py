@@ -81,7 +81,7 @@ class ContConfig(Config):
 
     # New params
     layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
-    dormant_reset_method: Literal["cbp", "ccbp", "ccbp2", "redo", "none"] = (
+    dormant_reset_method: Literal["shrink_perturb", "cbp", "ccbp", "ccbp2", "redo", "none"] = (
         "none"  # Dormant neuron reactivation method
     )
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
@@ -220,7 +220,12 @@ class ContPPO(PPO, ContConfig):
             **config.__dict__,
         )
         key, reset_method_key = random.split(random.PRNGKey(ppo_agent.seed))
-        reset_kwargs = dict(rng=reset_method_key)  # Change cbp options here i.e. "maturity_threshold": jnp.inf
+        reset_kwargs = {"shrink_perturb": dict(rng=reset_method_key, param_noise_fn=nn.initializers.xavier_normal()),
+                        "cbp": dict(),
+                        "redo": dict(),
+                        "ccbp": dict(),
+                        "ccbp2": dict()
+                        }
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 
         pprint(ppo_agent.__dict__)
@@ -324,7 +329,7 @@ class ContPPO(PPO, ContConfig):
             value_net_cls=value_net_cls,
             trainstate_cls=ResettingTrainState,
             reset_method=ppo_agent.dormant_reset_method,
-            reset_method_kwargs=reset_kwargs,
+            reset_method_kwargs=reset_kwargs[ppo_agent.dormant_reset_method],
         )
 
         while current_global_step < ppo_agent.training_steps:

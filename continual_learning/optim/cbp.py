@@ -14,7 +14,6 @@ from jaxtyping import (
     Scalar,
     Int,
 )
-from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
 from typing import Tuple
 from chex import dataclass
@@ -67,17 +66,6 @@ class CBPOptimState:
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
 
 
-# Define parameter partitioning functions
-def is_kernel(path, value):
-    return path[-1].key == "kernel"
-
-
-def is_bias(path, value):
-    return path[-1].key == "bias"
-
-
-
-
 # -------------- CBP Weight reset ---------------
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
@@ -103,7 +91,7 @@ def get_reset_mask(
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
     k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)  # bool
 
-    return k_masked_utility
+    return k_masked_utility & maturity_mask
 
 
 @jax.jit
@@ -227,7 +215,7 @@ def cbp(
             # Update ages
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), a + 1
+                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=state.maturity_threshold+1)
                 ),  # Clip to stop huge ages unnessesarily
                 state.ages,
                 reset_mask,
@@ -250,7 +238,7 @@ def cbp(
             new_state = state.replace(
                 ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
             )
-            new_params.update(excluded)  # TODO
+            new_params.update(excluded)
 
             # Reset optim, i.e. Adamw params
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)

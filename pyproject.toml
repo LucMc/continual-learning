@@ -12,7 +12,7 @@ dependencies = [
     "jax[cuda12]>=0.4.34",
     "gymnasium-robotics",
     "jaxtyping>=0.2.34",
-    "beeartype",
+    "beartype",
     "metaworld",
     "tensorboard",
     "polars",
