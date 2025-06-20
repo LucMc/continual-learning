@@ -1,23 +1,52 @@
-import os
-
-import altair as alt
 import flax.linen as nn
+import jax
 import jax.numpy as jnp
+import altair as alt
 import polars as pl
+import pandas as pd
+import os
+import numpy as np
+from functools import partial
+from flax.traverse_util import ModelParamTraversal
 
 
 def name_prefix(module: nn.Module) -> str:
     return module.name + "_" if module.name else ""
 
+@partial(jax.jit, static_argnames=["learning_rate", "label"])
+def compute_plasticity_metrics(old_params, new_params, learning_rate, label="net"):
+    """Compute neural plasticity metrics, normalised by learning rate"""
+    metrics = {}
 
-def compute_plasticity_metrics(old_params, new_params):
+    # Calculate weight changes for each layer
+    total_abs_change = 0
+    total_weights = 0
+    kernel_traversal = ModelParamTraversal(lambda path_str, _: path_str.endswith('/kernel'))
+    
+    # Consider scan to reduce compile time for large networks
+    for old_weights, new_weights in zip(kernel_traversal.iterate(old_params), kernel_traversal.iterate(new_params)):
+        
+        # Calculate changes
+        abs_changes = jnp.abs(new_weights - old_weights)
+
+        # Update totals
+        total_abs_change += jnp.sum(abs_changes)
+        total_weights += old_weights.size
+
+    # Overall metrics
+    normalised_change = total_abs_change / learning_rate
+
+    return {f"{label}_plasticity": normalised_change / total_weights }
+
+
+def compute_plasticity_metrics_regression(old_params, new_params):
     """Compute metrics related to neural plasticity."""
     metrics = {}
 
     # Calculate weight changes for each layer
     total_abs_change = 0
     total_weights = 0
-    # layer_metrics = {}
+    layer_metrics = {}
 
     for layer_name, layer_params in old_params.items():
         if isinstance(layer_params, dict) and "kernel" in layer_params:
@@ -88,7 +117,9 @@ def compute_forgetting_metrics(current_losses, best_losses):
 def stability_plasticity_tradeoff(adaptation, forgetting):
     """Calculate the stability-plasticity tradeoff metric."""
     stability = 1.0 / (1.0 + forgetting)  # Higher forgetting means lower stability
-    return stability * adaptation  # Good tradeoff means high adaptation with high stability
+    return (
+        stability * adaptation
+    )  # Good tradeoff means high adaptation with high stability
 
 
 def plot_results(all_metrics, filename_prefix="results", avg_window=3):
@@ -111,22 +142,21 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
             # Ensure 'phase' is present and handled correctly if missing
             phase = metric.get("phase", None)
             if phase is not None:
-                entry = {
+                 entry = {
                     "phase": phase,
                     "algorithm": algorithm_name,
-                    "final_loss": metric.get("final_loss"),
+                    "final_loss": metric.get("final_loss"), 
                     "plasticity": metric.get("plasticity"),
                     "adaptation": metric.get("adaptation"),
                     "forgetting": metric.get("forgetting"),
                     "tradeoff": metric.get("tradeoff"),
                 }
-                data.append(entry)
+                 data.append(entry)
         return data
 
     # Combine data from all algorithms
     data = []
-    for name, metric in all_metrics.items():
-        data += prepare_data(metric, name)
+    for name, metric in all_metrics.items(): data += prepare_data(metric, name)
 
     # --- Polars Section ---
     df = pl.DataFrame(data)
@@ -135,17 +165,16 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
     df = df.filter(pl.col("phase").is_not_null())
 
     # Define the metric columns for which to calculate moving averages
-    metric_cols = ["final_loss", "plasticity", "adaptation", "forgetting", "tradeoff"]
+    metric_cols = ['final_loss', 'plasticity', 'adaptation', 'forgetting', 'tradeoff']
 
     # Calculate moving averages using Polars window functions
     df_avg = df.sort("algorithm", "phase").with_columns(
         [
             pl.col(col)
-            .rolling_mean(window_size=avg_window)  # Calculate rolling mean
-            .over("algorithm")  # Partition by algorithm
-            .alias(f"{col}_ma")  # Name the new column
-            for col in metric_cols
-            if col in df.columns  # Check if column exists
+            .rolling_mean(window_size=avg_window, min_periods=1) # Calculate rolling mean
+            .over("algorithm") # Partition by algorithm
+            .alias(f"{col}_ma") # Name the new column
+            for col in metric_cols if col in df.columns # Check if column exists
         ]
     )
 
@@ -163,9 +192,7 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
             tooltip=["phase", "algorithm", "final_loss", "final_loss_ma"],
         )
-        .properties(
-            width=width, height=height, title=f"Final Loss After Each Phase (MA{avg_window})"
-        )
+        .properties(width=width, height=height, title=f"Final Loss After Each Phase (MA{avg_window})")
     )
 
     # Plot 2: Plasticity
@@ -174,18 +201,13 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y(
-                "plasticity_ma:Q",
-                title="Plasticity (Moving Avg)",
-                scale=alt.Scale(domain=[0.0, 0.0006], clamp=True),
-            ),
+            y=alt.Y("plasticity_ma:Q", title="Plasticity (Moving Avg)",
+                    scale=alt.Scale(domain=[0.0, 0.0006], clamp=True)),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
             tooltip=["phase", "algorithm", "plasticity", "plasticity_ma"],
         )
         .properties(
-            width=width,
-            height=height,
-            title=f"Neural Plasticity After Each Phase (MA{avg_window})",
+            width=width, height=height, title=f"Neural Plasticity After Each Phase (MA{avg_window})"
         )
     )
 
@@ -195,24 +217,17 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
         .mark_line()
         .encode(
             x=alt.X("phase:Q", title="Phase"),
-            y=alt.Y(
-                "adaptation_ma:Q",
-                title="Improvement (Initial - Final Loss) (Moving Avg)",
-                scale=alt.Scale(domain=[-0.1, 0.1], clamp=True),
-            ),
+            y=alt.Y("adaptation_ma:Q", title="Improvement (Initial - Final Loss) (Moving Avg)",
+                    scale=alt.Scale(domain=[-0.1, 0.1], clamp=True)),
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
             tooltip=["phase", "algorithm", "adaptation", "adaptation_ma"],
         )
-        .properties(
-            width=width, height=height, title=f"Adaptation to New Tasks (MA{avg_window})"
-        )
+        .properties(width=width, height=height, title=f"Adaptation to New Tasks (MA{avg_window})")
     )
 
     # Plot 4: Forgetting
     # TODO: Change forgetting to bar chart as only tested at eval intervals
-    df_filtered_forgetting_pl = df.filter(
-        pl.col("forgetting") > 0
-    )  # Assuming forgetting is non-negative
+    df_filtered_forgetting_pl = df.filter(pl.col('forgetting') > 0) # Assuming forgetting is non-negative
     forgetting_chart = (
         alt.Chart(df_filtered_forgetting_pl)
         .mark_line(strokeWidth=12)
@@ -222,27 +237,27 @@ def plot_results(all_metrics, filename_prefix="results", avg_window=3):
             color=alt.Color("algorithm:N", legend=alt.Legend(title="Algorithm")),
             tooltip=["phase", "algorithm", "forgetting"],
         )
-        .properties(
-            width=width, height=height, title=f"Catastrophic Forgetting (MA{avg_window})"
-        )
+        .properties(width=width, height=height, title=f"Catastrophic Forgetting (MA{avg_window})")
     )
+
 
     # Combine charts into a grid layout
     row1 = alt.hconcat(final_loss_chart, plasticity_chart)
     row2 = alt.hconcat(adaptation_chart, forgetting_chart)
     # row3 = alt.hconcat(tradeoff_chart, scatter_chart) # Assuming tradeoff_chart might exist
-    final_chart = alt.vconcat(row1, row2).properties(title=filename_prefix)  # , row3)
+    final_chart = alt.vconcat(row1, row2).properties(title=filename_prefix) # , row3)
 
     # Save the chart
     os.makedirs("results", exist_ok=True)  # Create results dir if not exists
-    save_path = f"./results/{filename_prefix}_ma{avg_window}.png"  # svg for paper? Use .png for broad compatibility
-    print(f"Saving chart to: {save_path}")  # Add print statement for confirmation
+    save_path = f"./results/{filename_prefix}_ma{avg_window}.png" # svg for paper? Use .png for broad compatibility
+    print(f"Saving chart to: {save_path}") # Add print statement for confirmation
     try:
         final_chart.save(save_path)
     except Exception as e:
         print(f"Error saving chart: {e}")
 
     return final_chart
+
 
 
 def print_summary_metrics(all_metrics, comparison_pairs=None):
@@ -259,19 +274,19 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
                          for comparing method1/method2. If None, a default set of pairs will be used.
     """
     import numpy as np
-
+    
     # Extract method names
     methods = list(all_metrics.keys())
-
+    
     # Define prettier display names for metrics
     metric_display = {
         "final_loss": "Average Loss",
         "plasticity": "Average Plasticity",
         "adaptation": "Average Adaptation",
         "forgetting": "Average Forgetting",
-        "tradeoff": "S-P Tradeoff",
+        "tradeoff": "S-P Tradeoff"
     }
-
+    
     # Calculate average metrics for each method
     avg_metrics = {}
     # Determine metric names from the first entry of the first method
@@ -281,13 +296,13 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
         metric_names = [m for m in sample_metrics.keys() if m in metric_display]
     else:
         metric_names = []
-
+    
     for method in methods:
         avg_metrics[method] = {}
         for metric in metric_names:
             # Calculate average for each metric
             avg_metrics[method][metric] = np.mean([m[metric] for m in all_metrics[method]])
-
+    
     # Print summary table
     print("\n===== CONTINUAL LEARNING SUMMARY METRICS =====")
     header = f"{'Metric':<20}"
@@ -296,34 +311,33 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
 
     print(header)
     print("=" * (20 + 15 * len(methods)))
-
+    
     for metric in metric_names:
         display_name = metric_display.get(metric, metric)
         row = f"{display_name:<20}"
         for method in methods:
             row += f" {avg_metrics[method][metric]:<15.6f}"
         print(row)
-
+    
     # Create relative comparison pairs
     if len(methods) > 1:
         if comparison_pairs is None:
             # If methods contain "CBP", "CBP+AdamW", "Adam", "AdamW", use original comparison pairs
             # if set(["CBP", "CBP+AdamW", "Adam", "AdamW"]).issubset(set(methods)):
             #     pairs = [
-            #         ("CBP", "Adam"),
-            #         ("CBP", "AdamW"),
-            #         ("CBP+AdamW", "Adam"),
+            #         ("CBP", "Adam"), 
+            #         ("CBP", "AdamW"), 
+            #         ("CBP+AdamW", "Adam"), 
             #         ("CBP+AdamW", "AdamW")
             #     ]
             # else:
-            # Default to comparing first method with all others
+                # Default to comparing first method with all others
             pairs = [(methods[0], m) for m in methods[1:]]
         else:
             # Use provided pairs, filtering out any invalid methods
-            pairs = [
-                (m1, m2) for m1, m2 in comparison_pairs if m1 in methods and m2 in methods
-            ]
-
+            pairs = [(m1, m2) for m1, m2 in comparison_pairs 
+                    if m1 in methods and m2 in methods]
+        
         if pairs:
             print("\n===== RELATIVE COMPARISONS =====")
             header = f"{'Metric':<20}"
@@ -331,7 +345,7 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
                 header += f" {m1}/{m2:<15}"
             print(header)
             print("=" * (20 + 15 * len(pairs)))
-
+            
             for metric in metric_names:
                 display_name = metric_display.get(metric, metric)
                 row = f"{display_name:<20}"
@@ -345,6 +359,7 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
                     row += f" {ratio:<15.6f}"
                 print(row)
             print("=" * (20 + 15 * len(pairs)))
+    """
 
     # Plot 5: Stability-Plasticity Tradeoff
     # tradeoff_chart = (
@@ -384,3 +399,4 @@ def print_summary_metrics(all_metrics, comparison_pairs=None):
     #     )
     #     .properties(width=width, height=height, title=f"Plasticity vs. Forgetting (MA{window_size})")
     # )
+    """

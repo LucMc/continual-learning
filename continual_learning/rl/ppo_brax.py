@@ -99,7 +99,7 @@ class BraxPPO(PPO, BraxConfig):
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
         }
 
-        return (
+        return (last_states,
             (
                 obss,
                 actions,
@@ -115,6 +115,7 @@ class BraxPPO(PPO, BraxConfig):
 
     def make_env(self, video_folder: str = None, env_args: dict = {}):
         return brax.envs.wrappers.training.wrap(brax.envs.get_environment(self.env_id))
+
 
     @staticmethod
     def learn(config: Config):
@@ -152,11 +153,11 @@ class BraxPPO(PPO, BraxConfig):
         states = env.reset(initial_reset_keys)
         current_global_step = 0
 
-        actor_ts, value_ts = setup_network_trainstates(states.obs, env.action_size, actor_key, value_key):
+        actor_ts, value_ts = setup_network_trainstates(states.obs, env.action_size, actor_key, value_key)
 
         while current_global_step < ppo_agent.training_steps:
             print("\ncurrent_global_step:", current_global_step)
-            rollout, rollout_info, env_infos = ppo_agent.get_rollout(
+            states, rollout, rollout_info, env_infos = ppo_agent.get_rollout(
                 actor_ts, value_ts, env, states, key
             )
 
@@ -177,18 +178,6 @@ class BraxPPO(PPO, BraxConfig):
                 if current_global_step % 100_000 * ppo_agent.n_envs == 0:
                     wandb.save(ckpt_path)
         ppo_agent.cleanup()
-
-    def cleanup():
-        # Close stuff
-        if ppo_agent.log:
-            # if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
-            if ppo_agent.log_video_every > 0:
-                print("[ ] Uploading Videos ...", end="\r")
-                for video_name in os.listdir(video_folder):
-                    wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
-                print(r"[x] Uploading Videos ...")
-
-            wandb.finish()
 
 
 if __name__ == "__main__":

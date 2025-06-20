@@ -17,7 +17,7 @@ import tyro
 import os
 from pathlib import Path
 from continual_learning.nn import ActorNet, ValueNet
-from continual_learning.utils.miscellaneous import compute_plasticity_metrics
+from continual_learning.utils.metrics import compute_plasticity_metrics
 
 """
 Base PPO class with networks in ../networks/nn.py modified to pass features to optimiser
@@ -36,7 +36,7 @@ class Config:
     batch_size: int = 64 * 2  # minibatch size
     clip_range: float = 0.2  # policy clip range
     epochs: int = 10  # number of epochs for fitting mini-batches
-    max_grad_norm: float = 0.5  # maximum gradient norm
+    max_grad_norm: float = 0.8  # maximum gradient norm
     gamma: float = 0.99  # discount factor
     vf_clip_range: float = np.inf  # vf clipping (typically higher than clip_range)
     ent_coef: float = 0.0  # how much exploration?
@@ -224,9 +224,9 @@ class PPO(Config):
             "explained_variance": float(
                 1 - (np.var(advantages.flatten()) / np.var(returns.flatten()))
             ),
-            "actor_lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
+            # "actor_lr": actor_ts.opt_state[0][1].hyperparams["learning_rate"], # TODO
             "action_dist_std": stds.mean(),
-            "value_lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
+            # "value_lr": value_ts.opt_state[0][1].hyperparams["learning_rate"],
         }
 
         return (
@@ -349,37 +349,29 @@ class PPO(Config):
         act_shape,
         actor_key,
         value_key,
+        opt,
         actor_net_cls=ActorNet,
         value_net_cls=ValueNet,
         trainstate_cls=TrainState,
-        act_ts_kwargs={},
-        val_ts_kwargs={}
+        reset_method_kwargs={},
+        reset_method="cbp"
     ):
         actor_net = actor_net_cls(act_shape)
         value_net = value_net_cls()
-        opt = optax.chain(
-            optax.clip_by_global_norm(self.max_grad_norm),
-            optax.inject_hyperparams(optax.adamw)(
-                learning_rate=optax.linear_schedule(
-                    init_value=self.learning_rate,
-                    end_value=self.learning_rate / 10,
-                    transition_steps=self.training_steps,
-                ),
-            ),
-        )
 
         actor_ts = trainstate_cls.create(
             apply_fn=actor_net.apply_w_features,
             params=actor_net.init(actor_key, obs),
             tx=opt,
-            **act_ts_kwargs
+            reset_method=reset_method,
+            reset_method_kwargs=reset_method_kwargs
         )
         value_ts = trainstate_cls.create(
             apply_fn=value_net.apply_w_features,
             params=value_net.init(value_key, obs),
             tx=opt,
-            **val_ts_kwargs
-        )
+            reset_method=reset_method,
+            reset_method_kwargs=reset_method_kwargs)
         return actor_ts, value_ts
 
     @staticmethod
@@ -459,19 +451,18 @@ class PPO(Config):
 
         ppo_agent.cleanup()
 
-    @staticmethod
-    def cleanup():
+
+    def cleanup(self):
         # Close stuff
-        if ppo_agent.log:
+        if self.log:
             # if abs(current_global_step % ppo_agent.log_video_every) < ppo_agent.rollout_steps:
-            if ppo_agent.log_video_every > 0:
+            if self.log_video_every > 0:
                 print("[ ] Uploading Videos ...", end="\r")
                 for video_name in os.listdir(video_folder):
                     wandb.log({video_name: wandb.Video(str(base_video_dir / video_name))})
                 print(r"[x] Uploading Videos ...")
 
             wandb.finish()
-
 
 if __name__ == "__main__":
     config = tyro.cli(Config)

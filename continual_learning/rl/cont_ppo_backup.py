@@ -38,11 +38,11 @@ from continual_learning.nn import (
     ActorNetLayerNorm,
     ValueNetLayerNorm,
 )
-from continual_learning.optim.train_state import ResettingTrainState, attach_reset_method
-from continual_learning.optim.cbp import cbp
-from continual_learning.optim.ccbp import ccbp
-from continual_learning.optim.ccbp_2 import ccbp2
-from continual_learning.optim.redo import redo
+from continual_learning.optim.base import ResttingTrainState
+from continual_learning.optim.continual_backprop import CBPTrainState, continual_backprop
+from continual_learning.optim.continuous_continual_backprop import CCBPTrainState, continuous_continual_backprop
+from continual_learning.optim.ccbp_2 import CCBP2TrainState, continuous_continual_backprop2
+from continual_learning.optim.redo import RedoTrainState, redo
 
 
 from continual_learning.utils.metrics import compute_plasticity_metrics
@@ -81,7 +81,7 @@ class ContConfig(Config):
 
     # New params
     layer_norm: bool = False  # Weather or not to use LayerNorm layers after activations
-    dormant_reset_method: Literal["shrink_perturb", "cbp", "ccbp", "ccbp2", "redo", "none"] = (
+    dormant_reset_method: Literal["cbp", "ccbp", "ccbp2", "redo", "none"] = (
         "none"  # Dormant neuron reactivation method
     )
     optim: Literal["adam", "adamw", "sgd", "muon", "muonw"] = "muonw"
@@ -134,7 +134,10 @@ class ContPPO(PPO, ContConfig):
                 adv_norm,
             )
             # Apply updates with / without features
-            actor_ts = actor_ts.apply_gradients(grads=actor_grads, features=actor_features)
+            if self.dormant_reset_method != "none":
+                actor_ts = actor_ts.apply_gradients(grads=actor_grads, features=actor_features)
+            else:
+                actor_ts = actor_ts.apply_gradients(grads=actor_grads)
 
             actor_loss_total += actor_loss_v
 
@@ -142,7 +145,10 @@ class ContPPO(PPO, ContConfig):
                 self.value_loss, has_aux=True
             )(value_ts.params, value_ts.apply_fn, obss[i], returns[i], old_values[i])
 
-            value_ts = value_ts.apply_gradients(grads=value_grads, features=value_features)
+            if self.dormant_reset_method != "none":
+                value_ts = value_ts.apply_gradients(grads=value_grads, features=value_features)
+            else:
+                value_ts = value_ts.apply_gradients(grads=value_grads)
 
             value_loss_total += value_loss_v
             value_total += value_mean
@@ -219,16 +225,9 @@ class ContPPO(PPO, ContConfig):
             buffer_size=config.rollout_steps,
             **config.__dict__,
         )
-        key, reset_method_key = random.split(random.PRNGKey(ppo_agent.seed))
-        reset_kwargs = {"shrink_perturb": dict(rng=reset_method_key, param_noise_fn=nn.initializers.xavier_normal()),
-                        "cbp": dict(),
-                        "redo": dict(),
-                        "ccbp": dict(),
-                        "ccbp2": dict(),
-                        "none": dict()
-                        }
-        np.random.seed(ppo_agent.seed)  # Seeding for np operations
+        cbp_params = {} # Change cbp options here i.e. "maturity_threshold": jnp.inf
 
+        np.random.seed(ppo_agent.seed)  # Seeding for np operations
         pprint(ppo_agent.__dict__)
         env_args = {}
 
@@ -284,6 +283,7 @@ class ContPPO(PPO, ContConfig):
             ]
         )
         dummy_obs, _ = envs.reset(seed=ppo_agent.seed)
+        key = random.PRNGKey(ppo_agent.seed)
         current_global_step = 0
 
         actor_key, value_key, key = random.split(key, num=3)
@@ -304,18 +304,25 @@ class ContPPO(PPO, ContConfig):
         if ppo_agent.optim == "sgd": tx = optax.sgd
         if ppo_agent.optim == "muon": tx = optax.contrib.muon
         if ppo_agent.optim == "muonw": tx = partial(optax.contrib.muon, weight_decay=0.01)
-        # fmt: on
         # For some reason loads of decay seems to work better...
 
-        opt = optax.with_extra_args_support(
-            optax.chain(
-                optax.with_extra_args_support(
-                    optax.clip_by_global_norm(ppo_agent.max_grad_norm)
-                ),
-                optax.with_extra_args_support(tx(learning_rate=ppo_agent.learning_rate)),
-            )
-        )
+        # Continual backpropergation
+        if ppo_agent.dormant_reset_method != "none":
+            cbp_value_key, cbp_actor_key, key = random.split(key, num=3)
+            match ppo_agent.dormant_reset_method:
+                case "cbp": trainstate_cls = CBPTrainState
+                case "ccbp": trainstate_cls = CCBPTrainState
+                case "ccbp2": trainstate_cls = CCBP2TrainState
+                case "redo": trainstate_cls = RedoTrainState
 
+            act_ts_kwargs = dict(rng=cbp_actor_key) | cbp_params
+            val_ts_kwargs = dict(rng=cbp_value_key) | cbp_params
+        else:
+            trainstate_cls = TrainState
+            act_ts_kwargs = {}
+            val_ts_kwargs = {}
+
+        # fmt: on
         last_obs, first_info = envs.reset()
         last_episode_starts = np.ones((ppo_agent.n_envs,), dtype=bool)
 
@@ -325,12 +332,11 @@ class ContPPO(PPO, ContConfig):
             envs.single_action_space.shape[0],
             actor_key,
             value_key,
-            opt,
             actor_net_cls=actor_net_cls,
             value_net_cls=value_net_cls,
-            trainstate_cls=ResettingTrainState,
-            reset_method=ppo_agent.dormant_reset_method,
-            reset_method_kwargs=reset_kwargs[ppo_agent.dormant_reset_method],
+            trainstate_cls=trainstate_cls,
+            act_ts_kwargs=act_ts_kwargs,
+            val_ts_kwargs=val_ts_kwargs,
         )
 
         while current_global_step < ppo_agent.training_steps:

@@ -1,23 +1,29 @@
-import time
-from dataclasses import dataclass, field
-from functools import partial
-from typing import Any, Callable, Literal, get_args
-
+from hashlib import file_digest
 import flax.linen as nn
+from functools import partial
 import jax
+import os
 import jax.numpy as jnp
 import jax.random as random
 import optax
-import tyro
 from flax.training.train_state import TrainState
+import numpy as np
+import time
+from typing import Dict, Any, Tuple, List, Callable, Literal
+from dataclasses import dataclass, field
 
-import continual_learning.nn.utils as utils
-from continual_learning.nn import SimpleNet, SimpleNetLayerNorm
+from continual_learning.optim.redo import RedoTrainState
 from continual_learning.optim.continual_backprop import (
+    continual_backprop,
     CBPTrainState,
 )
+import continual_learning.utils.metrics as metrics
+from continual_learning.nn import SimpleNet, SimpleNetLayerNorm
 
-METHODS = Literal[
+import tyro
+
+METHODS = [
+    "redo",
     "cbp",
     "cbp_adamw",
     "sgd",
@@ -32,7 +38,9 @@ METHODS = Literal[
 
 
 # --- Data Generation ---
-def generate_sine_data(key, batch_size, phase_shift=0.0, amplitude=1.0, noise_level=0.0):
+def generate_sine_data(
+    key, batch_size, phase_shift=0.0, amplitude=1.0, noise_level=0.0
+):
     """Generate a batch of sine wave data with a given phase shift."""
     key1, key2 = random.split(key)
     x = random.uniform(key1, (batch_size, 1)) * 2 * jnp.pi  # Input between 0 and 2π
@@ -45,11 +53,11 @@ def generate_sine_data(key, batch_size, phase_shift=0.0, amplitude=1.0, noise_le
 @dataclass
 class MethodConfig:
     name: str
-    net: type[nn.Module]
+    net: SimpleNet
     optimizer_fn: Callable
-    optimizer_kwargs: dict[str, Any]
+    optimizer_kwargs: Dict[str, Any]
     state_class: Callable
-    state_kwargs: dict[str, Any]
+    state_kwargs: Dict[str, Any]
     train_step_fn: Callable
 
 
@@ -63,7 +71,7 @@ def continual_sine_learning(
     weight_decay=0.01,
     phase_shift_step=0.1,
     eval_interval=100,
-    save_interval: float = 1000,
+    save_interval=1000,
     verbose=True,
     seed=0,
     cbp_kwargs={},
@@ -119,6 +127,19 @@ def continual_sine_learning(
 
     # --- Define Method Configurations ---
     method_configs = []
+
+    if "redo" in methods:
+        method_configs.append(
+            MethodConfig(
+                name="ReDo",
+                net=SimpleNet,
+                optimizer_fn=optax.adamw,
+                optimizer_kwargs={"learning_rate": learning_rate},
+                state_class=RedoTrainState,
+                state_kwargs={"rng": cbp_kwargs["rng"]},
+                train_step_fn=cbp_train_step,
+            )
+        )
 
     if "cbp" in methods:
         method_configs.append(
@@ -274,9 +295,9 @@ def continual_sine_learning(
     # print weight sizes (only need to do once)
     print("Model Parameter Shapes:")
     # for name, param in base_params["params"].items():
-    # print(
-    #     f"  {name}: {param.get('kernel', param.get('embedding', 'N/A')).shape}"
-    # )  # Handle different param types
+        # print(
+        #     f"  {name}: {param.get('kernel', param.get('embedding', 'N/A')).shape}"
+        # )  # Handle different param types
 
     # --- Main Training Loop ---
     start_time = time.time()
@@ -301,7 +322,9 @@ def continual_sine_learning(
                 if isinstance(current_params, dict)
                 else current_params
             )
-            initial_params[name] = jax.tree_util.tree_map(lambda x: x.copy(), param_dict)
+            initial_params[name] = jax.tree_util.tree_map(
+                lambda x: x.copy(), param_dict
+            )
 
             # Evaluate initial performance
             initial_losses[name] = evaluate(
@@ -317,7 +340,9 @@ def continual_sine_learning(
                 name = config.name
                 state = train_states[name]
                 # Perform training step using the configured function
-                new_state, loss = config.train_step_fn(config.net(), state, inputs, targets)
+                new_state, loss = config.train_step_fn(
+                    config.net(), state, inputs, targets
+                )
                 train_states[name] = new_state
                 phase_losses[name].append(float(loss))
 
@@ -326,7 +351,8 @@ def continual_sine_learning(
         plasticity_metrics = {}
         adaptation_metrics = {}
         forgetting_metrics = {
-            name: {"avg_forgetting": 0.0, "max_forgetting": 0.0} for name in method_names
+            name: {"avg_forgetting": 0.0, "max_forgetting": 0.0}
+            for name in method_names
         }
         tradeoff_metrics = {}
         current_params_dict = {}
@@ -354,7 +380,7 @@ def continual_sine_learning(
                 else current_params
             )
             current_params_dict[name] = param_dict  # Store for potential reuse
-            plasticity_metrics[name] = utils.compute_plasticity_metrics(
+            plasticity_metrics[name] = metrics.compute_plasticity_metrics_regression(
                 initial_params[name], param_dict
             )
 
@@ -380,18 +406,20 @@ def continual_sine_learning(
                 for config in method_configs:
                     name = config.name
                     state = train_states[name]
-                    prev_loss = evaluate(config.net(), state.params, prev_inputs, prev_targets)
+                    prev_loss = evaluate(
+                        config.net(), state.params, prev_inputs, prev_targets
+                    )
                     all_current_losses[name][prev_task_id] = float(prev_loss)
 
             # Compute overall forgetting metrics
             for name in method_names:
-                forgetting_metrics[name] = utils.compute_forgetting_metrics(
+                forgetting_metrics[name] = metrics.compute_forgetting_metrics(
                     all_current_losses[name], all_best_losses[name]
                 )
 
         # --- Compute Tradeoff and Store Metrics ---
         for name in method_names:
-            tradeoff_metrics[name] = utils.stability_plasticity_tradeoff(
+            tradeoff_metrics[name] = metrics.stability_plasticity_tradeoff(
                 adaptation_metrics[name], forgetting_metrics[name]["avg_forgetting"]
             )
 
@@ -444,7 +472,9 @@ def continual_sine_learning(
                             nodes_reset = sum(
                                 v.get("nodes_reset", 0) for v in cbp_logs.values()
                             )
-                            avg_age_sum = sum(v.get("avg_age", 0) for v in cbp_logs.values())
+                            avg_age_sum = sum(
+                                v.get("avg_age", 0) for v in cbp_logs.values()
+                            )
                             num_layers = (
                                 len(cbp_logs) if cbp_logs else 1
                             )  # Avoid division by zero
@@ -463,7 +493,7 @@ def continual_sine_learning(
         # --- Save and Plot Results Periodically ---
         if shift_idx % save_interval == 0 or shift_idx == num_phase_shifts - 1:
             # Unpack the metrics dictionary for the plotting function
-            utils.plot_results(
+            metrics.plot_results(
                 all_metrics=all_metrics,
                 # [all_metrics[name] for name in method_names], # Pass lists in order
                 # method_names=method_names, # Pass names for labels
@@ -474,7 +504,7 @@ def continual_sine_learning(
             # or ensure the order matches what plot_results expects.
 
     # --- Final Analysis ---
-    utils.print_summary_metrics(
+    metrics.print_summary_metrics(
         all_metrics=all_metrics
         # *[all_metrics[name] for name in method_names],
         # method_names=method_names # Also pass names here
@@ -487,12 +517,12 @@ def continual_sine_learning(
 @dataclass
 class Args:
     # net_name: Literal["standard", "layer_norm"] = "standard"
-    methods: list[METHODS] = field(default_factory=lambda: ["all"])
+    methods: List[Literal[*METHODS]] = field(default_factory=lambda: ["all"])
     seed: int = 0
     debug: bool = False
     shifts: int = 20_000
     epochs: int = 100
-    batch_size: int = 1
+    batch_size: int = 2
     lr: float = 1e-3
     wd: float = 0.01
     save_interval: int = 1000
@@ -506,13 +536,13 @@ class Args:
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    methods = list(get_args(METHODS))[:-1] if "all" in args.methods else args.methods
+    methods = METHODS[:-1] if "all" in args.methods else args.methods
 
     # Continual backprop optim kwargs
     cbp_kwargs = {
         "maturity_threshold": args.maturity_threshold,
         "replacement_rate": args.replacement_rate,
-        "rng": random.PRNGKey(args.seed),
+        "rng": random.PRNGKey(args.seed)
     }
 
     # Common settings
