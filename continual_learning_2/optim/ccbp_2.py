@@ -43,7 +43,6 @@ Does moving out towards 0 and in towards initial actually help or should both be
 
 """
 
-# -------------- Overall optimizer TrainState ---------------
 # -------------- CCBP Weight reset ---------------
 def reset_weights(
     reset_mask: PyTree[Float[Array, "#neurons"]], 

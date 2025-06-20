@@ -30,3 +30,22 @@ class RedoConfig(ResetMethod):
     update_frequency: int = 10
     score_threshold: float = 0.1
     
+@dataclass(frozen=True)
+class CBPConfig(ResetMethod):
+    replacement_rate: float
+    decay_rate: float
+    maturity_threshold: float
+    accumulate: float # TODO
+    
+@dataclass(frozen=True)
+class CCBPConfig(ResetMethod):
+    replacement_rate: float
+    decay_rate: float
+    maturity_threshold: float
+    
+@dataclass(frozen=True)
+class CCBP2Config(ResetMethod):
+    replacement_rate: float
+    decay_rate: float
+    maturity_threshold: float
+    
