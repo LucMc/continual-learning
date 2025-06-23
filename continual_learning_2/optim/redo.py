@@ -34,20 +34,20 @@ as an optax optimizer
 """
 # TODO: Remove RNG it doesn't need it at all
 
+
 @dataclass
 class RedoOptimState:
     initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
 
-    rng: PRNGKeyArray  # = random.PRNGKey(0)
+    # rng: PRNGKeyArray  # = random.PRNGKey(0)
     time_step: int = 0
-    scale: float = 1.0
-    step_size: float = 0.001
-    replacement_rate: float = 0.01
-    decay_rate: float = 0.9
-    update_frequency: int = 10
-    accumulate: bool = False
+    # scale: float = 1.0
+    # step_size: float = 0.001
+    # replacement_rate: float = 0.01
+    # decay_rate: float = 0.9
+    # update_frequency: int = 10
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
@@ -64,12 +64,6 @@ def get_score(  # averages over a batch
 
 
 # -------------- lowest utility mask ---------------
-def get_reset_mask(
-    scores: Float[Array, "#neurons"],
-    score_threshold: Int[Array, ""] = 0.1,
-) -> Bool[Array, "#neurons"]:
-    score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
-    return score_mask
 
 
 def process_params(params: PyTree):
@@ -108,7 +102,8 @@ def process_params(params: PyTree):
 # -------------- Main Redo Optimiser body ---------------
 def redo(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
-    rng: PRNGKeyArray = random.PRNGKey(0),
+    update_frequency: int = 10,
+    score_threshold: float = 0.1,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _ = process_params(params["params"])
@@ -119,10 +114,14 @@ def redo(
             initial_weights=weights,
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
-            rng=rng,
-            replacement_rate=replacement_rate,
             **kwargs,
         )
+
+    def get_reset_mask(
+        scores: Float[Array, "#neurons"],
+    ) -> Bool[Array, "#neurons"]:
+        score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
+        return score_mask
 
     @jax.jit
     def update(
@@ -130,24 +129,21 @@ def redo(
         state: RedoOptimState,
         params: optax.Params,
         features: Array,
-        tx_state: optax.OptState
+        tx_state: optax.OptState,
     ) -> tuple[optax.Updates, RedoOptimState]:
         def no_update(updates):
             new_state = state.replace(time_step=state.time_step + 1)
             return params, new_state, tx_state
 
         def _redo(updates: optax.Updates,) -> Tuple[optax.Updates, RedoOptimState]:  # fmt: skip
-            
-            _features = features["intermediates"]["activations"][0]
-
             weights, bias, excluded = process_params(params["params"])
-
-            new_rng, util_key = random.split(state.rng)
-            # key_tree = utils.gen_key_tree(util_key, weights)
-
-            scores = jax.tree.map(
-                get_score, _features
-            )  # Scores, avged over batches: # PyTree[#neurons]
+            scores = {
+                key: get_score(feature_tuple[0]) 
+                for key, feature_tuple in features.items()
+            }
+            # scores = jax.tree.map(
+            #     lambda f: get_score(f[0]), features
+            # )  # Scores, avged over batches: PyTree[#neurons]
 
             reset_mask = jax.tree.map(get_reset_mask, scores)
 
@@ -174,7 +170,7 @@ def redo(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                rng=new_rng, logs=FrozenDict(_logs), time_step=state.time_step + 1
+                logs=FrozenDict(_logs), time_step=state.time_step + 1
             )
             new_params.update(excluded)  # TODO
 
@@ -182,8 +178,6 @@ def redo(
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
             return {"params": new_params}, new_state, _tx_state
 
-        return jax.lax.cond(
-            state.time_step % state.update_frequency == 0, _redo, no_update, updates
-        )
+        return jax.lax.cond(state.time_step % update_frequency == 0, _redo, no_update, updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)

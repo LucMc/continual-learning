@@ -17,7 +17,7 @@ class ShrinkPerturbOptimState:
 
 def shrink_perturb(
     param_noise_fn: Callable,
-    rng: chex.PRNGKey,
+    seed: int = 42,
     shrink: float = 0.8,
     perturb: float = 0.01,
     every_n: int = 1,
@@ -26,7 +26,7 @@ def shrink_perturb(
 
     def init(params):
         del params
-        return ShrinkPerturbOptimState(count=jnp.zeros([], jnp.int32), rng=rng)
+        return ShrinkPerturbOptimState(count=jnp.zeros([], jnp.int32), rng=random.PRNGKey(seed))
 
     def update(updates, state, params=None, features=None, tx_state=None):
         if params is None:

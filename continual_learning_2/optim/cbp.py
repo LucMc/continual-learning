@@ -173,7 +173,7 @@ def cbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
             assert features, "Features must be provided in update"
-            _features = features["intermediates"]["activations"][0]
+            _features = features["activations"][0]
 
             weights, bias, out_w_mag, excluded = process_params(params["params"])
 

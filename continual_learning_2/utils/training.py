@@ -22,3 +22,20 @@ class TrainState(FlaxTrainState):
         new_params["params"][layer] = {"kernel": new_layer_kernel, "bias": new_layer_bias}
 
         return self.replace(params=new_params)
+
+
+    # pass features to optimizer and set params with update
+    # TODO: Check if optimiser is of type ResetMethod and use this if so, else normal apply grads
+    def apply_gradients(self, *, grads, features=None, **kwargs):
+        assert features, "Features must be provided to apply_gradients()"
+
+        new_params, new_opt_state = self.tx.update(
+            grads, self.opt_state, self.params, features=features
+        )
+
+        return self.replace(
+            step=self.step + 1,
+            params=new_params,
+            opt_state=new_opt_state,
+            **kwargs,
+        )

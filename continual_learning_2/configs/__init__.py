@@ -4,10 +4,12 @@ from .models import MLPConfig
 from .optim import (
     AdamConfig,
     ShrinkAndPerterbConfig,
+    RedoConfig,
     CBPConfig,
     CCBPConfig,
     CCBP2Config,
     OptimizerConfig,
+    ResetMethodConfig,
 )
 
 __all__ = [
@@ -17,8 +19,10 @@ __all__ = [
     "LoggingConfig",
     "AdamConfig",
     "ShrinkAndPerterbConfig",
+    "RedoConfig",
     "CBPConfig",
     "CCBPConfig",
     "CCBP2Config",
     "OptimizerConfig",
+    "ResetMethodConfig",
 ]

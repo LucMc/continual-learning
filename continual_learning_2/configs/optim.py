@@ -9,7 +9,7 @@ class OptimizerConfig:
     learning_rate: float
 
 @dataclass(frozen=True)
-class ResetMethod:
+class ResetMethodConfig:
     tx: OptimizerConfig
 
 class AdamConfig(OptimizerConfig):
@@ -18,7 +18,7 @@ class AdamConfig(OptimizerConfig):
     epsilon: float = 1e-8
 
 @dataclass(frozen=True)
-class ShrinkAndPerterbConfig(ResetMethod):
+class ShrinkAndPerterbConfig(ResetMethodConfig):
     param_noise_fn: Callable = nn.initializers.xavier_normal()
     seed: int = 42
     shrink: float = 0.8
@@ -26,25 +26,25 @@ class ShrinkAndPerterbConfig(ResetMethod):
     every_n: int = 1
 
 @dataclass(frozen=True)
-class RedoConfig(ResetMethod):
+class RedoConfig(ResetMethodConfig):
     update_frequency: int = 10
     score_threshold: float = 0.1
     
 @dataclass(frozen=True)
-class CBPConfig(ResetMethod):
+class CBPConfig(ResetMethodConfig):
     replacement_rate: float
     decay_rate: float
     maturity_threshold: float
     accumulate: float # TODO
     
 @dataclass(frozen=True)
-class CCBPConfig(ResetMethod):
+class CCBPConfig(ResetMethodConfig):
     replacement_rate: float
     decay_rate: float
     maturity_threshold: float
     
 @dataclass(frozen=True)
-class CCBP2Config(ResetMethod):
+class CCBP2Config(ResetMethodConfig):
     replacement_rate: float
     decay_rate: float
     maturity_threshold: float

@@ -4,6 +4,7 @@ from functools import partial
 from sys import prefix
 from typing import override
 
+from continual_learning_2.configs.optim import ResetMethodConfig
 from flax.core import DenyList
 import jax
 import jax.flatten_util
@@ -14,6 +15,11 @@ from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
     AdamConfig,
+    ShrinkAndPerterbConfig,
+    RedoConfig,
+    CBPConfig,
+    CCBPConfig,
+    CCBP2Config,
     DatasetConfig,
     LoggingConfig,
     MLPConfig,
@@ -26,9 +32,9 @@ from continual_learning_2.types import LogDict
 from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, get_linearised_neuron_logs, prefix_dict, pytree_histogram, compute_srank
 from continual_learning_2.utils.training import TrainState
 
-os.environ["XLA_FLAGS"] = (
-    " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
-)
+# os.environ["XLA_FLAGS"] = (
+#     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
+# )
 
 
 class CSLTrainerBase(abc.ABC):
@@ -137,7 +143,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
 
-        network_state = network_state.apply_gradients(grads=grads)
+        network_state = network_state.apply_gradients(grads=grads, features=activations)
         network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
@@ -198,7 +204,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
 
-        network_state = network_state.apply_gradients(grads=grads)
+        network_state = network_state.apply_gradients(grads=grads, features=activations)
         network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
@@ -263,25 +269,38 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
+    optim_conf = RedoConfig(
+            tx=AdamConfig(learning_rate=1e-3)
+        )
+
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=MLPConfig(output_size=10),
-        optimizer_config=AdamConfig(learning_rate=1e-3),
+        optimizer_config=optim_conf,
         dataset_config=DatasetConfig(
             name="split_mnist",
             seed=SEED,
             batch_size=64,
             num_tasks=5,
             num_epochs_per_task=1,
-            num_workers=(os.cpu_count() or 0) // 2,
+            num_workers=0#(os.cpu_count() or 0) // 2,
         ),
+        # logging_config=LoggingConfig(
+        #     run_name="split_mnist_debug_1",
+        #     wandb_entity="evangelos-ch",
+        #     wandb_project="continual_learning_2",
+        #     wandb_mode="disabled",
+        #     interval=100,
+        #     eval_during_training=False,
+
         logging_config=LoggingConfig(
             run_name="split_mnist_debug_1",
-            wandb_entity="evangelos-ch",
-            wandb_project="continual_learning_2",
+            wandb_entity="lucmc",
+            wandb_project="split_mnist",
             wandb_mode="disabled",
             interval=100,
             eval_during_training=False,
+
         ),
     )
 
