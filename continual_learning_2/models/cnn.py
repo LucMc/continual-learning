@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from continual_learning_2.configs.models import CNNConfig
+from continual_learning_2.utils.nn import flatten_last
 
 
 class CNN(nn.Module):
@@ -32,9 +33,6 @@ class CNN(nn.Module):
             use_bias=self.config.use_bias,
             dtype=self.config.dtype,
         )
-
-        def flatten_last(x: jax.Array) -> jax.Array:
-            return x.reshape((x.shape[0], -1))
 
         # ConvNet feature extractor
         for feature in self.config.features:
@@ -63,7 +61,7 @@ class CNN(nn.Module):
                 x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
             self.sow("activations", f"layer_{layer}_act", x)
 
-        self.sow("preactivations", f"output_pre", x)
+        self.sow("preactivations", "output_pre", x)
         x = Dense(self.config.output_size, name="output")(x)
         self.sow("activations", "output_act", x)
-        return x
+        return x.astype(jnp.float32)

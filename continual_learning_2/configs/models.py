@@ -43,3 +43,17 @@ class CNNConfig:
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
     use_bias: bool = True
     dtype: jnp.dtype = jnp.bfloat16
+
+
+@dataclass
+class ResNetConfig:
+    output_size: int
+
+    # ConvNet feature extractor
+    stage_sizes: Sequence[int] = (2, 2, 2, 2)
+    num_filters: int = 64
+
+    activation_fn: Callable[[jax.Array], jax.Array] = jax.nn.relu
+    kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
+    bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
+    dtype: jnp.dtype = jnp.bfloat16
