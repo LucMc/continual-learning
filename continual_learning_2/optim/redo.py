@@ -102,7 +102,7 @@ def process_params(params: PyTree):
 # -------------- Main Redo Optimiser body ---------------
 def redo(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
-    update_frequency: int = 10,
+    update_frequency: int = 10_000000000,
     score_threshold: float = 0.1,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
@@ -176,6 +176,7 @@ def redo(
 
             # Reset optim, i.e. Adamw params
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
+
             return {"params": new_params}, new_state, _tx_state
 
         return jax.lax.cond(state.time_step % update_frequency == 0, _redo, no_update, updates)

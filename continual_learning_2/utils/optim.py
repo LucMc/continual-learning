@@ -138,6 +138,9 @@ def reset_optim_params(tx_state, reset_mask):
                 "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
             }
 
+        if isinstance(tx_state, tuple) and len(tx_state)==2: # Make more generic by checking specific type instead
+            return (reset_params(tx_state[0]),) + tx_state[1:]
+
         # copy other attributes
         for attr in tx_state._fields:
             if attr not in ["mu", "nu"] and hasattr(tx_state, attr):

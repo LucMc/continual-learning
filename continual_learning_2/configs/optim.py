@@ -27,7 +27,7 @@ class ShrinkAndPerterbConfig(ResetMethodConfig):
 
 @dataclass(frozen=True)
 class RedoConfig(ResetMethodConfig):
-    update_frequency: int = 10
+    update_frequency: int = 100
     score_threshold: float = 0.1
     
 @dataclass(frozen=True)
