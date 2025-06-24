@@ -152,12 +152,12 @@ def redo(
                 reset_mask, weights, state.initial_weights
             )
 
-            # reset bias given mask
-            _bias = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
-                reset_mask,
-                bias,
-            )
+            # Update bias
+            bias_leaves, bias_tree_def = jax.tree.flatten(bias)
+            mask_leaves = jax.tree.leaves(reset_mask)
+            masked_leaves = [jnp.where(m, jnp.zeros_like(b, dtype=float), b)
+                             for m, b in zip(mask_leaves, bias_leaves)]
+            _bias = jax.tree.unflatten(bias_tree_def, masked_leaves)
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: Could be improved
