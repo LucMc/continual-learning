@@ -266,9 +266,13 @@ class PermutedDataset(ContinualLearningDataset):
 
 class ClassIncrementalDataset(SplitDataset):
     def __init__(self, config: DatasetConfig):
-        if not self.NUM_CLASSES <= config.num_tasks:
+        if not config.num_tasks <= self.NUM_CLASSES:
             raise ValueError(
                 f"Number of tasks ({config.num_tasks}) must be less than or equal to the number of classes ({self.NUM_CLASSES})."
+            )
+        if not self.NUM_CLASSES % config.num_tasks == 0:
+            raise ValueError(
+                f"Number of classes ({self.NUM_CLASSES}) must be divisible by the number of tasks ({config.num_tasks})."
             )
         self.num_tasks = config.num_tasks
         self.num_epochs = config.num_epochs_per_task
@@ -280,13 +284,18 @@ class ClassIncrementalDataset(SplitDataset):
         ).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
+        self.rng = np.random.default_rng(self.seed)
+        self.class_increment = self.NUM_CLASSES // self.num_tasks
+        self.class_order = self.rng.permutation(self.NUM_CLASSES)
+
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
     def _get_task(self, task_id: int) -> grain.DataLoader:
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
-        ds = self._dataset_train.filter(lambda x: x["label"] in list(range(task_id)))
+        num_classes = self.class_increment * (task_id + 1)
+        ds = self._dataset_train.filter(lambda x: x["label"] in self.class_order[:num_classes])
 
         return grain.DataLoader(
             data_source=ds,

@@ -19,6 +19,7 @@ from continual_learning_2.configs import (
     MLPConfig,
     OptimizerConfig,
 )
+from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.data import ContinualLearningDataset, get_dataset
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
@@ -305,24 +306,48 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
+    # trainer = HeadResetClassificationCSLTrainer(
+    #     seed=SEED,
+    #     model_config=MLPConfig(output_size=10),
+    #     optimizer_config=AdamConfig(learning_rate=1e-3),
+    #     dataset_config=DatasetConfig(
+    #         name="split_mnist",
+    #         seed=SEED,
+    #         batch_size=64,
+    #         num_tasks=5,
+    #         num_epochs_per_task=1,
+    #         # num_workers=(os.cpu_count() or 0) // 2,
+    #         num_workers=0,
+    #         dataset_kwargs={
+    #             "flatten": False,
+    #         },
+    #     ),
+    #     logging_config=LoggingConfig(
+    #         run_name="split_mnist_debug_1",
+    #         wandb_entity="evangelos-ch",
+    #         wandb_project="continual_learning_2",
+    #         wandb_mode="disabled",
+    #         interval=100,
+    #         eval_during_training=False,
+    #     ),
+    # )
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
-        model_config=MLPConfig(output_size=10),
+        model_config=CNNConfig(output_size=2),
         optimizer_config=AdamConfig(learning_rate=1e-3),
         dataset_config=DatasetConfig(
-            name="split_mnist",
+            name="split_cifar10",
             seed=SEED,
             batch_size=64,
             num_tasks=5,
             num_epochs_per_task=1,
-            # num_workers=(os.cpu_count() or 0) // 2,
-            num_workers=0,
+            num_workers=(os.cpu_count() or 0) // 2,
             dataset_kwargs={
                 "flatten": False,
             },
         ),
         logging_config=LoggingConfig(
-            run_name="split_mnist_debug_1",
+            run_name="split_cifar10_debug_1",
             wandb_entity="evangelos-ch",
             wandb_project="continual_learning_2",
             wandb_mode="disabled",
