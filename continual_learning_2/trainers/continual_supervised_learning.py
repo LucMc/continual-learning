@@ -4,12 +4,12 @@ from functools import partial
 from sys import prefix
 from typing import override
 
-from flax.core import DenyList
+import flax.traverse_util
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import optax
-import flax.traverse_util
+from flax.core import DenyList
 from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
@@ -23,7 +23,14 @@ from continual_learning_2.data import ContinualLearningDataset, get_dataset
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import LogDict
-from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, get_linearised_neuron_logs, prefix_dict, pytree_histogram, compute_srank
+from continual_learning_2.utils.monitoring import (
+    Logger,
+    compute_srank,
+    get_dormant_neuron_logs,
+    get_linearised_neuron_logs,
+    prefix_dict,
+    pytree_histogram,
+)
 from continual_learning_2.utils.training import TrainState
 
 os.environ["XLA_FLAGS"] = (
@@ -61,7 +68,12 @@ class CSLTrainerBase(abc.ABC):
         optimizer = get_optimizer(optimizer_config)
         self.network = TrainState.create(
             apply_fn=jax.jit(flax_module.apply, static_argnames=("training", "mutable")),
-            params=flax_module.lazy_init(model_init_key, self.dataset.spec, training=False, mutable=DenyList(["activations", "preactivations"])),
+            params=flax_module.lazy_init(
+                model_init_key,
+                self.dataset.spec,
+                training=False,
+                mutable=DenyList(["activations", "preactivations"]),
+            ),
             tx=optimizer,
             kernel_init=model_config.kernel_init,
             bias_init=model_config.bias_init,
@@ -76,7 +88,7 @@ class CSLTrainerBase(abc.ABC):
 
     def train(self):
         total_steps = 0
-        for i, task in enumerate(self.dataset.tasks):
+        for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
                 self.network, self.key, logs = self.update_network(
@@ -96,7 +108,9 @@ class CSLTrainerBase(abc.ABC):
 
                 total_steps += 1
 
-            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
+            logs = self.dataset.evaluate(
+                self.network, forgetting=self.logger.cfg.catastrophic_forgetting
+            )
             self.logger.push(total_steps)  # Flush logger
             self.logger.log(logs, step=total_steps)
 
@@ -116,23 +130,34 @@ class ClassificationCSLTrainer(CSLTrainerBase):
 
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
-                params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations")
+                params,
+                x,
+                training=True,
+                rngs={"dropout": dropout_key},
+                mutable=("activations", "preactivations"),
             )
             return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
-        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+            network_state.params
+        )
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
         activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
+        activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+        }  # pyright: ignore[reportIndexIssue]
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
         preactivations = intermediates["preactivations"]
-        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
+        preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+        }  # pyright: ignore[reportIndexIssue]
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -176,24 +201,38 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
-                params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations")
+                params,
+                x,
+                training=True,
+                rngs={"dropout": dropout_key},
+                mutable=("activations", "preactivations"),
             )
             # NOTE:                         we use the mask here vvvvv
-            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (logits, intermediates)
+            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (
+                logits,
+                intermediates,
+            )
 
-        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+            network_state.params
+        )
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
         activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
+        activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+        }
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
         preactivations = intermediates["preactivations"]
-        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
+        preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+        }
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -224,9 +263,10 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
     @override
     def train(self):
         total_steps = 0
-        for i, task in enumerate(self.dataset.tasks):
+        for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
+                breakpoint()
                 self.network, self.key, logs = self.update_network(
                     self.network, self.key, x, y
                 )
@@ -244,7 +284,9 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
 
                 total_steps += 1
 
-            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
+            logs = self.dataset.evaluate(
+                self.network, forgetting=self.logger.cfg.catastrophic_forgetting
+            )
             self.logger.push(total_steps)  # Flush logger
             self.logger.log(logs, step=total_steps)
 
@@ -273,7 +315,11 @@ if __name__ == "__main__":
             batch_size=64,
             num_tasks=5,
             num_epochs_per_task=1,
-            num_workers=(os.cpu_count() or 0) // 2,
+            # num_workers=(os.cpu_count() or 0) // 2,
+            num_workers=0,
+            dataset_kwargs={
+                "flatten": False,
+            },
         ),
         logging_config=LoggingConfig(
             run_name="split_mnist_debug_1",

@@ -13,7 +13,7 @@ from flax.training.train_state import TrainState
 from jaxtyping import Array, Int32
 
 from continual_learning_2.configs import DatasetConfig
-from continual_learning_2.types import DatasetItem, LogDict, PredictorModel
+from continual_learning_2.types import DatasetItem, LogDict
 from continual_learning_2.utils.monitoring import accumulate_metrics, prefix_dict
 
 
@@ -25,6 +25,9 @@ class ContinualLearningDataset(abc.ABC):
 
     @abc.abstractproperty
     def tasks(self) -> Generator[grain.DataLoader, None, None]: ...
+
+    @abc.abstractproperty
+    def operations(self) -> list[grain.Transformation]: ...
 
     @abc.abstractmethod
     def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict: ...
@@ -42,12 +45,12 @@ def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> LogDict:
 
 
 class SplitDataset(ContinualLearningDataset):
-    CURRENT_TASK: int
+    current_task: int
+
     NUM_CLASSES: int
     KEEP_IN_MEMORY: bool | None = None
 
     DATASET_PATH: str
-    OPERATIONS: list[grain.Transformation] = []
 
     def __init__(self, config: DatasetConfig):
         if not self.NUM_CLASSES % config.num_tasks == 0:
@@ -69,22 +72,22 @@ class SplitDataset(ContinualLearningDataset):
     @property
     def tasks(self) -> Generator[grain.DataLoader, None, None]:
         for task_id in range(self.num_tasks):
-            self.CURRENT_TASK = task_id
+            self.current_task = task_id
             yield self._get_task(task_id)
 
     def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict:
         metrics = {}
         if forgetting:
-            for task in range(self.CURRENT_TASK):
+            for task in range(self.current_task):
                 test_set = self._get_task_test(task)
                 print(f"- Evaluating on task {task}")
                 metrics.update(
                     prefix_dict(f"metrics/task_{task}", self._eval_task(model, test_set))
                 )
-        print(f"- Evaluating on task {self.CURRENT_TASK}")
-        latest_metrics = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
+        print(f"- Evaluating on task {self.current_task}")
+        latest_metrics = self._eval_task(model, self._get_task_test(self.current_task))
         metrics.update(prefix_dict("metrics", latest_metrics))
-        metrics.update(prefix_dict(f"metrics/task_{self.CURRENT_TASK}", latest_metrics))
+        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest_metrics))
         return metrics
 
     def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> LogDict:
@@ -115,7 +118,7 @@ class SplitDataset(ContinualLearningDataset):
                 seed=self.seed,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 grain.Batch(batch_size=self.batch_size, drop_remainder=True),
             ],
             worker_count=self.num_workers,
@@ -140,7 +143,7 @@ class SplitDataset(ContinualLearningDataset):
                 num_epochs=1,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 grain.Batch(batch_size=self.batch_size, drop_remainder=False),
             ],
             worker_count=self.num_workers,
@@ -160,13 +163,11 @@ class PermuteInputs(grain.MapTransform):
 
 
 class PermutedDataset(ContinualLearningDataset):
-    CURRENT_TASK: int
+    current_task: int
+
     NUM_CLASSES: int
-
     DATA_DIM: int
-
     DATASET_PATH: str
-    OPERATIONS: list[grain.Transformation] = []
 
     def __init__(self, config: DatasetConfig):
         self.num_tasks = config.num_tasks
@@ -188,22 +189,22 @@ class PermutedDataset(ContinualLearningDataset):
     @property
     def tasks(self) -> Generator[grain.DataLoader, None, None]:
         for task_id in range(self.num_tasks):
-            self.CURRENT_TASK = task_id
+            self.current_task = task_id
             yield self._get_task(task_id)
 
     def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict:
         metrics = {}
         if forgetting:
-            for task in range(self.CURRENT_TASK):
+            for task in range(self.current_task):
                 test_set = self._get_task_test(task)
                 print(f"- Evaluating on task {task}")
                 metrics.update(
                     prefix_dict(f"metrics/task_{task}", self._eval_task(model, test_set))
                 )
-        print(f"- Evaluating on task {self.CURRENT_TASK}")
-        latest_metrics = self._eval_task(model, self._get_task_test(self.CURRENT_TASK))
+        print(f"- Evaluating on task {self.current_task}")
+        latest_metrics = self._eval_task(model, self._get_task_test(self.current_task))
         metrics.update(prefix_dict("metrics", latest_metrics))
-        metrics.update(prefix_dict(f"metrics/task_{self.CURRENT_TASK}", latest_metrics))
+        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest_metrics))
         return metrics
 
     def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> LogDict:
@@ -232,7 +233,7 @@ class PermutedDataset(ContinualLearningDataset):
                 seed=seed,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 PermuteInputs(permutation),
                 grain.Batch(batch_size=self.batch_size, drop_remainder=True),
             ],
@@ -255,7 +256,7 @@ class PermutedDataset(ContinualLearningDataset):
                 seed=seed,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 PermuteInputs(permutation),
                 grain.Batch(batch_size=self.batch_size),
             ],
@@ -296,7 +297,7 @@ class ClassIncrementalDataset(SplitDataset):
                 seed=self.seed,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 grain.Batch(batch_size=self.batch_size, drop_remainder=True),
             ],
             worker_count=self.num_workers,
@@ -316,7 +317,7 @@ class ClassIncrementalDataset(SplitDataset):
                 num_epochs=1,
             ),
             operations=[
-                *self.OPERATIONS,
+                *self.operations,
                 grain.Batch(batch_size=self.batch_size, drop_remainder=False),
             ],
             worker_count=self.num_workers,

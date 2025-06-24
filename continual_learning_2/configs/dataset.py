@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -20,3 +20,6 @@ class DatasetConfig:
 
     num_workers: int = 0
     """The number of workers to use for data loading. 0 = no multi-processing."""
+
+    dataset_kwargs: dict = field(default_factory=lambda: {})
+    """Additional keyword arguments to pass to the dataset constructor."""
