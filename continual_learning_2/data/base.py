@@ -13,7 +13,7 @@ from flax.training.train_state import TrainState
 from jaxtyping import Array, Int32
 
 from continual_learning_2.configs import DatasetConfig
-from continual_learning_2.types import DatasetItem, LogDict
+from continual_learning_2.types import DatasetItem
 from continual_learning_2.utils.monitoring import accumulate_metrics, prefix_dict
 
 
@@ -24,24 +24,30 @@ class ContinualLearningDataset(abc.ABC):
     def __init__(self, config: DatasetConfig): ...
 
     @abc.abstractproperty
+    def state(self) -> dict: ...
+
+    @abc.abstractmethod
+    def load(self, state: dict, resumed_loader: grain.DataLoader) -> None: ...
+
+    @abc.abstractproperty
     def tasks(self) -> Generator[grain.DataLoader, None, None]: ...
 
     @abc.abstractproperty
     def operations(self) -> list[grain.Transformation]: ...
 
     @abc.abstractmethod
-    def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict: ...
+    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]: ...
 
     @abc.abstractproperty
     def spec(self) -> jax.ShapeDtypeStruct: ...
 
 
 @jax.jit
-def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> LogDict:
+def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> dict[str, float]:
     logits = model.apply_fn(model.params, x, training=False)
     loss = optax.softmax_cross_entropy(logits, y).mean()
     accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
-    return {"eval_loss": loss, "eval_accuracy": accuracy}
+    return {"eval_loss": float(loss), "eval_accuracy": float(accuracy)}
 
 
 class SplitDataset(ContinualLearningDataset):
@@ -67,15 +73,32 @@ class SplitDataset(ContinualLearningDataset):
         ).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
+        self.current_task = 0
+        self.resumed_loader = None
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
     @property
     def tasks(self) -> Generator[grain.DataLoader, None, None]:
-        for task_id in range(self.num_tasks):
+        for task_id in range(self.current_task, self.num_tasks):
             self.current_task = task_id
-            yield self._get_task(task_id)
 
-    def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict:
+            if self.resumed_loader is not None:
+                yield self.resumed_loader
+                self.resumed_loader = None
+            else:
+                yield self._get_task(task_id)
+
+    @property
+    def state(self) -> dict:
+        return {
+            "current_task": self.current_task,
+        }
+
+    def load(self, state: dict, resumed_loader: grain.DataLoader) -> None:
+        self.current_task = state["current_task"]
+        self.resumed_loader = resumed_loader
+
+    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]:
         metrics = {}
         if forgetting:
             for task in range(self.current_task):
@@ -90,7 +113,7 @@ class SplitDataset(ContinualLearningDataset):
         metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest_metrics))
         return metrics
 
-    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> LogDict:
+    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> dict[str, float]:
         logs = []
         for data in test_set:
             x, y = data
@@ -178,21 +201,36 @@ class PermutedDataset(ContinualLearningDataset):
         self.dataset = datasets.load_dataset(self.DATASET_PATH).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
-        self.rng = np.random.default_rng(self.seed)
-        self.permutations = [
-            self.rng.permutation(self.DATA_DIM) for _ in range(self.num_tasks)
-        ]
-        self.seeds = [self.rng.integers(0, sys.maxsize) for _ in range(self.num_tasks)]
+        rng = np.random.default_rng(self.seed)
+        self.permutations = [rng.permutation(self.DATA_DIM) for _ in range(self.num_tasks)]
+        self.seeds = [rng.integers(0, sys.maxsize) for _ in range(self.num_tasks)]
+        self.current_task = 0
+        self.resumed_loader = None
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
     @property
-    def tasks(self) -> Generator[grain.DataLoader, None, None]:
-        for task_id in range(self.num_tasks):
-            self.current_task = task_id
-            yield self._get_task(task_id)
+    def state(self) -> dict:
+        return {
+            "current_task": self.current_task,
+        }
 
-    def evaluate(self, model: TrainState, forgetting: bool = False) -> LogDict:
+    def load(self, state: dict, resumed_loader: grain.DataLoader) -> None:
+        self.current_task = state["current_task"]
+        self.resumed_loader = resumed_loader
+
+    @property
+    def tasks(self) -> Generator[grain.DataLoader, None, None]:
+        for task_id in range(self.current_task, self.num_tasks):
+            self.current_task = task_id
+
+            if self.resumed_loader is not None:
+                yield self.resumed_loader
+                self.resumed_loader = None
+            else:
+                yield self._get_task(task_id)
+
+    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]:
         metrics = {}
         if forgetting:
             for task in range(self.current_task):
@@ -207,7 +245,7 @@ class PermutedDataset(ContinualLearningDataset):
         metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest_metrics))
         return metrics
 
-    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> LogDict:
+    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> dict[str, float]:
         logs = []
         for data in test_set:
             x, y = data
@@ -284,9 +322,10 @@ class ClassIncrementalDataset(SplitDataset):
         ).with_format("numpy")
         assert isinstance(self.dataset, datasets.DatasetDict)
 
-        self.rng = np.random.default_rng(self.seed)
+        rng = np.random.default_rng(self.seed)
         self.class_increment = self.NUM_CLASSES // self.num_tasks
-        self.class_order = self.rng.permutation(self.NUM_CLASSES)
+        self.class_order = rng.permutation(self.NUM_CLASSES)
+        self.current_task = 0
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 

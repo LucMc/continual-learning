@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 
@@ -8,6 +9,8 @@ class LoggingConfig:
     wandb_entity: str
     wandb_project: str
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
+
+    checkpoint_dir: Path = Path("checkpoints")
 
     interval: int = 100
     save_interval: int = 1000

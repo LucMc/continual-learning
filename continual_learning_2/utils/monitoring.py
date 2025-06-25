@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, TypeVar
 
 import chex
 import flax.traverse_util
@@ -195,7 +195,10 @@ def average_histograms(histograms: list[Histogram]) -> Histogram:
     )
 
 
-def accumulate_metrics(metrics: list[LogDict]) -> LogDict:
+MetricsType = TypeVar("MetricsType", bound=LogDict | dict[str, float])
+
+
+def accumulate_metrics(metrics: list[MetricsType]) -> MetricsType:
     ret = {}
     for k in metrics[0]:
         if not isinstance(metrics[0][k], Histogram):
@@ -203,7 +206,7 @@ def accumulate_metrics(metrics: list[LogDict]) -> LogDict:
         else:
             ret[k] = average_histograms([m[k] for m in metrics])  # pyright: ignore[reportArgumentType,reportCallIssue]
 
-    return ret
+    return ret  # pyright: ignore[reportReturnType]
 
 
 class Logger:
@@ -245,7 +248,7 @@ class Logger:
     def accumulate(self, logs: LogDict):
         self.buffer.append(logs)
 
-    def _log(self, logs: LogDict, step: int):
+    def _log(self, logs: LogDict | dict[str, float], step: int):
         for key, value in logs.items():
             if isinstance(value, Histogram):
                 logs[key] = wandb.Histogram(value.data, np_histogram=value.np_histogram)  # pyright: ignore[reportArgumentType]
@@ -259,7 +262,7 @@ class Logger:
         self.buffer.clear()
         self._log(logs, step)
 
-    def log(self, logs: LogDict, step: int):
+    def log(self, logs: LogDict | dict[str, float], step: int):
         self._log(logs, step)
 
     def close(self):

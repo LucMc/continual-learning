@@ -1,3 +1,4 @@
+# pyright: reportCallIssue=false
 import abc
 import os
 from functools import partial
@@ -8,7 +9,9 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint as ocp
 from flax.core import DenyList
+from grain import python as grain
 from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
@@ -16,6 +19,7 @@ from continual_learning_2.configs import (
     DatasetConfig,
     LoggingConfig,
     OptimizerConfig,
+    TrainingConfig,
 )
 from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.data import ContinualLearningDataset, get_dataset
@@ -44,27 +48,31 @@ class CSLTrainerBase(abc.ABC):
     dataset: ContinualLearningDataset
     logger: Logger
 
+    ckpt_mgr: ocp.CheckpointManager
+
     def __init__(
         self,
         seed: int,
         model_config,
-        optimizer_config: OptimizerConfig,
-        dataset_config: DatasetConfig,
-        logging_config: LoggingConfig,
+        optim_cfg: OptimizerConfig,
+        data_cfg: DatasetConfig,
+        train_cfg: TrainingConfig,
+        logs_cfg: LoggingConfig,
     ):
         self.key, model_init_key = jax.random.split(jax.random.PRNGKey(seed))
         self.logger = Logger(
-            logging_config,
+            logs_cfg,
             run_config={
                 "model": model_config,
-                "optimizer": optimizer_config,
-                "dataset": dataset_config,
+                "optimizer": optim_cfg,
+                "dataset": data_cfg,
             },
         )
-        self.dataset = get_dataset(dataset_config)
+        self.dataset = get_dataset(data_cfg)
+        self.train_cfg = train_cfg
 
         flax_module = get_model(model_config)
-        optimizer = get_optimizer(optimizer_config)
+        optimizer = get_optimizer(optim_cfg)
         self.network = TrainState.create(
             apply_fn=jax.jit(flax_module.apply, static_argnames=("training", "mutable")),
             params=flax_module.lazy_init(
@@ -77,6 +85,15 @@ class CSLTrainerBase(abc.ABC):
             kernel_init=model_config.kernel_init,
             bias_init=model_config.bias_init,
         )
+        self.total_steps = 0
+
+        self.ckpt_mgr = ocp.CheckpointManager(
+            logs_cfg.checkpoint_dir / f"{logs_cfg.run_name}_{seed}",
+            options=ocp.CheckpointManagerOptions(
+                max_to_keep=5,
+                # TODO: there's lots more to add here
+            ),
+        )
 
     @staticmethod
     @partial(jax.jit, donate_argnames=("network_state", "key"))
@@ -85,8 +102,47 @@ class CSLTrainerBase(abc.ABC):
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         raise NotImplementedError
 
+    def save(self, dataloader: grain.DataLoader, metrics: dict[str, float] | None):
+        self.ckpt_mgr.save(
+            self.total_steps,
+            args=ocp.args.Composite(
+                nn=ocp.args.StandardSave(self.network),
+                key=ocp.args.JaxRandomKeySave(self.key),
+                dataloader=grain.PyGrainCheckpointSave(dataloader),
+                dataset=ocp.args.JsonSave(self.dataset.state),
+            ),
+            metrics=metrics,
+        )
+
+    def load(self, step: int):
+        assert self.total_steps == 0, "Load was called before training started"
+        dummy_dataloader = next(self.dataset.tasks)
+
+        if step == -1:
+            latest_step = self.ckpt_mgr.latest_step()
+            assert latest_step is not None, "No checkpoint found"
+            step = latest_step
+
+        ckpt = self.ckpt_mgr.restore(
+            self.ckpt_mgr.latest_step() if step == -1 else step,
+            args=ocp.args.Composite(
+                nn=ocp.args.StandardRestore(self.network),
+                key=ocp.args.JaxRandomKeyRestore(self.key),
+                dataloader=grain.PyGrainCheckpointRestore(dummy_dataloader),
+                dataset=ocp.args.JsonRestore(),
+            ),
+        )
+        self.network = ckpt["nn"]
+        self.key = ckpt["key"]
+        self.dataset.load(ckpt["dataset"])
+        self.total_steps = step + 1
+
+        # TODO: feed the resumed loader to the dataset
+
     def train(self):
-        total_steps = 0
+        if self.train_cfg.resume:
+            self.load(step=self.train_cfg.resume_from_step)
+
         for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
@@ -95,23 +151,26 @@ class CSLTrainerBase(abc.ABC):
                 )
                 self.logger.accumulate(logs)
 
-                if step % self.logger.cfg.interval == 0:
-                    self.logger.push(total_steps)
-
+                metrics = None
                 if (
                     self.logger.cfg.eval_during_training
                     and step % self.logger.cfg.eval_interval == 0
                 ):
-                    logs = self.dataset.evaluate(self.network, forgetting=False)
-                    self.logger.log(logs, step=total_steps)
+                    metrics = self.dataset.evaluate(self.network, forgetting=False)
+                    self.logger.log(metrics, step=self.total_steps)
 
-                total_steps += 1
+                if step % self.logger.cfg.interval == 0:
+                    self.logger.push(self.total_steps)
+                    self.save(dataloader=task, metrics=metrics)
+
+                self.total_steps += 1
+
+            self.logger.push(self.total_steps)  # Flush logger
 
             logs = self.dataset.evaluate(
                 self.network, forgetting=self.logger.cfg.catastrophic_forgetting
             )
-            self.logger.push(total_steps)  # Flush logger
-            self.logger.log(logs, step=total_steps)
+            self.logger.log(logs, step=self.total_steps)
 
         self.logger.close()
 
@@ -331,8 +390,8 @@ if __name__ == "__main__":
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=CNNConfig(output_size=10),
-        optimizer_config=AdamConfig(learning_rate=1e-3),
-        dataset_config=DatasetConfig(
+        optim_cfg=AdamConfig(learning_rate=1e-3),
+        data_cfg=DatasetConfig(
             name="split_cifar10",
             seed=SEED,
             batch_size=64,
@@ -343,7 +402,7 @@ if __name__ == "__main__":
                 "flatten": False,
             },
         ),
-        logging_config=LoggingConfig(
+        logs_cfg=LoggingConfig(
             run_name="split_cifar10_debug_1",
             wandb_entity="evangelos-ch",
             wandb_project="continual_learning_2",
