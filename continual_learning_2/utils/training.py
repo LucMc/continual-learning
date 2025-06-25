@@ -1,8 +1,7 @@
-from typing import Callable, Self
+from typing import Self
 
 import jax
 from flax import struct
-import flax.core
 from flax.training.train_state import TrainState as FlaxTrainState
 from jaxtyping import PRNGKeyArray
 

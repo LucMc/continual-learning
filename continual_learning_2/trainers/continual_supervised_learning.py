@@ -1,7 +1,6 @@
 import abc
 import os
 from functools import partial
-from sys import prefix
 from typing import override
 
 import flax.traverse_util
@@ -16,7 +15,6 @@ from continual_learning_2.configs import (
     AdamConfig,
     DatasetConfig,
     LoggingConfig,
-    MLPConfig,
     OptimizerConfig,
 )
 from continual_learning_2.configs.models import CNNConfig

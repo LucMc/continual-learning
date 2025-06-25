@@ -1,7 +1,6 @@
 # Based on https://github.com/google/flax/blob/main/examples/imagenet/models.py
-from collections.abc import Sequence
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 import flax.linen as nn
 import jax

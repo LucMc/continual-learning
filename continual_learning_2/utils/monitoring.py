@@ -1,16 +1,15 @@
 from typing import Any
 
 import chex
-import flax.struct
 import flax.traverse_util
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-import wandb
 from jaxtyping import Array, Float, PyTree
 
+import wandb
 from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.types import Histogram, Intermediates, LayerActivationsDict, LogDict
+from continual_learning_2.types import Histogram, LayerActivationsDict, LogDict
 
 
 def log(logs: dict, step: int) -> None:
@@ -104,7 +103,9 @@ def get_dormant_neuron_logs(
     return logs
 
 
-def get_linearised_neuron_logs(layer_preactivations: LayerActivationsDict, linearised_threshold: float = 0.9) -> LogDict:
+def get_linearised_neuron_logs(
+    layer_preactivations: LayerActivationsDict, linearised_threshold: float = 0.9
+) -> LogDict:
     """Compute the linearised neuron ratio per layer.
     Linearised units are "zombie" units which essentially always activate.
 
