@@ -15,7 +15,7 @@ dependencies = [
     "altair",
     "vl-convert-python",
     "numpy>=2.1.2",
-    "orbax-checkpoint>=0.7.0",
+    "orbax-checkpoint>=0.11.16",
     "tyro>=0.8.11",
     "wandb>=0.18.5",
     "optax @ git+https://github.com/google-deepmind/optax.git",

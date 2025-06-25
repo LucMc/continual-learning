@@ -10,6 +10,7 @@ import jax.flatten_util
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
+import orbax.checkpoint.checkpoint_managers as ocp_mgrs
 from flax.core import DenyList
 from grain import python as grain
 from jaxtyping import PRNGKeyArray
@@ -90,8 +91,20 @@ class CSLTrainerBase(abc.ABC):
         self.ckpt_mgr = ocp.CheckpointManager(
             logs_cfg.checkpoint_dir / f"{logs_cfg.run_name}_{seed}",
             options=ocp.CheckpointManagerOptions(
-                max_to_keep=5,
-                # TODO: there's lots more to add here
+                save_decision_policy=ocp_mgrs.AnySavePolicy(
+                    [
+                        ocp_mgrs.FixedIntervalPolicy(logs_cfg.save_interval),
+                        ocp_mgrs.save_decision_policy.PreemptionCheckpointingPolicy(),
+                    ]
+                ),
+                preservation_policy=ocp_mgrs.AnyPreservationPolicy(
+                    [
+                        ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
+                        ocp_mgrs.BestN(  # Top 3
+                            n=3, get_metric_fn=lambda x: x["metrics/test_accuracy"]
+                        ),
+                    ]
+                ),
             ),
         )
 
@@ -134,10 +147,8 @@ class CSLTrainerBase(abc.ABC):
         )
         self.network = ckpt["nn"]
         self.key = ckpt["key"]
-        self.dataset.load(ckpt["dataset"])
+        self.dataset.load(ckpt["dataset"], resumed_loader=ckpt["dataloader"])
         self.total_steps = step + 1
-
-        # TODO: feed the resumed loader to the dataset
 
     def train(self):
         if self.train_cfg.resume:
@@ -173,6 +184,7 @@ class CSLTrainerBase(abc.ABC):
             self.logger.log(logs, step=self.total_steps)
 
         self.logger.close()
+        self.ckpt_mgr.close()
 
 
 class ClassificationCSLTrainer(CSLTrainerBase):
