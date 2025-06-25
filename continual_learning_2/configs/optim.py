@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
+import optax
+
 
 @dataclass
 class OptimizerConfig:
-    learning_rate: float
+    learning_rate: float | optax.Schedule
 
 
 class AdamConfig(OptimizerConfig):

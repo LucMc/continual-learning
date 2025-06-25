@@ -402,6 +402,9 @@ if __name__ == "__main__":
                 "flatten": False,
             },
         ),
+        train_cfg=TrainingConfig(
+            resume=True,
+        ),
         logs_cfg=LoggingConfig(
             run_name="split_cifar10_debug_1",
             wandb_entity="evangelos-ch",
