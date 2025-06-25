@@ -4,6 +4,7 @@ import flax.linen as nn
 from typing import Callable
 import chex
 
+# Base configs
 @dataclass(frozen=True)
 class OptimizerConfig:
     learning_rate: float
@@ -12,11 +13,13 @@ class OptimizerConfig:
 class ResetMethodConfig:
     tx: OptimizerConfig
 
+# Standard optimizer configs
 class AdamConfig(OptimizerConfig):
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 1e-8
 
+# Reset method configs
 @dataclass(frozen=True)
 class ShrinkAndPerterbConfig(ResetMethodConfig):
     param_noise_fn: Callable = nn.initializers.xavier_normal()
@@ -32,10 +35,10 @@ class RedoConfig(ResetMethodConfig):
     
 @dataclass(frozen=True)
 class CBPConfig(ResetMethodConfig):
-    replacement_rate: float
-    decay_rate: float
-    maturity_threshold: float
-    accumulate: float # TODO
+    replacement_rate: float = 0.1
+    decay_rate: float = 0.9
+    maturity_threshold: int = 20
+    accumulate: bool = False # TODO
     
 @dataclass(frozen=True)
 class CCBPConfig(ResetMethodConfig):

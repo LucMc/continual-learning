@@ -25,17 +25,10 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.utils.optim as utils
+import continual_learning_2.utils.optim as utils
 
 """
 This is an implementation of continual back propergation (CBP): https://www.nature.com/articles/s41586-024-07711-7
-
-TODO:
- * Clip ages
- * Reset adam/optim state for reset nodes
- * fix logging
-
-Count = 15
 
 :: Testing ::
   * See testing list in test_reset.py
@@ -56,7 +49,7 @@ class CBPOptimState:
     mean_feature_act: Float[Array, ""]
     ages: Array
     accumulated_features_to_replace: int
-    rng: PRNGKeyArray
+    # rng: PRNGKeyArray
 
     step_size: float = 0.001
     replacement_rate: float = 0.5
@@ -106,7 +99,7 @@ def get_out_weights_mag(weights):
 
 def process_params(params: PyTree):
     # TODO: Make out_w_mag optional so can be used by redo too
-    out_layer_name = "out_layer"
+    out_layer_name = "output"
 
     excluded = {
         out_layer_name: params[out_layer_name]
@@ -141,7 +134,7 @@ def cbp(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
-    rng: Array = random.PRNGKey(0),
+    accumulate: bool = False,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
         weights, bias, _, _ = process_params(params["params"])
@@ -154,10 +147,6 @@ def cbp(
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             accumulated_features_to_replace=0,
-            replacement_rate=replacement_rate,
-            decay_rate=decay_rate,
-            maturity_threshold=maturity_threshold,
-            rng=rng,
             **kwargs,
         )
 
@@ -172,12 +161,12 @@ def cbp(
         def _cbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            assert features, "Features must be provided in update"
-            _features = features["activations"][0]
+            # assert features, "Features must be provided in update"
+            # _features = features["activations"][0]
 
             weights, bias, out_w_mag, excluded = process_params(params["params"])
 
-            new_rng, util_key = random.split(rng)
+            # new_rng, util_key = random.split(rng)
             # key_tree = utils.gen_key_tree(util_key, weights)
 
             # vmap utility calculation over batch
@@ -185,9 +174,21 @@ def cbp(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 in_axes=(None, None, 0),
             )
-            _utility_batch = jax.tree.map(
-                batched_util_calculation, out_w_mag, state.utilities, _features
-            )
+
+            # Flatten all the structures (For unmatched trees)
+            out_w_mag_leaves, _ = jax.tree.flatten(out_w_mag)
+            utilities_leaves, utilities_tree_def = jax.tree.flatten(state.utilities)
+            feature_leaves = [f[0] for f in jax.tree.leaves(features)]
+
+            # Apply the calculation to the leaves
+            utility_batch_leaves = [
+                batched_util_calculation(w, u, f)
+                for w, u, f in zip(out_w_mag_leaves, utilities_leaves, feature_leaves)
+            ]
+
+            # Reconstruct the tree
+            _utility_batch = jax.tree.unflatten(utilities_tree_def, utility_batch_leaves)
+
             _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
 
             reset_mask = jax.tree.map(
@@ -216,13 +217,13 @@ def cbp(
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
                     m, jnp.zeros_like(a), jnp.clip(a + 1, max=state.maturity_threshold+1)
-                ),  # Clip to stop huge ages unnessesarily
+                ),  # Clip to stop huge ages
                 state.ages,
                 reset_mask,
             )
 
             new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
 
@@ -236,7 +237,7 @@ def cbp(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+                ages=_ages, logs=FrozenDict(_logs), utilities=_utility
             )
             new_params.update(excluded)
 

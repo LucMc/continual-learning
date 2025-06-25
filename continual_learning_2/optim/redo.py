@@ -102,7 +102,7 @@ def process_params(params: PyTree):
 # -------------- Main Redo Optimiser body ---------------
 def redo(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
-    update_frequency: int = 10_000000000,
+    update_frequency: int = 100,
     score_threshold: float = 0.1,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):

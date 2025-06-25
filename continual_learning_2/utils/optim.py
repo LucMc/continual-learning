@@ -11,6 +11,52 @@ import optax
 import continual_learning.optim as optim
 
 
+def attach_reset_method(
+    *args: tuple[str, optax.GradientTransformation],
+) -> optax.GradientTransformationExtraArgs:
+    names = [name for name, _ in args]
+
+    if len(names) != len(set(names)):
+        raise ValueError(f"Named transformations must have unique names, but got {names}")
+
+    transforms = [(name, optax.with_extra_args_support(t)) for name, t in args]
+
+    def init_fn(params):
+        states = {}
+        for name, tx in transforms:
+            states[name] = tx.init(params)
+        return states
+
+    def update_fn(updates, state, params=None, features=None, **extra_args):
+        """Updated named chain update from Optax to enable resetting of base optim running stats"""
+
+        new_state = {}
+        assert len(transforms) == 2, "chain the optim with the reset method only"
+        assert "tx" == args[0][0], "'tx' is the first part of this chain"
+        assert "reset_method" == args[1][0], "'reset_method' is the second part of this chain"
+
+        # TX update
+        tx = transforms[0][1]
+        reset_method = transforms[1][1]
+
+        updates, new_state["tx"] = tx.update(updates, state["tx"], params, **extra_args)
+        new_params_with_opt = optax.apply_updates(params, updates)
+
+        # Reset method
+        new_params_with_reset, new_state["reset_method"], new_state["tx"] = (
+            reset_method.update(
+                updates,
+                state["reset_method"],
+                new_params_with_opt,
+                features=features,
+                tx_state=new_state["tx"],
+            )
+        )
+
+        return new_params_with_reset, new_state
+
+    return optax.GradientTransformationExtraArgs(init_fn, update_fn)
+
 def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
@@ -48,43 +94,6 @@ def reset_weights(
         logs[w_in_layer] = {"nodes_reset": n_reset}
 
     logs[w_out_layer] = {"nodes_reset": 0}
-
-    return layer_w, logs
-
-
-# VMAPPED VERSION TODO
-def reset_weights_vmap(
-    reset_mask: PyTree[Bool[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    initial_weights: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = None,
-):
-    layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(layer_names) - 1):
-        in_layer = layer_names[i]
-        out_layer = layer_names[i + 1]
-
-        assert reset_mask[in_layer].dtype == bool, "Mask type isn't bool"
-        assert len(reset_mask[in_layer].flatten()) == layer_w[out_layer].shape[0], (
-            f"Reset mask shape incorrect: {len(reset_mask[in_layer].flatten())} should be {layer_w[out_layer].shape[0]}"
-        )
-
-        in_reset_mask = reset_mask[in_layer].reshape(-1)  # [1, out_size]
-        _in_layer_w = jnp.where(in_reset_mask, initial_weights[in_layer], layer_w[in_layer])
-
-        _out_layer_w = jnp.where(
-            in_reset_mask, jnp.zeros_like(layer_w[out_layer]), layer_w[out_layer]
-        )
-        n_reset = reset_mask[in_layer].sum()
-
-        layer_w[in_layer] = _in_layer_w
-        layer_w[out_layer] = _out_layer_w
-
-        logs[in_layer] = {"nodes_reset": n_reset}
-
-    logs[out_layer] = {"nodes_reset": 0}
 
     return layer_w, logs
 
