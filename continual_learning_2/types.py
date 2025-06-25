@@ -15,7 +15,7 @@ Value = Float[np.ndarray, "... 1"]
 LogProb = Float[np.ndarray, "... 1"]
 Observation = Float[np.ndarray, "... obs_dim"]
 type LogDict = dict[str, float | Float[Array, ""] | Histogram]
-type Input = Float[np.ndarray, " ... *input_dim"]
+type Input = Float[np.ndarray | Array, " ... *input_dim"]
 type Label = Float[np.ndarray, " ... num_classes"]
 type DatasetItem = tuple[Input, Label]
 

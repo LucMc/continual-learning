@@ -267,7 +267,6 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
         for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
-                breakpoint()
                 self.network, self.key, logs = self.update_network(
                     self.network, self.key, x, y
                 )
@@ -333,7 +332,7 @@ if __name__ == "__main__":
     # )
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
-        model_config=CNNConfig(output_size=2),
+        model_config=CNNConfig(output_size=10),
         optimizer_config=AdamConfig(learning_rate=1e-3),
         dataset_config=DatasetConfig(
             name="split_cifar10",
@@ -341,7 +340,7 @@ if __name__ == "__main__":
             batch_size=64,
             num_tasks=5,
             num_epochs_per_task=1,
-            num_workers=(os.cpu_count() or 0) // 2,
+            # num_workers=(os.cpu_count() or 0) // 2,
             dataset_kwargs={
                 "flatten": False,
             },

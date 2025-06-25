@@ -28,8 +28,8 @@ class CNNConfig:
     features: Sequence[int] = (64, 128, 256)
     num_convs_per_layer: int = 2
     kernel_size: int | Sequence[int] = (3, 3)
-    strides: int | Sequence[int] = 2
-    padding: Literal["SAME", "VALID", "CIRCULAR"] = "VALID"
+    strides: int | Sequence[int] = 1
+    padding: Literal["SAME", "VALID", "CIRCULAR"] = "SAME"
     use_max_pooling: bool = True
 
     # MLP head

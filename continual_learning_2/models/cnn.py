@@ -10,6 +10,8 @@ from continual_learning_2.utils.nn import flatten_last
 
 
 class CNN(nn.Module):
+    """Based on VGG."""
+
     config: CNNConfig
 
     @nn.compact
