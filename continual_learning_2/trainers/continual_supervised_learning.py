@@ -99,6 +99,7 @@ class CSLTrainerBase(abc.ABC):
                 ),
                 preservation_policy=ocp_mgrs.AnyPreservationPolicy(
                     [
+                        ocp_mgrs.LatestN(n=1),
                         ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
                         ocp_mgrs.BestN(  # Top 3
                             n=3, get_metric_fn=lambda x: x["metrics/test_accuracy"]
