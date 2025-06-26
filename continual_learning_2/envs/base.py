@@ -1,8 +1,7 @@
 import abc
-from typing import Generator, NamedTuple
+from typing import Generator, NamedTuple, Protocol
 
 import jax
-from flax.training.train_state import TrainState
 
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.types import (
@@ -15,6 +14,10 @@ from continual_learning_2.types import (
     Observation,
     Reward,
 )
+
+
+class Agent(Protocol):
+    def eval_action(self, observation: Observation) -> Action: ...
 
 
 class Timestep(NamedTuple):
@@ -75,7 +78,7 @@ class ContinualLearningEnv(abc.ABC):
     def action_dim(self) -> int: ...
 
     @abc.abstractmethod
-    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]: ...
+    def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float]: ...
 
     @abc.abstractmethod
     def save(self) -> dict: ...

@@ -13,6 +13,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import orbax.checkpoint as ocp
 import orbax.checkpoint.checkpoint_managers as ocp_mgrs
 from flax.core import DenyList, FrozenDict
@@ -21,8 +22,9 @@ from jaxtyping import Array, Float, PRNGKeyArray
 from continual_learning_2.configs import (
     EnvConfig,
     LoggingConfig,
-    TrainingConfig,
 )
+from continual_learning_2.configs.rl import PPOConfig
+from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import (
     ContinualLearningEnv,
     VectorEnv,
@@ -31,16 +33,19 @@ from continual_learning_2.envs import (
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import Action, LogDict, LogProb, Observation, Rollout, Value
-from continual_learning_2.utils.buffers import RolloutBuffer
+from continual_learning_2.utils.buffers import RolloutBuffer, compute_gae
 from continual_learning_2.utils.monitoring import (
     Logger,
+    accumulate_metrics,
     compute_srank,
+    explained_variance,
     get_dormant_neuron_logs,
     get_linearised_neuron_logs,
+    get_logs,
     prefix_dict,
     pytree_histogram,
 )
-from continual_learning_2.utils.training import TrainState
+from continual_learning_2.utils.training import TrainState, to_minibatch_iterator
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -51,6 +56,7 @@ class ContinualPPOTrainer(abc.ABC):
     policy: TrainState
     vf: TrainState
     key: PRNGKeyArray
+    cfg: PPOConfig
 
     benchmark: ContinualLearningEnv
     logger: Logger
@@ -60,12 +66,13 @@ class ContinualPPOTrainer(abc.ABC):
     def __init__(
         self,
         seed: int,
-        ppo_config,
+        ppo_config: PPOConfig,
         env_cfg: EnvConfig,
-        train_cfg: TrainingConfig,
+        train_cfg: RLTrainingConfig,
         logs_cfg: LoggingConfig,
     ):
         self.key, policy_init_key, vf_init_key = jax.random.split(jax.random.PRNGKey(seed), 3)
+        self.cfg = ppo_config
         self.logger = Logger(
             logs_cfg,
             run_config={
@@ -107,7 +114,7 @@ class ContinualPPOTrainer(abc.ABC):
 
         self.start_step = 0
         self.total_steps = 0
-        self.steps_per_task = 0  # TODO: Get from some config
+        self.steps_per_task = train_cfg.num_steps // env_cfg.num_tasks
         self.buffer = RolloutBuffer(ppo_config.num_rollout_steps, self.benchmark)
         self.episodic_returns: Deque[float] = deque([], maxlen=20 * self.benchmark.num_envs)
         self.episodic_lengths: Deque[int] = deque([], maxlen=20 * self.benchmark.num_envs)
@@ -237,9 +244,8 @@ class ContinualPPOTrainer(abc.ABC):
 
                 metrics = None
                 if self.total_steps % self.logger.cfg.eval_interval == 0:
-                    # TODO: Agent interface
                     metrics = self.benchmark.evaluate(
-                        self.policy, forgetting=self.logger.cfg.catastrophic_forgetting
+                        self, forgetting=self.logger.cfg.catastrophic_forgetting
                     )
 
                 self.save(envs, metrics)
@@ -252,7 +258,7 @@ class ContinualPPOTrainer(abc.ABC):
         key: PRNGKeyArray, policy: TrainState, vf: TrainState, observation: Observation
     ) -> tuple[PRNGKeyArray, Action, LogProb, Value]:
         dist: distrax.Distribution
-        key, action_key, p_dropout, vf_dropout = jax.random.split(key)
+        key, action_key, p_dropout, vf_dropout = jax.random.split(key, 4)
         dist = policy.apply_fn(
             policy.params, observation, training=True, rngs={"dropout": p_dropout}
         )
@@ -261,6 +267,31 @@ class ContinualPPOTrainer(abc.ABC):
             vf.params, observation, training=True, rngs={"dropout": vf_dropout}
         )
         return key, action, log_prob, value  # pyright: ignore[reportReturnType]
+
+    @staticmethod
+    @jax.jit
+    def _sample_action(
+        key: PRNGKeyArray, policy: TrainState, observation: Observation
+    ) -> tuple[PRNGKeyArray, Action]:
+        dist: distrax.Distribution
+        key, action_key = jax.random.split(key)
+        dist = policy.apply_fn(policy.params, observation, training=False)
+        return key, dist.sample(seed=action_key)  # pyright: ignore[reportReturnType]
+
+    def eval_action(self, observation: Observation) -> Action:
+        self.key, action = self._sample_action(self.key, self.policy, observation)
+        return action
+
+    @staticmethod
+    @jax.jit
+    def _get_value(
+        vf: TrainState, key: PRNGKeyArray, observation: Observation
+    ) -> tuple[PRNGKeyArray, Value]:
+        key, vf_dropout = jax.random.split(key)
+        value = vf.apply_fn(
+            vf.params, observation, training=True, rngs={"dropout": vf_dropout}
+        )
+        return key, value
 
     def sample(self, observation: Observation) -> tuple[Action, LogProb, Value]:
         self.key, action, log_prob, value = self._sample_action_value_and_log_prob(
@@ -272,20 +303,18 @@ class ContinualPPOTrainer(abc.ABC):
     @partial(
         jax.jit,
         donate_argnames=("policy", "key"),
-        static_argnames=("clip_eps", "normalize_advantages", "entropy_coefficient"),
+        static_argnames=("cfg"),
     )
     def update_policy(
         policy: TrainState,
         data: Rollout,
         key: PRNGKeyArray,
-        clip_eps: float,
-        normalize_advantages: bool,
-        entropy_coefficient: float,
+        cfg: PPOConfig,
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         assert data.advantages is not None
         key, dropout_key = jax.random.split(key)
 
-        if normalize_advantages:
+        if cfg.normalize_advantages:
             advantages = (data.advantages - data.advantages.mean(axis=0, keepdims=True)) / (
                 data.advantages.std(axis=0, keepdims=True) + 1e-8
             )
@@ -310,17 +339,17 @@ class ContinualPPOTrainer(abc.ABC):
 
             # For logs
             approx_kl = jax.lax.stop_gradient(((ratio - 1) - log_ratio).mean())
-            clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > clip_eps).mean())
+            clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > cfg.clip_eps).mean())
 
             pg_loss1 = -advantages * ratio  # pyright: ignore[reportOptionalOperand]
             pg_loss2 = -advantages * jnp.clip(  # pyright: ignore[reportOptionalOperand]
-                ratio, 1 - clip_eps, 1 + clip_eps
+                ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps
             )
             pg_loss = jnp.maximum(pg_loss1, pg_loss2).mean()
 
             entropy_loss = action_dist.entropy().mean()
 
-            return pg_loss - entropy_coefficient * entropy_loss, (
+            return pg_loss - cfg.entropy_coefficient * entropy_loss, (
                 {
                     "metrics/entropy_loss": entropy_loss,
                     "metrics/policy_loss": pg_loss,
@@ -377,15 +406,13 @@ class ContinualPPOTrainer(abc.ABC):
     @partial(
         jax.jit,
         donate_argnames=("vf", "key"),
-        static_argnames=("clip_vf_loss", "clip_eps", "vf_coefficient"),
+        static_argnames=("cfg"),
     )
     def update_value_function(
         vf: TrainState,
         data: Rollout,
         key: PRNGKeyArray,
-        clip_vf_loss: bool,
-        clip_eps: float,
-        vf_coefficient: float,
+        cfg: PPOConfig,
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         key, dropout_key = jax.random.split(key)
 
@@ -402,17 +429,17 @@ class ContinualPPOTrainer(abc.ABC):
             chex.assert_equal_shape((new_values, data.returns))
             assert data.values is not None and data.returns is not None
 
-            if clip_vf_loss:
+            if cfg.clip_vf_loss:
                 vf_loss_unclipped = (new_values - data.returns) ** 2
                 v_clipped = data.values + jnp.clip(
-                    new_values - data.values, -clip_eps, clip_eps
+                    new_values - data.values, -cfg.clip_eps, cfg.clip_eps
                 )
                 vf_loss_clipped = (v_clipped - data.returns) ** 2
                 vf_loss = 0.5 * jnp.maximum(vf_loss_unclipped, vf_loss_clipped).mean()
             else:
                 vf_loss = 0.5 * ((new_values - data.returns) ** 2).mean()
 
-            return vf_coefficient * vf_loss, (
+            return cfg.vf_coefficient * vf_loss, (
                 {
                     "metrics/vf_loss": vf_loss,
                     "metrics/values": new_values.mean(),
@@ -461,3 +488,82 @@ class ContinualPPOTrainer(abc.ABC):
                 **prefix_dict("nn/vf_srank", srank_logs),
             },
         )
+
+    def update(
+        self,
+        data: Rollout,
+        dones: Float[npt.NDArray, "task 1"],
+        next_obs: Float[Observation, " task"] | None = None,
+    ) -> LogDict:
+        last_values = None
+        if next_obs is not None:
+            self.key, last_values = self._get_value(self.vf, self.key, next_obs)
+
+        data = compute_gae(data, self.cfg.gamma, self.cfg.gae_lambda, last_values, dones)
+
+        assert data.advantages is not None and data.returns is not None
+        assert data.values is not None and data.log_probs is not None
+        diagnostic_logs = prefix_dict(
+            "data",
+            {
+                **get_logs("advantages", data.advantages),
+                **get_logs("returns", data.returns),
+                **get_logs("values", data.values),
+                **get_logs("rewards", data.rewards),
+                **get_logs(
+                    "num_episodes", data.episode_starts.sum(axis=1), hist=False, std=False
+                ),
+                "approx_entropy": np.mean(-data.log_probs),
+            },
+        )
+
+        self.key, minibatch_iterator_key = jax.random.split(self.key)
+        seed = jax.random.randint(
+            minibatch_iterator_key, (), minval=0, maxval=jnp.iinfo(jnp.int32).max
+        ).item()
+        minibatch_iterator = to_minibatch_iterator(
+            data, self.cfg.num_gradient_steps, int(seed)
+        )
+
+        update_logs = []
+        final_logs = {}
+        keep_training = True
+        for epoch in range(self.cfg.num_epochs):
+            for step in range(self.cfg.num_gradient_steps):
+                minibatch_rollout = next(minibatch_iterator)
+                self.policy, self.key, policy_logs = self.update_policy(
+                    self.policy, minibatch_rollout, self.key, self.cfg
+                )
+                self.vf, self.key, vf_logs = self.update_value_function(
+                    self.vf, minibatch_rollout, self.key, self.cfg
+                )
+
+                update_logs.append(policy_logs | vf_logs)
+
+                if epoch == 0 and step == 0:  # Initial KL and Loss
+                    final_logs["metrics/kl_before"] = policy_logs["metrics/approx_kl"]
+                    final_logs["metrics/policy_loss_before"] = policy_logs[
+                        "metrics/policy_loss"
+                    ]
+                    final_logs["metrics/vf_loss_before"] = vf_logs["metrics/vf_loss"]
+
+                if (
+                    self.cfg.target_kl
+                    and policy_logs["metrics/approx_kl"] > 1.5 * self.cfg.target_kl
+                ):
+                    print(
+                        f"Stopped early at KL {policy_logs['metrics/approx_kl']}, (epoch: {epoch}, steps: {step})"
+                    )
+                    keep_training = False
+                    break
+
+            if not keep_training:
+                break
+
+        # Finalize logs
+        final_logs["metrics/explained_variance"] = explained_variance(
+            data.values.reshape(-1), data.returns.reshape(-1)
+        )
+        final_logs.update(accumulate_metrics(update_logs))
+
+        return diagnostic_logs | final_logs

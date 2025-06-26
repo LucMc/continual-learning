@@ -121,3 +121,58 @@ class RolloutBuffer:
             self.log_probs,
             self.values,
         )
+
+
+def compute_gae(
+    rollouts: Rollout,
+    gamma: float,
+    gae_lambda: float,
+    last_values: Float[npt.NDArray, " task"] | None,
+    dones: Float[npt.NDArray, " task"],
+) -> Rollout:
+    # NOTE: dones is a very misleading name but it goes back to OpenAI's original PPO code
+    # really, dones indicates whether *the previous timstep* was terminal.
+
+    assert rollouts.values is not None
+
+    if last_values is not None:
+        last_values = last_values.reshape(-1, 1)
+    else:
+        if np.all(dones == 1.0):
+            last_values = np.zeros_like(rollouts.values[0])
+        else:
+            raise ValueError(
+                "Must provide final value estimates if the final timestep is not terminal for all envs."
+            )
+    dones = dones.reshape(-1, 1)
+
+    advantages = np.zeros_like(rollouts.rewards)
+
+    # Adapted from https://github.com/openai/baselines/blob/master/baselines/ppo2/runner.py
+    # Renamed dones -> episode_starts because the former is misleading
+    last_gae_lamda = 0
+    num_rollout_steps = rollouts.observations.shape[0]
+    assert last_values is not None
+
+    for timestep in reversed(range(num_rollout_steps)):
+        if timestep == num_rollout_steps - 1:
+            next_nonterminal = 1.0 - dones
+            next_values = last_values
+        else:
+            next_nonterminal = 1.0 - rollouts.episode_starts[timestep + 1]
+            next_values = rollouts.values[timestep + 1]
+        delta = (
+            rollouts.rewards[timestep]
+            + next_nonterminal * gamma * next_values
+            - rollouts.values[timestep]
+        )
+        advantages[timestep] = last_gae_lamda = (
+            delta + next_nonterminal * gamma * gae_lambda * last_gae_lamda
+        )
+
+    returns = advantages + rollouts.values
+
+    return rollouts._replace(
+        returns=returns,
+        advantages=advantages,
+    )
