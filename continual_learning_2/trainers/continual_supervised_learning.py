@@ -67,6 +67,7 @@ class CSLTrainerBase(abc.ABC):
                 "model": model_config,
                 "optimizer": optim_cfg,
                 "dataset": data_cfg,
+                "training": train_cfg,
             },
         )
         self.dataset = get_dataset(data_cfg)
@@ -102,7 +103,9 @@ class CSLTrainerBase(abc.ABC):
                         ocp_mgrs.LatestN(n=1),
                         ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
                         ocp_mgrs.BestN(  # Top 3
-                            n=3, get_metric_fn=lambda x: x["metrics/test_accuracy"]
+                            n=3,
+                            get_metric_fn=lambda x: x["metrics/test_accuracy"],
+                            reverse=True,
                         ),
                     ]
                 ),
@@ -173,7 +176,8 @@ class CSLTrainerBase(abc.ABC):
 
                 if step % self.logger.cfg.interval == 0:
                     self.logger.push(self.total_steps)
-                    self.save(dataloader=task, metrics=metrics)
+
+                self.save(dataloader=task, metrics=metrics)
 
                 self.total_steps += 1
 
@@ -219,7 +223,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         activations_flat = {
             k: v[0]  # pyright: ignore[reportIndexIssue]
             for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }  # pyright: ignore[reportIndexIssue]
+        }
         dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
@@ -227,7 +231,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         preactivations_flat = {
             k: v[0]  # pyright: ignore[reportIndexIssue]
             for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }  # pyright: ignore[reportIndexIssue]
+        }
         linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
@@ -333,7 +337,9 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
     @override
     def train(self):
-        total_steps = 0
+        if self.train_cfg.resume:
+            self.load(step=self.train_cfg.resume_from_step)
+
         for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
@@ -343,22 +349,25 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
                 self.logger.accumulate(logs)
 
                 if step % self.logger.cfg.interval == 0:
-                    self.logger.push(total_steps)
+                    self.logger.push(self.total_steps)
 
+                metrics = None
                 if (
                     self.logger.cfg.eval_during_training
                     and step % self.logger.cfg.eval_interval == 0
                 ):
-                    logs = self.dataset.evaluate(self.network, forgetting=False)
-                    self.logger.log(logs, step=total_steps)
+                    metrics = self.dataset.evaluate(self.network, forgetting=False)
+                    self.logger.log(metrics, step=self.total_steps)
 
-                total_steps += 1
+                self.save(dataloader=task, metrics=metrics)
+                self.total_steps += 1
+
+            self.logger.push(self.total_steps)  # Flush logger
 
             logs = self.dataset.evaluate(
                 self.network, forgetting=self.logger.cfg.catastrophic_forgetting
             )
-            self.logger.push(total_steps)  # Flush logger
-            self.logger.log(logs, step=total_steps)
+            self.logger.log(logs, step=self.total_steps)
 
             # NOTE: this is the difference to the base training loop
             # we reset the last layer of the network

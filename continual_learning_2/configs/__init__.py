@@ -1,4 +1,5 @@
 from .dataset import DatasetConfig
+from .envs import EnvConfig
 from .logging import LoggingConfig
 from .models import MLPConfig
 from .optim import AdamConfig, OptimizerConfig
@@ -11,4 +12,5 @@ __all__ = [
     "LoggingConfig",
     "AdamConfig",
     "TrainingConfig",
+    "EnvConfig",
 ]

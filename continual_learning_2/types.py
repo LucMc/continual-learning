@@ -6,7 +6,7 @@ import flax.struct
 import jax
 import numpy as np
 import numpy.typing as npt
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float, Int, PyTree
 
 from continual_learning_2.utils.nn import Identity
 
@@ -14,6 +14,12 @@ Action = Float[np.ndarray, "... action_dim"]
 Value = Float[np.ndarray, "... 1"]
 LogProb = Float[np.ndarray, "... 1"]
 Observation = Float[np.ndarray, "... obs_dim"]
+Reward = Float[np.ndarray, "... 1"]
+Done = Bool[np.ndarray, "... 1"]
+EpisodeStarted = Bool[np.ndarray, "... 1"]
+EpisodeLengths = Int[np.ndarray, "... 1"]
+EpisodeReturns = Float[np.ndarray, "... 1"]
+EnvState = PyTree
 type LogDict = dict[str, float | Float[Array, ""] | Histogram]
 type Input = Float[np.ndarray | Array, " ... *input_dim"]
 type Label = Float[np.ndarray, " ... num_classes"]
@@ -68,18 +74,15 @@ class StdType(enum.Enum):
 
 class Rollout(NamedTuple):
     # Standard timestep data
-    observations: Float[Observation, "timestep task"]
-    actions: Float[Action, "timestep task"]
-    rewards: Float[np.ndarray, "timestep task 1"]
-    dones: Float[np.ndarray, "timestep task 1"]
+    observations: Float[Observation, "timestep env"]
+    actions: Float[Action, "timestep env"]
+    rewards: Float[np.ndarray, "timestep env 1"]
+    episode_starts: Float[np.ndarray, "timestep env 1"]
 
     # Auxiliary policy outputs
-    log_probs: Float[LogProb, "timestep task"] | None = None
-    means: Float[Action, "timestep task"] | None = None
-    stds: Float[Action, "timestep task"] | None = None
-    values: Float[np.ndarray, "timestep task 1"] | None = None
+    log_probs: Float[LogProb, "timestep env"] | None = None
+    values: Float[np.ndarray, "timestep env 1"] | None = None
 
     # Computed statistics about observed rewards
-    returns: Float[np.ndarray, "timestep task 1"] | None = None
-    advantages: Float[np.ndarray, "timestep task 1"] | None = None
-    valids: Float[np.ndarray, "episode timestep 1"] | None = None
+    returns: Float[np.ndarray, "timestep env 1"] | None = None
+    advantages: Float[np.ndarray, "timestep env 1"] | None = None
