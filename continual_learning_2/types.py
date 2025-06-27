@@ -10,18 +10,21 @@ from jaxtyping import Array, Bool, Float, Int, PyTree
 
 from continual_learning_2.utils.nn import Identity
 
-Action = Float[np.ndarray, "... action_dim"]
-Value = Float[np.ndarray, "... 1"]
-LogProb = Float[np.ndarray, "... 1"]
-Observation = Float[np.ndarray, "... obs_dim"]
-Reward = Float[np.ndarray, "... 1"]
-Done = Bool[np.ndarray, "... 1"]
-EpisodeStarted = Bool[np.ndarray, "... 1"]
-EpisodeLengths = Int[np.ndarray, "... 1"]
-EpisodeReturns = Float[np.ndarray, "... 1"]
+# RL
+Action = Float[np.ndarray | Array, "... action_dim"]
+Value = Float[np.ndarray | Array, "... 1"]
+LogProb = Float[np.ndarray | Array, "... 1"]
+Observation = Float[np.ndarray | Array, "... obs_dim"]
+Reward = Float[np.ndarray | Array, "... 1"]
+Done = Bool[np.ndarray | Array, "... 1"]
+EpisodeStarted = Bool[np.ndarray | Array, "... 1"]
+EpisodeLengths = Int[np.ndarray | Array, "... 1"]
+EpisodeReturns = Float[np.ndarray | Array, "... 1"]
 EnvState = PyTree
 type LogDict = dict[str, float | Float[Array, ""] | Histogram]
-type Input = Float[np.ndarray | Array, " ... *input_dim"]
+
+# Supervised Learning
+type Input = Float[np.ndarray, " ... *input_dim"]
 type Label = Float[np.ndarray, " ... num_classes"]
 type DatasetItem = tuple[Input, Label]
 

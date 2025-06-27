@@ -13,7 +13,6 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import numpy as np
-import numpy.typing as npt
 import orbax.checkpoint as ocp
 import orbax.checkpoint.checkpoint_managers as ocp_mgrs
 from flax.core import DenyList, FrozenDict
