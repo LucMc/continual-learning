@@ -1,6 +1,8 @@
+import jax
+import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jaxtyping import Float
+from jaxtyping import Array, Float
 
 from continual_learning_2.envs.base import ContinualLearningEnv
 from continual_learning_2.types import Action, Observation, Rollout
@@ -127,52 +129,59 @@ def compute_gae(
     rollouts: Rollout,
     gamma: float,
     gae_lambda: float,
-    last_values: Float[npt.NDArray, " task"] | None,
-    dones: Float[npt.NDArray, " task"],
+    last_values: Float[Array, "... 1"],
 ) -> Rollout:
-    # NOTE: dones is a very misleading name but it goes back to OpenAI's original PPO code
-    # really, dones indicates whether *the previous timstep* was terminal.
-
     assert rollouts.values is not None
-
-    if last_values is not None:
-        last_values = last_values.reshape(-1, 1)
-    else:
-        if np.all(dones == 1.0):
-            last_values = np.zeros_like(rollouts.values[0])
-        else:
-            raise ValueError(
-                "Must provide final value estimates if the final timestep is not terminal for all envs."
-            )
-    dones = dones.reshape(-1, 1)
 
     advantages = np.zeros_like(rollouts.rewards)
 
     # Adapted from https://github.com/openai/baselines/blob/master/baselines/ppo2/runner.py
-    # Renamed dones -> episode_starts because the former is misleading
+    # Changed to actually use the done flag
     last_gae_lamda = 0
     num_rollout_steps = rollouts.observations.shape[0]
     assert last_values is not None
 
     for timestep in reversed(range(num_rollout_steps)):
-        if timestep == num_rollout_steps - 1:
-            next_nonterminal = 1.0 - dones
-            next_values = last_values
-        else:
-            next_nonterminal = 1.0 - rollouts.episode_starts[timestep + 1]
-            next_values = rollouts.values[timestep + 1]
+        next_nonterminal = 1.0 - rollouts.dones[timestep]
         delta = (
             rollouts.rewards[timestep]
-            + next_nonterminal * gamma * next_values
+            + next_nonterminal * gamma * last_values
             - rollouts.values[timestep]
         )
         advantages[timestep] = last_gae_lamda = (
             delta + next_nonterminal * gamma * gae_lambda * last_gae_lamda
         )
-
-    returns = advantages + rollouts.values
+        last_values = rollouts.values[timestep]
 
     return rollouts._replace(
-        returns=returns,
         advantages=advantages,
+        returns=advantages + rollouts.values,
+    )
+
+
+@jax.jit
+def compute_gae_scan(
+    rollouts: Rollout, last_values: Float[Array, "... 1"], gamma: float, gae_lambda: float
+) -> Rollout:
+    """Adapted from https://github.com/luchris429/purejaxrl/blob/main/purejaxrl/ppo.py#L142"""
+
+    def get_advantages(gae_and_next_value: tuple[jax.Array, jax.Array], rollout: Rollout):
+        assert rollout.values is not None
+
+        gae, next_value = gae_and_next_value
+        next_nonterminal = 1.0 - rollout.dones
+        delta = (rollout.rewards + next_nonterminal * gamma * next_value) - rollout.values
+        gae = delta + next_nonterminal * gamma * gae_lambda * gae
+        return (gae, rollout.values), gae
+
+    _, advantages = jax.lax.scan(
+        get_advantages,  # pyright: ignore[reportArgumentType]
+        (jnp.zeros_like(last_values), last_values),
+        rollouts,
+        reverse=True,
+        unroll=16,
+    )
+    return rollouts._replace(
+        advantages=advantages,
+        returns=advantages + rollouts.values,
     )

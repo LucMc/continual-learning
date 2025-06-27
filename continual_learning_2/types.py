@@ -77,7 +77,7 @@ class Rollout(NamedTuple):
     observations: Float[Observation, "timestep env"]
     actions: Float[Action, "timestep env"]
     rewards: Float[np.ndarray, "timestep env 1"]
-    episode_starts: Float[np.ndarray, "timestep env 1"]
+    dones: Float[np.ndarray, "timestep env 1"]
 
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None

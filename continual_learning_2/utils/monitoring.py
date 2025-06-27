@@ -2,6 +2,7 @@ from typing import Any, TypeVar
 
 import chex
 import flax.traverse_util
+import jax
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
@@ -195,6 +196,33 @@ def average_histograms(histograms: list[Histogram]) -> Histogram:
     )
 
 
+def average_histograms_concatenated(histograms: Histogram) -> Histogram:
+    assert histograms.np_histogram is not None
+    global_min = jnp.min(histograms.np_histogram[0])
+    global_max = jnp.max(histograms.np_histogram[0])
+    print("TODO: Check that edges.shape is something like [EPOCHS,BATCHES,64] or something")
+    breakpoint()
+    max_edges = histograms.np_histogram[1].shape[-1]
+
+    target_bin_edges = jnp.linspace(global_min, global_max, 2 * max_edges - 1)
+    target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
+
+    @jax.vmap
+    def resample(data):
+        counts, bin_edges = data
+        original_bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        resampled_counts = jnp.interp(target_bin_centers, original_bin_centers, counts)
+        return resampled_counts
+
+    resampled_counts = resample(histograms.np_histogram)
+    averaged_counts = jnp.average(resampled_counts, axis=0, weights=histograms.total_events)
+
+    return Histogram(
+        total_events=jnp.sum(histograms.total_events).item(),
+        np_histogram=(averaged_counts, target_bin_edges),
+    )
+
+
 MetricsType = TypeVar("MetricsType", bound=LogDict | dict[str, float])
 
 
@@ -205,6 +233,17 @@ def accumulate_metrics(metrics: list[MetricsType]) -> MetricsType:
             ret[k] = float(np.mean([m[k] for m in metrics]))  # pyright: ignore[reportArgumentType,reportCallIssue]
         else:
             ret[k] = average_histograms([m[k] for m in metrics])  # pyright: ignore[reportArgumentType,reportCallIssue]
+
+    return ret  # pyright: ignore[reportReturnType]
+
+
+def accumulate_concatenated_metrics(metrics: LogDict) -> LogDict:
+    ret = {}
+    for k in metrics:
+        if not isinstance(metrics[k], Histogram):
+            ret[k] = jnp.mean(metrics[k])  # pyright: ignore[reportArgumentType,reportCallIssue]
+        else:
+            ret[k] = average_histograms_concatenated(metrics[k])  # pyright: ignore[reportArgumentType,reportCallIssue]
 
     return ret  # pyright: ignore[reportReturnType]
 

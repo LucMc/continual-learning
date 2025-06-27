@@ -33,10 +33,10 @@ from continual_learning_2.envs import (
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import Action, LogDict, LogProb, Observation, Rollout, Value
-from continual_learning_2.utils.buffers import RolloutBuffer, compute_gae
+from continual_learning_2.utils.buffers import RolloutBuffer, compute_gae_scan
 from continual_learning_2.utils.monitoring import (
     Logger,
-    accumulate_metrics,
+    accumulate_concatenated_metrics,
     compute_srank,
     explained_variance,
     get_dormant_neuron_logs,
@@ -45,7 +45,7 @@ from continual_learning_2.utils.monitoring import (
     prefix_dict,
     pytree_histogram,
 )
-from continual_learning_2.utils.training import TrainState, to_minibatch_iterator
+from continual_learning_2.utils.training import TrainState
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -230,7 +230,7 @@ class ContinualPPOTrainer(abc.ABC):
 
                 if self.buffer.ready:
                     rollouts = self.buffer.get()
-                    logs = self.update(
+                    self.policy, self.vf, self.key, logs = self.update(
                         rollouts,
                         dones=timestep.terminated,
                         next_obs=np.where(
@@ -270,17 +270,15 @@ class ContinualPPOTrainer(abc.ABC):
 
     @staticmethod
     @jax.jit
-    def _sample_action(
-        key: PRNGKeyArray, policy: TrainState, observation: Observation
+    def _sample_action_deterministic(
+        policy: TrainState, observation: Observation
     ) -> tuple[PRNGKeyArray, Action]:
         dist: distrax.Distribution
-        key, action_key = jax.random.split(key)
         dist = policy.apply_fn(policy.params, observation, training=False)
-        return key, dist.sample(seed=action_key)  # pyright: ignore[reportReturnType]
+        return dist.mode()
 
     def eval_action(self, observation: Observation) -> Action:
-        self.key, action = self._sample_action(self.key, self.policy, observation)
-        return action
+        return self._sample_action_deterministic(self.policy, observation)
 
     @staticmethod
     @jax.jit
@@ -300,206 +298,20 @@ class ContinualPPOTrainer(abc.ABC):
         return action, log_prob, value
 
     @staticmethod
-    @partial(
-        jax.jit,
-        donate_argnames=("policy", "key"),
-        static_argnames=("cfg"),
-    )
-    def update_policy(
-        policy: TrainState,
-        data: Rollout,
+    @partial(jax.jit, static_argnames=("cfg"), donate_argnames=("policy", "vf", "key"))
+    def update(
         key: PRNGKeyArray,
-        cfg: PPOConfig,
-    ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
-        assert data.advantages is not None
-        key, dropout_key = jax.random.split(key)
-
-        if cfg.normalize_advantages:
-            advantages = (data.advantages - data.advantages.mean(axis=0, keepdims=True)) / (
-                data.advantages.std(axis=0, keepdims=True) + 1e-8
-            )
-        else:
-            advantages = data.advantages
-
-        def policy_loss(params: FrozenDict):
-            action_dist: distrax.Distribution
-            new_log_probs: Float[Array, " *batch"]
-            assert data.log_probs is not None
-
-            action_dist, intermediates = policy.apply_fn(
-                params,
-                data.observations,
-                training=True,
-                rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations"),
-            )
-            new_log_probs = action_dist.log_prob(data.actions)  # pyright: ignore[reportAssignmentType]
-            log_ratio = new_log_probs.reshape(data.log_probs.shape) - data.log_probs
-            ratio = jnp.exp(log_ratio)
-
-            # For logs
-            approx_kl = jax.lax.stop_gradient(((ratio - 1) - log_ratio).mean())
-            clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > cfg.clip_eps).mean())
-
-            pg_loss1 = -advantages * ratio  # pyright: ignore[reportOptionalOperand]
-            pg_loss2 = -advantages * jnp.clip(  # pyright: ignore[reportOptionalOperand]
-                ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps
-            )
-            pg_loss = jnp.maximum(pg_loss1, pg_loss2).mean()
-
-            entropy_loss = action_dist.entropy().mean()
-
-            return pg_loss - cfg.entropy_coefficient * entropy_loss, (
-                {
-                    "metrics/entropy_loss": entropy_loss,
-                    "metrics/policy_loss": pg_loss,
-                    "metrics/approx_kl": approx_kl,
-                    "metrics/clip_fracs": clip_fracs,
-                },
-                intermediates,
-            )
-
-        (_, (logs, intermediates)), policy_grads = jax.value_and_grad(
-            policy_loss, has_aux=True
-        )(policy.params)
-        policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
-        grads_hist_dict = pytree_histogram(policy_grads["params"])
-
-        activations = intermediates["activations"]
-        activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
-        srank_logs = jax.tree.map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
-
-        policy = policy.apply_gradients(grads=policy_grads)
-        policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
-        param_hist_dict = pytree_histogram(policy.params["params"])
-
-        return (
-            policy,
-            key,
-            logs
-            | {
-                "nn/policy_gradient_norm": jnp.linalg.norm(policy_grads_flat),
-                "nn/policy_parameter_norm": jnp.linalg.norm(policy_params_flat),
-                **prefix_dict("nn/policy_gradients", grads_hist_dict),
-                **prefix_dict("nn/policy_parameters", param_hist_dict),
-                **prefix_dict("nn/policy_activations", activations_hist_dict),
-                **prefix_dict("nn/policy_dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/policy_linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/policy_srank", srank_logs),
-                **prefix_dict("nn/policy_gradients", grads_hist_dict),
-            },
-        )
-
-    @staticmethod
-    @partial(
-        jax.jit,
-        donate_argnames=("vf", "key"),
-        static_argnames=("cfg"),
-    )
-    def update_value_function(
+        policy: TrainState,
         vf: TrainState,
         data: Rollout,
-        key: PRNGKeyArray,
+        next_obs: Float[Observation, " ..."],
         cfg: PPOConfig,
-    ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
-        key, dropout_key = jax.random.split(key)
-
-        def value_function_loss(params: FrozenDict):
-            new_values: Float[Array, "*batch 1"]
-            new_values, intermediates = vf.apply_fn(
-                params,
-                data.observations,
-                training=True,
-                rngs={"dropout": dropout_key},
-                mutable=["preactivations", "activations"],
-            )
-
-            chex.assert_equal_shape((new_values, data.returns))
-            assert data.values is not None and data.returns is not None
-
-            if cfg.clip_vf_loss:
-                vf_loss_unclipped = (new_values - data.returns) ** 2
-                v_clipped = data.values + jnp.clip(
-                    new_values - data.values, -cfg.clip_eps, cfg.clip_eps
-                )
-                vf_loss_clipped = (v_clipped - data.returns) ** 2
-                vf_loss = 0.5 * jnp.maximum(vf_loss_unclipped, vf_loss_clipped).mean()
-            else:
-                vf_loss = 0.5 * ((new_values - data.returns) ** 2).mean()
-
-            return cfg.vf_coefficient * vf_loss, (
-                {
-                    "metrics/vf_loss": vf_loss,
-                    "metrics/values": new_values.mean(),
-                },
-                intermediates,
-            )
-
-        (_, (logs, intermediates)), vf_grads = jax.value_and_grad(
-            value_function_loss, has_aux=True
-        )(vf.params, data)
-        vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
-        grads_hist_dict = pytree_histogram(vf_grads["params"])
-
-        activations = intermediates["activations"]
-        activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
-        srank_logs = jax.tree.map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
-
-        vf = vf.apply_gradients(grads=vf_grads)
-        vf_params_flat, _ = jax.flatten_util.ravel_pytree(vf.params)
-        param_hist_dict = pytree_histogram(vf.params["params"])
-
-        return (
-            vf,
-            key,
-            logs
-            | {
-                "nn/vf_gradient_norm": jnp.linalg.norm(vf_grads_flat),
-                "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
-                **prefix_dict("nn/vf_gradients", grads_hist_dict),
-                **prefix_dict("nn/vf_parameters", param_hist_dict),
-                **prefix_dict("nn/vf_activations", activations_hist_dict),
-                **prefix_dict("nn/vf_dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/vf_linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/vf_srank", srank_logs),
-            },
+    ) -> tuple[PRNGKeyArray, TrainState, TrainState, LogDict]:
+        key, last_values_key = jax.random.split(key)
+        last_values = vf.apply_fn(
+            vf.params, next_obs, training=True, rngs={"dropout": last_values_key}
         )
-
-    def update(
-        self,
-        data: Rollout,
-        dones: Float[npt.NDArray, "task 1"],
-        next_obs: Float[Observation, " task"] | None = None,
-    ) -> LogDict:
-        last_values = None
-        if next_obs is not None:
-            self.key, last_values = self._get_value(self.vf, self.key, next_obs)
-
-        data = compute_gae(data, self.cfg.gamma, self.cfg.gae_lambda, last_values, dones)
+        data = compute_gae_scan(data, last_values, cfg.gamma, cfg.gae_lambda)
 
         assert data.advantages is not None and data.returns is not None
         assert data.values is not None and data.log_probs is not None
@@ -510,60 +322,221 @@ class ContinualPPOTrainer(abc.ABC):
                 **get_logs("returns", data.returns),
                 **get_logs("values", data.values),
                 **get_logs("rewards", data.rewards),
-                **get_logs(
-                    "num_episodes", data.episode_starts.sum(axis=1), hist=False, std=False
-                ),
-                "approx_entropy": np.mean(-data.log_probs),
+                **get_logs("num_episodes", data.dones.sum(axis=1), hist=False, std=False),
+                "approx_entropy": -data.log_probs.mean(),
             },
         )
 
-        self.key, minibatch_iterator_key = jax.random.split(self.key)
-        seed = jax.random.randint(
-            minibatch_iterator_key, (), minval=0, maxval=jnp.iinfo(jnp.int32).max
-        ).item()
-        minibatch_iterator = to_minibatch_iterator(
-            data, self.cfg.num_gradient_steps, int(seed)
+        def update_policy(
+            policy: TrainState,
+            data: Rollout,
+            key: PRNGKeyArray,
+            cfg: PPOConfig,
+        ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
+            assert data.advantages is not None
+            key, dropout_key = jax.random.split(key)
+
+            if cfg.normalize_advantages:
+                advantages = (
+                    data.advantages - data.advantages.mean(axis=0, keepdims=True)
+                ) / (data.advantages.std(axis=0, keepdims=True) + 1e-8)
+            else:
+                advantages = data.advantages
+
+            def policy_loss(params: FrozenDict):
+                action_dist: distrax.Distribution
+                new_log_probs: Float[Array, " *batch"]
+                assert data.log_probs is not None
+
+                action_dist, intermediates = policy.apply_fn(
+                    params,
+                    data.observations,
+                    training=True,
+                    rngs={"dropout": dropout_key},
+                    mutable=("activations", "preactivations"),
+                )
+                new_log_probs = action_dist.log_prob(data.actions)  # pyright: ignore[reportAssignmentType]
+                log_ratio = new_log_probs.reshape(data.log_probs.shape) - data.log_probs
+                ratio = jnp.exp(log_ratio)
+
+                # For logs
+                approx_kl = jax.lax.stop_gradient(((ratio - 1) - log_ratio).mean())
+                clip_fracs = jax.lax.stop_gradient(
+                    (jnp.abs(ratio - 1.0) > cfg.clip_eps).mean()
+                )
+
+                pg_loss1 = -advantages * ratio  # pyright: ignore[reportOptionalOperand]
+                pg_loss2 = -advantages * jnp.clip(  # pyright: ignore[reportOptionalOperand]
+                    ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps
+                )
+                pg_loss = jnp.maximum(pg_loss1, pg_loss2).mean()
+
+                entropy_loss = action_dist.entropy().mean()
+
+                return pg_loss - cfg.entropy_coefficient * entropy_loss, (
+                    {
+                        "metrics/entropy_loss": entropy_loss,
+                        "metrics/policy_loss": pg_loss,
+                        "metrics/approx_kl": approx_kl,
+                        "metrics/clip_fracs": clip_fracs,
+                    },
+                    intermediates,
+                )
+
+            (_, (logs, intermediates)), policy_grads = jax.value_and_grad(
+                policy_loss, has_aux=True
+            )(policy.params)
+            policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
+            grads_hist_dict = pytree_histogram(policy_grads["params"])
+
+            activations = intermediates["activations"]
+            activations_hist_dict = pytree_histogram(activations)
+            activations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+            }
+            dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
+            srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+            preactivations = intermediates["preactivations"]
+            preactivations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+            }
+            linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
+
+            policy = policy.apply_gradients(grads=policy_grads)
+            policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
+            param_hist_dict = pytree_histogram(policy.params["params"])
+
+            return (
+                policy,
+                key,
+                logs
+                | {
+                    "nn/policy_gradient_norm": jnp.linalg.norm(policy_grads_flat),
+                    "nn/policy_parameter_norm": jnp.linalg.norm(policy_params_flat),
+                    **prefix_dict("nn/policy_gradients", grads_hist_dict),
+                    **prefix_dict("nn/policy_parameters", param_hist_dict),
+                    **prefix_dict("nn/policy_activations", activations_hist_dict),
+                    **prefix_dict("nn/policy_dormant_neurons", dormant_neuron_logs),
+                    **prefix_dict("nn/policy_linearised_neurons", linearised_neuron_logs),
+                    **prefix_dict("nn/policy_srank", srank_logs),
+                    **prefix_dict("nn/policy_gradients", grads_hist_dict),
+                },
+            )
+
+        def update_value_function(
+            vf: TrainState,
+            data: Rollout,
+            key: PRNGKeyArray,
+            cfg: PPOConfig,
+        ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
+            key, dropout_key = jax.random.split(key)
+
+            def value_function_loss(params: FrozenDict):
+                new_values: Float[Array, "*batch 1"]
+                new_values, intermediates = vf.apply_fn(
+                    params,
+                    data.observations,
+                    training=True,
+                    rngs={"dropout": dropout_key},
+                    mutable=["preactivations", "activations"],
+                )
+
+                chex.assert_equal_shape((new_values, data.returns))
+                assert data.values is not None and data.returns is not None
+
+                vf_loss = 0.5 * ((new_values - data.returns) ** 2).mean()
+
+                return cfg.vf_coefficient * vf_loss, (
+                    {
+                        "metrics/vf_loss": vf_loss,
+                        "metrics/values": new_values.mean(),
+                    },
+                    intermediates,
+                )
+
+            (_, (logs, intermediates)), vf_grads = jax.value_and_grad(
+                value_function_loss, has_aux=True
+            )(vf.params, data)
+            vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
+            grads_hist_dict = pytree_histogram(vf_grads["params"])
+
+            activations = intermediates["activations"]
+            activations_hist_dict = pytree_histogram(activations)
+            activations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+            }
+            dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
+            srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+            preactivations = intermediates["preactivations"]
+            preactivations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+            }
+            linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
+
+            vf = vf.apply_gradients(grads=vf_grads)
+            vf_params_flat, _ = jax.flatten_util.ravel_pytree(vf.params)
+            param_hist_dict = pytree_histogram(vf.params["params"])
+
+            return (
+                vf,
+                key,
+                logs
+                | {
+                    "nn/vf_gradient_norm": jnp.linalg.norm(vf_grads_flat),
+                    "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
+                    **prefix_dict("nn/vf_gradients", grads_hist_dict),
+                    **prefix_dict("nn/vf_parameters", param_hist_dict),
+                    **prefix_dict("nn/vf_activations", activations_hist_dict),
+                    **prefix_dict("nn/vf_dormant_neurons", dormant_neuron_logs),
+                    **prefix_dict("nn/vf_linearised_neurons", linearised_neuron_logs),
+                    **prefix_dict("nn/vf_srank", srank_logs),
+                },
+            )
+
+        def train_minibatch(carry, minibatch: Rollout):
+            key, policy, vf = carry
+            policy, key, policy_logs = update_policy(policy, minibatch, key, cfg)
+            vf, key, vf_logs = update_value_function(vf, minibatch, key, cfg)
+            return (policy, vf, key), (policy_logs | vf_logs)
+
+        def train_epoch(carry, _):
+            policy, vf, key, data = carry
+
+            key, permutation_key = jax.random.split(key)
+            rollout_size = data.observations.shape[0] * data.observations.shape[1]
+
+            permutation = jax.random.permutation(permutation_key, rollout_size)
+            data = jax.tree.map(lambda x: x.reshape((rollout_size, *x.shape[2:])), data)
+            shuffled_data = jax.tree.map(lambda x: jnp.take(x, permutation, axis=0), data)
+
+            minibatches = jax.tree.map(
+                lambda x: x.reshape(cfg.num_gradient_steps, -1, *x.shape[1:]),
+                shuffled_data,
+            )
+
+            (policy, vf, key), logs = jax.lax.scan(
+                train_minibatch, (policy, vf, key), minibatches
+            )
+            return (policy, vf, key, data), logs
+
+        (policy, vf, key, _), logs = jax.lax.scan(
+            train_epoch,
+            (policy, vf, key, data),
+            None,
+            length=cfg.num_epochs,
         )
 
-        update_logs = []
-        final_logs = {}
-        keep_training = True
-        for epoch in range(self.cfg.num_epochs):
-            for step in range(self.cfg.num_gradient_steps):
-                minibatch_rollout = next(minibatch_iterator)
-                self.policy, self.key, policy_logs = self.update_policy(
-                    self.policy, minibatch_rollout, self.key, self.cfg
-                )
-                self.vf, self.key, vf_logs = self.update_value_function(
-                    self.vf, minibatch_rollout, self.key, self.cfg
-                )
-
-                update_logs.append(policy_logs | vf_logs)
-
-                if epoch == 0 and step == 0:  # Initial KL and Loss
-                    final_logs["metrics/kl_before"] = policy_logs["metrics/approx_kl"]
-                    final_logs["metrics/policy_loss_before"] = policy_logs[
-                        "metrics/policy_loss"
-                    ]
-                    final_logs["metrics/vf_loss_before"] = vf_logs["metrics/vf_loss"]
-
-                if (
-                    self.cfg.target_kl
-                    and policy_logs["metrics/approx_kl"] > 1.5 * self.cfg.target_kl
-                ):
-                    print(
-                        f"Stopped early at KL {policy_logs['metrics/approx_kl']}, (epoch: {epoch}, steps: {step})"
-                    )
-                    keep_training = False
-                    break
-
-            if not keep_training:
-                break
-
         # Finalize logs
+        final_logs = {}
         final_logs["metrics/explained_variance"] = explained_variance(
             data.values.reshape(-1), data.returns.reshape(-1)
         )
-        final_logs.update(accumulate_metrics(update_logs))
+        final_logs.update(accumulate_concatenated_metrics(logs))
 
-        return diagnostic_logs | final_logs
+        return key, policy, vf, diagnostic_logs | final_logs
