@@ -17,7 +17,7 @@ from continual_learning_2.envs.base import (
     JittableVectorEnv,
     Timestep,
 )
-from continual_learning_2.types import EnvState
+from continual_learning_2.types import Agent, EnvState
 
 
 class SlipperyAnt(Ant):
@@ -233,3 +233,17 @@ class ContinualAnt(JittableContinualLearningEnv):
     @property
     def num_envs(self) -> int:
         return self.num_envs
+
+    def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float] | None:
+        del agent, forgetting
+        return None
+
+    @property
+    def observation_spec(self) -> jax.ShapeDtypeStruct:
+        env = SlipperyAnt(friction=self.frictions[0])
+        return jax.ShapeDtypeStruct((1, env.observation_size), jnp.float32)
+
+    @property
+    def action_dim(self) -> int:
+        env = SlipperyAnt(friction=self.frictions[0])
+        return env.action_size
