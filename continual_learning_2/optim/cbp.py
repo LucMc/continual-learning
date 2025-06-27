@@ -49,14 +49,7 @@ class CBPOptimState:
     mean_feature_act: Float[Array, ""]
     ages: Array
     accumulated_features_to_replace: int
-    # rng: PRNGKeyArray
-
-    step_size: float = 0.001
-    replacement_rate: float = 0.5
-    decay_rate: float = 0.9
-    maturity_threshold: int = 10
-    accumulate: bool = False
-    logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0})
+    logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0, "avg_util": 0, "std_util": 0})
 
 
 # -------------- CBP Weight reset ---------------
@@ -82,51 +75,11 @@ def get_reset_mask(
 ) -> Bool[Array, "#neurons"]:
     maturity_mask = ages > maturity_threshold  # get nodes over maturity threshold Arr[Bool]
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
-    k_masked_utility = utils.get_bottom_k_mask(updated_utility, n_to_replace)  # bool
 
-    return k_masked_utility & maturity_mask
+    masked_utility = jnp.where(maturity_mask, updated_utility, jnp.zeros_like(updated_utility))
+    k_masked_utility = utils.get_bottom_k_mask(masked_utility, n_to_replace)  # bool
 
-
-@jax.jit
-def get_out_weights_mag(weights):
-    w_mags = jax.tree.map(
-        lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
-    )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of out_layer but should be eqivalent
-
-    keys = list(w_mags.keys())
-    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
-
-
-def process_params(params: PyTree):
-    # TODO: Make out_w_mag optional so can be used by redo too
-    out_layer_name = "output"
-
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
-
-    for layer_name in params.keys():
-        # For layer norm etc
-        if type(params[layer_name]) != dict:
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        elif not ("kernel" in params[layer_name].keys()):
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        bias[layer_name] = params[layer_name]["bias"]
-        weights[layer_name] = params[layer_name]["kernel"]
-
-    out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, out_w_mag, excluded
+    return k_masked_utility
 
 
 # -------------- Main CBP Optimiser body ---------------
@@ -137,7 +90,7 @@ def cbp(
     accumulate: bool = False,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
-        weights, bias, _, _ = process_params(params["params"])
+        weights, bias, _ = utils.process_params(params["params"])
 
         del params  # Delete params?
 
@@ -164,7 +117,7 @@ def cbp(
             # assert features, "Features must be provided in update"
             # _features = features["activations"][0]
 
-            weights, bias, out_w_mag, excluded = process_params(params["params"])
+            weights, bias, out_w_mag, excluded = utils.process_params_with_outmag(params["params"])
 
             # new_rng, util_key = random.split(rng)
             # key_tree = utils.gen_key_tree(util_key, weights)
@@ -175,7 +128,7 @@ def cbp(
                 in_axes=(None, None, 0),
             )
 
-            # Flatten all the structures (For unmatched trees)
+            # Flatten all the structures (for unmatched trees)
             out_w_mag_leaves, _ = jax.tree.flatten(out_w_mag)
             utilities_leaves, utilities_tree_def = jax.tree.flatten(state.utilities)
             feature_leaves = [f[0] for f in jax.tree.leaves(features)]
@@ -188,7 +141,6 @@ def cbp(
 
             # Reconstruct the tree
             _utility_batch = jax.tree.unflatten(utilities_tree_def, utility_batch_leaves)
-
             _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
 
             reset_mask = jax.tree.map(
@@ -210,13 +162,13 @@ def cbp(
             _bias = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
                 reset_mask,
-                bias,
+                bias
             )
 
             # Update ages
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=state.maturity_threshold+1)
+                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold+1)
                 ),  # Clip to stop huge ages
                 state.ages,
                 reset_mask,
@@ -226,6 +178,8 @@ def cbp(
             _logs = {k: 0 for k in state.logs}
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
+            avg_util = jax.tree.map(lambda v: v.mean(), _utility)
+            std_util = jax.tree.map(lambda v: v.std(), _utility)
 
             # Logging
             for layer_name in bias.keys():
@@ -234,6 +188,9 @@ def cbp(
                     "bias": _bias[layer_name],
                 }
                 _logs["avg_age"] += avg_ages[layer_name]
+                _logs["avg_util"] += avg_util[layer_name]
+                _logs["std_util"] += std_util[layer_name]
+
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(

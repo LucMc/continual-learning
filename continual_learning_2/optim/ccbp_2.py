@@ -28,12 +28,8 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.utils.optim as utils
-from continual_learning.optim.cbp import (
-    get_out_weights_mag,
-    process_params,
-    CBPOptimState,
-)
+import continual_learning_2.utils.optim as utils
+from continual_learning_2.optim.cbp import CBPOptimState
 
 """
 TODO: Test get_reset_mask gets utilities for marture nodes, and sets 1 for immature nodes. This means,
@@ -44,10 +40,9 @@ Does moving out towards 0 and in towards initial actually help or should both be
 """
 
 # -------------- CCBP Weight reset ---------------
-def reset_weights(
+def continuous_weight_reset(
     reset_mask: PyTree[Float[Array, "#neurons"]], 
     layer_w: PyTree[Float[Array, "..."]],
-    key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
     replacement_rate: Float[Array, ""] = 0.01,
@@ -116,10 +111,9 @@ def ccbp2(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
-    rng: Array = random.PRNGKey(0),
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
-        weights, bias, _, _ = process_params(params["params"])
+        weights, bias, _ = utils.process_params(params["params"])
 
         del params
 
@@ -129,10 +123,6 @@ def ccbp2(
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             accumulated_features_to_replace=0,
-            replacement_rate=replacement_rate,
-            decay_rate=decay_rate,
-            maturity_threshold=maturity_threshold,
-            rng=rng,
             **kwargs,
         )
 
@@ -147,45 +137,53 @@ def ccbp2(
         def _ccbp2(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            assert features, "Features must be provided in update"
-            _features = features["activations"][0]
+            # assert features, "Features must be provided in update"
+            # _features = features["activations"][0]
 
-            weights, bias, out_w_mag, excluded = process_params(params["params"])
-
-            new_rng, util_key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(util_key, weights)
+            weights, bias, out_w_mag, excluded = utils.process_params_with_outmag(params["params"])
 
             # vmap utility calculation over batch
             batched_util_calculation = jax.vmap(
-                partial(get_updated_utility, decay_rate=state.decay_rate),
+                partial(get_updated_utility, decay_rate=decay_rate),
                 in_axes=(None, None, 0),
             )
-            _utility_batch = jax.tree.map(
-                batched_util_calculation, out_w_mag, state.utilities, _features
-            )
+            # Flatten all the structures (for unmatched features/params pytrees)
+            out_w_mag_leaves, _ = jax.tree.flatten(out_w_mag)
+            utilities_leaves, utilities_tree_def = jax.tree.flatten(state.utilities)
+            features_leaves = [f[0] for f in jax.tree.leaves(features)]
+
+            # Apply the calculation to the leaves
+            utility_batch_leaves = [
+                batched_util_calculation(w, u, f)
+                for w, u, f in zip(out_w_mag_leaves, utilities_leaves, features_leaves)
+            ]
+            # Reconstruct the tree
+            _utility_batch = jax.tree.unflatten(utilities_tree_def, utility_batch_leaves)
             _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
 
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
-                    maturity_threshold=state.maturity_threshold,
-                    replacement_rate=state.replacement_rate,
+                    maturity_threshold=maturity_threshold,
+                    replacement_rate=replacement_rate,
                 ),
                 _utility,
                 state.ages,
             )
 
             # reset weights given mask
-            _weights, reset_logs = reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights, _utility, state.replacement_rate
+            _weights, reset_logs = continuous_weight_reset( 
+                reset_mask, weights, state.initial_weights, _utility, replacement_rate
             )
 
             # reset bias given mask
-            _bias = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
-                reset_mask,
-                bias,
-            )
+            # Expermiment: reset bias/continuous reset bias/ leave bias alone
+            # _bias = jax.tree.map(
+            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
+            #     reset_mask,
+            #     bias,
+            # )
+            _bias = bias
 
             # Update ages
             _ages = jax.tree.map(
@@ -200,19 +198,24 @@ def ccbp2(
             _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
+            avg_util = jax.tree.map(lambda v: v.mean(), _utility)
+            std_util = jax.tree.map(lambda v: v.std(), _utility)
 
+            # Logging
             for layer_name in bias.keys():
                 new_params[layer_name] = {
                     "kernel": _weights[layer_name],
                     "bias": _bias[layer_name],
                 }
                 _logs["avg_age"] += avg_ages[layer_name]
+                _logs["avg_util"] += avg_util[layer_name]
+                _logs["std_util"] += std_util[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                ages=_ages, rng=new_rng, logs=FrozenDict(_logs), utilities=_utility
+                ages=_ages, logs=FrozenDict(_logs), utilities=_utility
             )
-            new_params.update(excluded)  # TODO
+            new_params.update(excluded)
 
             return {"params": new_params}, new_state, tx_state
 

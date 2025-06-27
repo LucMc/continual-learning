@@ -26,12 +26,8 @@ from copy import deepcopy
 from functools import partial
 from dataclasses import field
 
-import continual_learning.utils.optim as utils
-from continual_learning.optim.cbp import (
-    get_out_weights_mag,
-    process_params,
-    CBPOptimState,
-)
+import continual_learning_2.utils.optim as utils
+from continual_learning_2.optim.cbp import CBPOptimState
 
 # TODO: update momentums proportional to utility too? Like the reset methods do?
 
@@ -39,7 +35,7 @@ from continual_learning.optim.cbp import (
 def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
-    key_tree: PyTree[PRNGKeyArray],
+    # key_tree: PyTree[PRNGKeyArray],
     initial_weights: PyTree[Float[Array, "..."]],
     replacement_rate: Float[Array, ""] = 0.01,
 ):
@@ -100,10 +96,9 @@ def ccbp(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
-    rng: Array = random.PRNGKey(0),
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
-        weights, bias, _, _ = process_params(params["params"])
+        weights, bias, _ = utils.process_params(params["params"])
 
         del params  # Delete params?
 
@@ -113,10 +108,6 @@ def ccbp(
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
             accumulated_features_to_replace=0,
-            replacement_rate=replacement_rate,
-            decay_rate=decay_rate,
-            maturity_threshold=maturity_threshold,
-            rng=rng,
             **kwargs,
         )
 
@@ -131,25 +122,24 @@ def ccbp(
         def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            weights, bias, out_w_mag, excluded = process_params(params["params"])
+            weights, bias, out_w_mag, excluded = utils.process_params_with_outmag(params["params"])
 
-            new_rng, util_key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(util_key, weights)
+            # key_tree = utils.gen_key_tree(util_key, weights)
 
             reset_mask = jax.tree.map(
                 partial(
                     get_reset_mask,
-                    maturity_threshold=state.maturity_threshold,
-                    replacement_rate=state.replacement_rate,
+                    maturity_threshold=maturity_threshold,
+                    replacement_rate=replacement_rate,
                 ),
                 state.ages,
             )
 
             # reset weights given mask
             _weights, reset_logs = reset_weights(
-                reset_mask, weights, key_tree, state.initial_weights, state.replacement_rate
+                reset_mask, weights, state.initial_weights, replacement_rate
             )
-            _weights = weights
+            # _weights = weights
 
             # reset bias given mask
             _bias = jax.tree.map(
@@ -157,7 +147,7 @@ def ccbp(
                 reset_mask,
                 bias,
             )
-            _bias = bias
+            # _bias = bias
 
             # Update ages
             _ages = jax.tree.map(
@@ -182,7 +172,7 @@ def ccbp(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                ages=_ages, rng=new_rng, logs=FrozenDict(_logs)
+                ages=_ages, logs=FrozenDict(_logs)
             )
             new_params.update(excluded)  # TODO
 

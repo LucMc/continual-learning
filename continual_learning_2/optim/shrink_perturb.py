@@ -7,7 +7,6 @@ import jax.random as random
 import optax
 from chex import dataclass
 import continual_learning_2.utils.optim as utils
-from .redo import process_params
 
 @dataclass
 class ShrinkPerturbOptimState:
@@ -37,7 +36,7 @@ def shrink_perturb(
             return params, new_state, tx_state
 
         def apply_shrink_perturb(params):
-            weights, bias, excluded = process_params(params["params"])
+            weights, bias, excluded = utils.process_params(params["params"])
             new_rng, noise_rng = random.split(state.rng, num=2)
             noise_key_tree = utils.gen_key_tree(noise_rng, weights)
 

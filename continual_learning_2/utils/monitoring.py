@@ -217,6 +217,7 @@ class Logger:
             entity=self.cfg.wandb_entity,
             config=run_config,
             mode=self.cfg.wandb_mode,
+            group=self.cfg.group,
             resume="allow",
         )
 

@@ -4,7 +4,6 @@ from functools import partial
 from sys import prefix
 from typing import override
 
-from continual_learning_2.configs.optim import ResetMethodConfig
 from flax.core import DenyList
 import jax
 import jax.flatten_util
@@ -74,7 +73,8 @@ class CSLTrainerBase(abc.ABC):
         )
 
     @staticmethod
-    @partial(jax.jit, donate_argnames=("network_state", "key"))
+    @jax.jit
+    # @partial(jax.jit, donate_argnames=("network_state", "key"))
     def update_network(
         network_state: TrainState, key: PRNGKeyArray, x: jax.Array, y: jax.Array
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
@@ -111,7 +111,8 @@ class CSLTrainerBase(abc.ABC):
 
 class ClassificationCSLTrainer(CSLTrainerBase):
     @staticmethod
-    @partial(jax.jit, donate_argnames=("network_state", "key"))
+    # @partial(jax.jit, donate_argnames=("network_state", "key"))
+    @jax.jit
     def update_network(
         network_state: TrainState,
         key: PRNGKeyArray,
@@ -147,6 +148,8 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
+        optim_logs = network_state.opt_state["reset_method"].logs
+
         return (
             network_state,
             key,
@@ -161,13 +164,15 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
+                **prefix_dict("optimizer", optim_logs)
             },
         )
 
 
 class MaskedClassificationCSLTrainer(CSLTrainerBase):
     @staticmethod
-    @partial(jax.jit, donate_argnames=("network_state", "key"))
+    # @partial(jax.jit, donate_argnames=("network_state", "key"))
+    @jax.jit
     def update_network(
         network_state: TrainState,
         key: PRNGKeyArray,
@@ -269,10 +274,23 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
-    optim_conf = RedoConfig(
-            tx=AdamConfig(learning_rate=1e-3)
-        )
+    # optim_conf = ShrinkAndPerterbConfig(
+    #         tx=AdamConfig(learning_rate=1e-3)
+    #     )
+    # optim_conf = RedoConfig(
+    #         update_frequency=20,
+    #         score_threshold=0.05,
+    #         tx=AdamConfig(learning_rate=1e-3)
+    #     )
 
+    optim_conf = CBPConfig(
+            tx=AdamConfig(learning_rate=1e-3),
+            decay_rate=0.9,
+            replacement_rate=0.5
+        )
+    # optim_conf = AdamConfig(learning_rate=1e-3)
+
+    # Add validation to say what the available options are for dataset etc
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=MLPConfig(output_size=10),
@@ -281,8 +299,8 @@ if __name__ == "__main__":
             name="split_mnist",
             seed=SEED,
             batch_size=64,
-            num_tasks=5,
-            num_epochs_per_task=1,
+            num_tasks=10,
+            num_epochs_per_task=20,
             num_workers=0#(os.cpu_count() or 0) // 2,
         ),
         # logging_config=LoggingConfig(
@@ -294,13 +312,12 @@ if __name__ == "__main__":
         #     eval_during_training=False,
 
         logging_config=LoggingConfig(
-            run_name="split_mnist_debug_1",
+            run_name=optim_conf.__class__.__name__,
             wandb_entity="lucmc",
             wandb_project="split_mnist",
-            wandb_mode="disabled",
+            wandb_mode="online",
             interval=100,
-            eval_during_training=False,
-
+            eval_during_training=True,
         ),
     )
 

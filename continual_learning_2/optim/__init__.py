@@ -4,6 +4,8 @@ import flax.linen as nn
 from continual_learning_2.configs.optim import (
     AdamConfig,
     CBPConfig,
+    CCBPConfig,
+    CCBP2Config,
     RedoConfig,
     ShrinkAndPerterbConfig,
     OptimizerConfig,

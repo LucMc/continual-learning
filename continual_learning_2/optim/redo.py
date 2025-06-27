@@ -32,8 +32,8 @@ This file implements ReDo:
 https://github.com/google/dopamine/blob/master/dopamine/labs/redo/weight_recyclers.py
 as an optax optimizer
 """
-# TODO: Remove RNG it doesn't need it at all
 
+# TODO: Features are bundled with params and don't need to passed in explicitly!
 
 @dataclass
 class RedoOptimState:
@@ -63,42 +63,6 @@ def get_score(  # averages over a batch
     return score
 
 
-# -------------- lowest utility mask ---------------
-
-
-def process_params(params: PyTree):
-    out_layer_name = "output"
-    # Removed deep copy of params however be careful as changes to `weights` and `bias` are
-
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
-
-    for layer_name in params.keys():
-        # For layer norm etc
-        if type(params[layer_name]) != dict:
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        elif not ("kernel" in params[layer_name].keys()):
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        bias[layer_name] = params[layer_name]["bias"]
-        weights[layer_name] = params[layer_name]["kernel"]
-
-    # out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, excluded
-
-
 # -------------- Main Redo Optimiser body ---------------
 def redo(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
@@ -106,7 +70,7 @@ def redo(
     score_threshold: float = 0.1,
 ) -> optax.GradientTransformationExtraArgs:
     def init(params: optax.Params, **kwargs):
-        weights, bias, _ = process_params(params["params"])
+        weights, bias, _ = utils.process_params(params["params"])
 
         del params  # Delete params?
 
@@ -136,10 +100,12 @@ def redo(
             return params, new_state, tx_state
 
         def _redo(updates: optax.Updates,) -> Tuple[optax.Updates, RedoOptimState]:  # fmt: skip
-            weights, bias, excluded = process_params(params["params"])
+            weights, bias, excluded = utils.process_params(params["params"])
+
             scores = {
-                key: get_score(feature_tuple[0]) 
-                for key, feature_tuple in features.items()
+                key: get_score(feature_tuple[0])
+                for key, feature_tuple in zip(bias.keys(), features.values())
+                # for key, feature_tuple in features.items()
             }
             # scores = jax.tree.map(
             #     lambda f: get_score(f[0]), features
@@ -153,11 +119,14 @@ def redo(
             )
 
             # Update bias
-            bias_leaves, bias_tree_def = jax.tree.flatten(bias)
-            mask_leaves = jax.tree.leaves(reset_mask)
-            masked_leaves = [jnp.where(m, jnp.zeros_like(b, dtype=float), b)
-                             for m, b in zip(mask_leaves, bias_leaves)]
-            _bias = jax.tree.unflatten(bias_tree_def, masked_leaves)
+            _bias = jax.tree.map(
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b), reset_mask, bias
+            )
+            # bias_leaves, bias_tree_def = jax.tree.flatten(bias)
+            # mask_leaves = jax.tree.leaves(reset_mask)
+            # masked_leaves = [jnp.where(m, jnp.zeros_like(b, dtype=float), b)
+            #                  for m, b in zip(mask_leaves, bias_leaves)]
+            # _bias = jax.tree.unflatten(bias_tree_def, masked_leaves)
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: Could be improved
@@ -169,9 +138,7 @@ def redo(
                 }
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(
-                logs=FrozenDict(_logs), time_step=state.time_step + 1
-            )
+            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1)
             new_params.update(excluded)  # TODO
 
             # Reset optim, i.e. Adamw params

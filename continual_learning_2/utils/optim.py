@@ -11,6 +11,81 @@ import optax
 import continual_learning.optim as optim
 
 
+def process_params(params: PyTree):
+    out_layer_name = "output"
+    # Removed deep copy of params however be careful as changes to `weights` and `bias` are
+
+    excluded = {
+        out_layer_name: params[out_layer_name]
+    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+    bias = {}
+    weights = {}
+
+    for layer_name in params.keys():
+        # For layer norm etc
+        if type(params[layer_name]) != dict:
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        elif not ("kernel" in params[layer_name].keys()):
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        bias[layer_name] = params[layer_name]["bias"]
+        weights[layer_name] = params[layer_name]["kernel"]
+
+    # out_w_mag = get_out_weights_mag(weights)
+
+    # Remove output layer
+    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
+    weights.pop(out_layer_name)
+    bias.pop(out_layer_name)
+
+    return weights, bias, excluded
+
+
+def get_out_weights_mag(weights): #TODO: Check/test
+    w_mags = jax.tree.map(
+        lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
+    )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of out_layer but should be eqivalent
+
+    keys = list(w_mags.keys())
+    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
+
+
+def process_params_with_outmag(params: PyTree):
+    # TODO: Make out_w_mag optional so can be used by redo too
+    out_layer_name = "output"
+
+    excluded = {
+        out_layer_name: params[out_layer_name]
+    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+    bias = {}
+    weights = {}
+
+    for layer_name in params.keys():
+        # For layer norm etc
+        if type(params[layer_name]) != dict:
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        elif not ("kernel" in params[layer_name].keys()):
+            excluded.update({layer_name: params[layer_name]})
+            continue
+
+        bias[layer_name] = params[layer_name]["bias"]
+        weights[layer_name] = params[layer_name]["kernel"]
+
+    out_w_mag = get_out_weights_mag(weights)
+
+    # Remove output layer
+    weights.pop(out_layer_name)
+    bias.pop(out_layer_name)
+
+    return weights, bias, out_w_mag, excluded
+
+
+
 def attach_reset_method(
     *args: tuple[str, optax.GradientTransformation],
 ) -> optax.GradientTransformationExtraArgs:
@@ -70,6 +145,7 @@ def reset_weights(
     for i in range(len(weight_layer_names) - 1):
         w_in_layer = weight_layer_names[i]
         w_out_layer = weight_layer_names[i + 1]
+
         m_in_layer = activation_layer_names[i]
         m_out_layer = activation_layer_names[i + 1]
 

@@ -15,7 +15,7 @@ def cbp_mnist_experiment():
     start = time.time()
 
     optim_conf = CBPConfig(
-        tx=AdamConfig(learning_rate=1e-3), decay_rate=0.9, replacement_rate=0.5
+        tx=AdamConfig(learning_rate=1e-3), decay_rate=0.9, replacement_rate=0.5, maturity_threshold=20
     )
 
     # Add validation to say what the available options are for dataset etc
@@ -31,17 +31,11 @@ def cbp_mnist_experiment():
             num_epochs_per_task=20,
             num_workers=0,  # (os.cpu_count() or 0) // 2,
         ),
-        # logging_config=LoggingConfig(
-        #     run_name="split_mnist_debug_1",
-        #     wandb_entity="evangelos-ch",
-        #     wandb_project="continual_learning_2",
-        #     wandb_mode="disabled",
-        #     interval=100,
-        #     eval_during_training=False,
         logging_config=LoggingConfig(
-            run_name=optim_conf.__class__.__name__,
+            run_name="cbp",
             wandb_entity="lucmc",
-            wandb_project="split_mnist",
+            wandb_project="crl_experiments",
+            group="split_mnist",
             wandb_mode="online",
             interval=100,
             eval_during_training=True,
