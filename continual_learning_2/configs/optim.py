@@ -3,11 +3,12 @@ import jax
 import flax.linen as nn
 from typing import Callable
 import chex
+import optax
 
 # Base configs
-@dataclass(frozen=True)
+@dataclass
 class OptimizerConfig:
-    learning_rate: float
+    learning_rate: float | optax.Schedule
 
 @dataclass(frozen=True)
 class ResetMethodConfig:

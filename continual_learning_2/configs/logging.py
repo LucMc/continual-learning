@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from tokenize import group
+from pathlib import Path
 from typing import Literal
 
 
@@ -10,6 +11,9 @@ class LoggingConfig:
     wandb_project: str
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     group: str | None = None
+
+    checkpoint_dir: Path = Path("checkpoints")
+    best_metric: str = "metrics/eval_score"
 
     interval: int = 100
     save_interval: int = 1000

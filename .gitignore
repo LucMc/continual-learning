@@ -212,3 +212,4 @@ continual_learning.egg-info/
 flake.lock
 flake.nix
 .envrc
+checkpoints/

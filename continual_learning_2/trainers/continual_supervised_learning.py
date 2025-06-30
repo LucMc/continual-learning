@@ -1,15 +1,18 @@
+# pyright: reportCallIssue=false
 import abc
 import os
 from functools import partial
-from sys import prefix
 from typing import override
 
-from flax.core import DenyList
+import flax.traverse_util
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import optax
-import flax.traverse_util
+import orbax.checkpoint as ocp
+import orbax.checkpoint.checkpoint_managers as ocp_mgrs
+from flax.core import DenyList
+from grain import python as grain
 from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
@@ -21,19 +24,27 @@ from continual_learning_2.configs import (
     CCBP2Config,
     DatasetConfig,
     LoggingConfig,
-    MLPConfig,
     OptimizerConfig,
+    TrainingConfig,
 )
+from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.data import ContinualLearningDataset, get_dataset
 from continual_learning_2.models import get_model
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import LogDict
-from continual_learning_2.utils.monitoring import Logger, get_dormant_neuron_logs, get_linearised_neuron_logs, prefix_dict, pytree_histogram, compute_srank
+from continual_learning_2.utils.monitoring import (
+    Logger,
+    compute_srank,
+    get_dormant_neuron_logs,
+    get_linearised_neuron_logs,
+    prefix_dict,
+    pytree_histogram,
+)
 from continual_learning_2.utils.training import TrainState
 
-# os.environ["XLA_FLAGS"] = (
-#     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
-# )
+os.environ["XLA_FLAGS"] = (
+    " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
+)
 
 
 class CSLTrainerBase(abc.ABC):
@@ -43,33 +54,67 @@ class CSLTrainerBase(abc.ABC):
     dataset: ContinualLearningDataset
     logger: Logger
 
+    ckpt_mgr: ocp.CheckpointManager
+
     def __init__(
         self,
         seed: int,
         model_config,
-        optimizer_config: OptimizerConfig,
-        dataset_config: DatasetConfig,
-        logging_config: LoggingConfig,
+        optim_cfg: OptimizerConfig,
+        data_cfg: DatasetConfig,
+        train_cfg: TrainingConfig,
+        logs_cfg: LoggingConfig,
     ):
         self.key, model_init_key = jax.random.split(jax.random.PRNGKey(seed))
         self.logger = Logger(
-            logging_config,
+            logs_cfg,
             run_config={
                 "model": model_config,
-                "optimizer": optimizer_config,
-                "dataset": dataset_config,
+                "optimizer": optim_cfg,
+                "dataset": data_cfg,
+                "training": train_cfg,
             },
         )
-        self.dataset = get_dataset(dataset_config)
+        self.dataset = get_dataset(data_cfg)
+        self.train_cfg = train_cfg
 
         flax_module = get_model(model_config)
-        optimizer = get_optimizer(optimizer_config)
+        optimizer = get_optimizer(optim_cfg)
         self.network = TrainState.create(
             apply_fn=jax.jit(flax_module.apply, static_argnames=("training", "mutable")),
-            params=flax_module.lazy_init(model_init_key, self.dataset.spec, training=False, mutable=DenyList(["activations", "preactivations"])),
+            params=flax_module.lazy_init(
+                model_init_key,
+                self.dataset.spec,
+                training=False,
+                mutable=DenyList(["activations", "preactivations"]),
+            ),
             tx=optimizer,
             kernel_init=model_config.kernel_init,
             bias_init=model_config.bias_init,
+        )
+        self.total_steps = 0
+
+        self.ckpt_mgr = ocp.CheckpointManager(
+            logs_cfg.checkpoint_dir / f"{logs_cfg.run_name}_{seed}",
+            options=ocp.CheckpointManagerOptions(
+                save_decision_policy=ocp_mgrs.AnySavePolicy(
+                    [
+                        ocp_mgrs.FixedIntervalPolicy(logs_cfg.save_interval),
+                        ocp_mgrs.save_decision_policy.PreemptionCheckpointingPolicy(),
+                    ]
+                ),
+                preservation_policy=ocp_mgrs.AnyPreservationPolicy(
+                    [
+                        ocp_mgrs.LatestN(n=1),
+                        ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
+                        ocp_mgrs.BestN(  # Top 3
+                            n=3,
+                            get_metric_fn=lambda x: x["metrics/test_accuracy"],
+                            reverse=True,
+                        ),
+                    ]
+                ),
+            ),
         )
 
     @staticmethod
@@ -79,9 +124,47 @@ class CSLTrainerBase(abc.ABC):
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         raise NotImplementedError
 
+    def save(self, dataloader: grain.DataLoader, metrics: dict[str, float] | None):
+        return # TODO: Fix checkpointing
+        self.ckpt_mgr.save(
+            self.total_steps,
+            args=ocp.args.Composite(
+                nn=ocp.args.StandardSave(self.network),
+                key=ocp.args.JaxRandomKeySave(self.key),
+                dataloader=grain.PyGrainCheckpointSave(dataloader),
+                dataset=ocp.args.JsonSave(self.dataset.state),
+            ),
+            metrics=metrics,
+        )
+
+    def load(self, step: int):
+        assert self.total_steps == 0, "Load was called before training started"
+        dummy_dataloader = next(self.dataset.tasks)
+
+        if step == -1:
+            latest_step = self.ckpt_mgr.latest_step()
+            assert latest_step is not None, "No checkpoint found"
+            step = latest_step
+
+        ckpt = self.ckpt_mgr.restore(
+            self.ckpt_mgr.latest_step() if step == -1 else step,
+            args=ocp.args.Composite(
+                nn=ocp.args.StandardRestore(self.network),
+                key=ocp.args.JaxRandomKeyRestore(self.key),
+                dataloader=grain.PyGrainCheckpointRestore(dummy_dataloader),
+                dataset=ocp.args.JsonRestore(),
+            ),
+        )
+        self.network = ckpt["nn"]
+        self.key = ckpt["key"]
+        self.dataset.load(ckpt["dataset"], resumed_loader=ckpt["dataloader"])
+        self.total_steps = step + 1
+
     def train(self):
-        total_steps = 0
-        for i, task in enumerate(self.dataset.tasks):
+        if self.train_cfg.resume:
+            self.load(step=self.train_cfg.resume_from_step)
+
+        for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
                 self.network, self.key, logs = self.update_network(
@@ -89,23 +172,30 @@ class CSLTrainerBase(abc.ABC):
                 )
                 self.logger.accumulate(logs)
 
-                if step % self.logger.cfg.interval == 0:
-                    self.logger.push(total_steps)
-
+                metrics = None
                 if (
                     self.logger.cfg.eval_during_training
                     and step % self.logger.cfg.eval_interval == 0
                 ):
-                    logs = self.dataset.evaluate(self.network, forgetting=False)
-                    self.logger.log(logs, step=total_steps)
+                    metrics = self.dataset.evaluate(self.network, forgetting=False)
+                    self.logger.log(metrics, step=self.total_steps)
 
-                total_steps += 1
+                if step % self.logger.cfg.interval == 0:
+                    self.logger.push(self.total_steps)
 
-            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
-            self.logger.push(total_steps)  # Flush logger
-            self.logger.log(logs, step=total_steps)
+                self.save(dataloader=task, metrics=metrics)
+
+                self.total_steps += 1
+
+            self.logger.push(self.total_steps)  # Flush logger
+
+            logs = self.dataset.evaluate(
+                self.network, forgetting=self.logger.cfg.catastrophic_forgetting
+            )
+            self.logger.log(logs, step=self.total_steps)
 
         self.logger.close()
+        self.ckpt_mgr.close()
 
 
 class ClassificationCSLTrainer(CSLTrainerBase):
@@ -121,23 +211,34 @@ class ClassificationCSLTrainer(CSLTrainerBase):
 
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
-                params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations")
+                params,
+                x,
+                training=True,
+                rngs={"dropout": dropout_key},
+                mutable=("activations", "preactivations"),
             )
             return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
-        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+            network_state.params
+        )
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
         activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
+        activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+        }
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
         preactivations = intermediates["preactivations"]
-        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
+        preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+        }
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -184,24 +285,38 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
-                params, x, training=True, rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations")
+                params,
+                x,
+                training=True,
+                rngs={"dropout": dropout_key},
+                mutable=("activations", "preactivations"),
             )
             # NOTE:                         we use the mask here vvvvv
-            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (logits, intermediates)
+            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (
+                logits,
+                intermediates,
+            )
 
-        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(network_state.params)
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+            network_state.params
+        )
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
         activations = intermediates["activations"]
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat) # pyright: ignore[reportArgumentType]
+        activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+        }
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
         preactivations = intermediates["preactivations"]
-        preactivations_flat = {k: v[0] for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()} # pyright: ignore[reportIndexIssue]
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat) # pyright: ignore[reportArgumentType]
+        preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+        }
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -231,8 +346,10 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
     @override
     def train(self):
-        total_steps = 0
-        for i, task in enumerate(self.dataset.tasks):
+        if self.train_cfg.resume:
+            self.load(step=self.train_cfg.resume_from_step)
+
+        for _, task in enumerate(self.dataset.tasks):
             for step, batch in enumerate(task):
                 x, y = batch
                 self.network, self.key, logs = self.update_network(
@@ -241,20 +358,25 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
                 self.logger.accumulate(logs)
 
                 if step % self.logger.cfg.interval == 0:
-                    self.logger.push(total_steps)
+                    self.logger.push(self.total_steps)
 
+                metrics = None
                 if (
                     self.logger.cfg.eval_during_training
                     and step % self.logger.cfg.eval_interval == 0
                 ):
-                    logs = self.dataset.evaluate(self.network, forgetting=False)
-                    self.logger.log(logs, step=total_steps)
+                    metrics = self.dataset.evaluate(self.network, forgetting=False)
+                    self.logger.log(metrics, step=self.total_steps)
 
-                total_steps += 1
+                self.save(dataloader=task, metrics=metrics)
+                self.total_steps += 1
 
-            logs = self.dataset.evaluate(self.network, forgetting=self.logger.cfg.catastrophic_forgetting)
-            self.logger.push(total_steps)  # Flush logger
-            self.logger.log(logs, step=total_steps)
+            self.logger.push(self.total_steps)  # Flush logger
+
+            logs = self.dataset.evaluate(
+                self.network, forgetting=self.logger.cfg.catastrophic_forgetting
+            )
+            self.logger.log(logs, step=self.total_steps)
 
             # NOTE: this is the difference to the base training loop
             # we reset the last layer of the network
@@ -271,47 +393,33 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
-    # optim_conf = ShrinkAndPerterbConfig(
-    #         tx=AdamConfig(learning_rate=1e-3)
-    #     )
-    # optim_conf = RedoConfig(
-    #         update_frequency=20,
-    #         score_threshold=0.05,
-    #         tx=AdamConfig(learning_rate=1e-3)
-    #     )
-
     optim_conf = CBPConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.9,
             replacement_rate=0.5
         )
-    # optim_conf = AdamConfig(learning_rate=1e-3)
-
-    # Add validation to say what the available options are for dataset etc
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
-        model_config=MLPConfig(output_size=10),
-        optimizer_config=optim_conf,
-        dataset_config=DatasetConfig(
-            name="split_mnist",
+        model_config=CNNConfig(output_size=10),
+        optim_cfg=optim_conf,
+        data_cfg=DatasetConfig(
+            name="split_cifar10",
             seed=SEED,
             batch_size=64,
-            num_tasks=10,
-            num_epochs_per_task=20,
-            num_workers=0#(os.cpu_count() or 0) // 2,
+            num_tasks=5,
+            num_epochs_per_task=1,
+            # num_workers=(os.cpu_count() or 0) // 2,
+            dataset_kwargs={
+                "flatten": False,
+            },
         ),
-        # logging_config=LoggingConfig(
-        #     run_name="split_mnist_debug_1",
-        #     wandb_entity="evangelos-ch",
-        #     wandb_project="continual_learning_2",
-        #     wandb_mode="disabled",
-        #     interval=100,
-        #     eval_during_training=False,
-
-        logging_config=LoggingConfig(
-            run_name=optim_conf.__class__.__name__,
-            wandb_entity="lucmc",
-            wandb_project="split_mnist",
+        train_cfg=TrainingConfig(
+            resume=True,
+        ),
+        logs_cfg=LoggingConfig(
+            run_name="split_cifar10_debug_1",
+            wandb_entity="evangelos-ch",
+            wandb_project="continual_learning_2",
             wandb_mode="disabled",
             interval=100,
             eval_during_training=True,
