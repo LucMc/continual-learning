@@ -103,7 +103,7 @@ def ccbp(
         del params  # Delete params?
 
         return CBPOptimState(
-            initial_weights=weights,
+            initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),

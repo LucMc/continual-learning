@@ -73,8 +73,7 @@ class CSLTrainerBase(abc.ABC):
         )
 
     @staticmethod
-    @jax.jit
-    # @partial(jax.jit, donate_argnames=("network_state", "key"))
+    @partial(jax.jit, donate_argnames=("network_state", "key"))
     def update_network(
         network_state: TrainState, key: PRNGKeyArray, x: jax.Array, y: jax.Array
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
@@ -111,8 +110,7 @@ class CSLTrainerBase(abc.ABC):
 
 class ClassificationCSLTrainer(CSLTrainerBase):
     @staticmethod
-    # @partial(jax.jit, donate_argnames=("network_state", "key"))
-    @jax.jit
+    @partial(jax.jit, donate_argnames=("network_state", "key"))
     def update_network(
         network_state: TrainState,
         key: PRNGKeyArray,
@@ -171,8 +169,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
 
 class MaskedClassificationCSLTrainer(CSLTrainerBase):
     @staticmethod
-    # @partial(jax.jit, donate_argnames=("network_state", "key"))
-    @jax.jit
+    @partial(jax.jit, donate_argnames=("network_state", "key"))
     def update_network(
         network_state: TrainState,
         key: PRNGKeyArray,
@@ -315,7 +312,7 @@ if __name__ == "__main__":
             run_name=optim_conf.__class__.__name__,
             wandb_entity="lucmc",
             wandb_project="split_mnist",
-            wandb_mode="online",
+            wandb_mode="disabled",
             interval=100,
             eval_during_training=True,
         ),

@@ -75,7 +75,7 @@ def redo(
         del params  # Delete params?
 
         return RedoOptimState(
-            initial_weights=weights,
+            initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             **kwargs,
