@@ -84,22 +84,6 @@ wheels = [
 ]
 
 [[package]]
-name = "altair"
-version = "5.5.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jinja2", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "jsonschema", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "narwhals", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "packaging", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "typing-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/16/b1/f2969c7bdb8ad8bbdda031687defdce2c19afba2aa2c8e1d2a17f78376d8/altair-5.5.0.tar.gz", hash = "sha256:d960ebe6178c56de3855a68c47b516be38640b73fb3b5111c2a9ca90546dd73d", size = 705305, upload-time = "2024-11-23T23:39:58.542Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/f3/0b6ced594e51cc95d8c1fc1640d3623770d01e4969d29c0bd09945fafefa/altair-5.5.0-py3-none-any.whl", hash = "sha256:91a310b926508d560fe0148d02a194f38b824122641ef528113d029fcd129f8c", size = 731200, upload-time = "2024-11-23T23:39:56.4Z" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -261,7 +245,6 @@ name = "continual-learning"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "altair", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "brax", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "datasets", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "distrax", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
@@ -275,10 +258,7 @@ dependencies = [
     { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "optax", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "orbax-checkpoint", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "polars", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "tensorboard", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "tyro", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "vl-convert-python", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
     { name = "wandb", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
 ]
 
@@ -307,7 +287,6 @@ tpu = [
 
 [package.metadata]
 requires-dist = [
-    { name = "altair" },
     { name = "brax", specifier = ">=0.12.4" },
     { name = "chex", marker = "extra == 'testing'", specifier = ">=0.1.89" },
     { name = "datasets", specifier = ">=3.6.0" },
@@ -326,13 +305,10 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.1.2" },
     { name = "optax", git = "https://github.com/google-deepmind/optax.git" },
     { name = "orbax-checkpoint", specifier = ">=0.11.16" },
-    { name = "polars" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.3.5" },
-    { name = "tensorboard" },
     { name = "tensorboard", marker = "extra == 'profile'", specifier = ">=2.19.0" },
     { name = "tensorflow-cpu", marker = "extra == 'profile'", specifier = ">=2.19.0" },
     { name = "tyro", specifier = ">=0.8.11" },
-    { name = "vl-convert-python" },
     { name = "wandb", specifier = ">=0.18.5" },
 ]
 provides-extras = ["cpu", "metal", "cuda12", "tpu", "testing", "profile"]
@@ -1053,33 +1029,6 @@ wheels = [
 ]
 
 [[package]]
-name = "jsonschema"
-version = "4.24.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "attrs", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "jsonschema-specifications", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "referencing", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "rpds-py", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/d3/1cf5326b923a53515d8f3a2cd442e6d7e94fcc444716e879ea70a0ce3177/jsonschema-4.24.0.tar.gz", hash = "sha256:0b4e8069eb12aedfa881333004bccaec24ecef5a8a6a4b6df142b2cc9599d196", size = 353480, upload-time = "2025-05-26T18:48:10.459Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/3d/023389198f69c722d039351050738d6755376c8fd343e91dc493ea485905/jsonschema-4.24.0-py3-none-any.whl", hash = "sha256:a462455f19f5faf404a7902952b6f0e3ce868f3ee09a359b05eca6673bd8412d", size = 88709, upload-time = "2025-05-26T18:48:08.417Z" },
-]
-
-[[package]]
-name = "jsonschema-specifications"
-version = "2025.4.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "referencing", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/ce/46fbd9c8119cfc3581ee5643ea49464d168028cfb5caff5fc0596d0cf914/jsonschema_specifications-2025.4.1.tar.gz", hash = "sha256:630159c9f4dbea161a6a2205c3011cc4f18ff381b189fff48bb39b9bf26ae608", size = 15513, upload-time = "2025-04-23T12:34:07.418Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/0e/b27cdbaccf30b890c40ed1da9fd4a3593a5cf94dae54fb34f8a4b74fcd3f/jsonschema_specifications-2025.4.1-py3-none-any.whl", hash = "sha256:4653bffbd6584f7de83a67e0d620ef16900b390ddc7939d56684d6c81e33f1af", size = 18437, upload-time = "2025-04-23T12:34:05.422Z" },
-]
-
-[[package]]
 name = "keras"
 version = "3.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1332,15 +1281,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0c/c0/ee95b28f029c73f8d49d8f52edaed02a1d4a9acb8b69355737fdb1faa191/namex-0.1.0.tar.gz", hash = "sha256:117f03ccd302cc48e3f5c58a296838f6b89c83455ab8683a1e85f2a430aa4306", size = 6649, upload-time = "2025-05-26T23:17:38.918Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b2/bc/465daf1de06409cdd4532082806770ee0d8d7df434da79c76564d0f69741/namex-0.1.0-py3-none-any.whl", hash = "sha256:e2012a474502f1e2251267062aae3114611f07df4224b6e06334c57b0f2ce87c", size = 5905, upload-time = "2025-05-26T23:17:37.695Z" },
-]
-
-[[package]]
-name = "narwhals"
-version = "1.41.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/32/fc/7b9a3689911662be59889b1b0b40e17d5dba6f98080994d86ca1f3154d41/narwhals-1.41.0.tar.gz", hash = "sha256:0ab2e5a1757a19b071e37ca74b53b0b5426789321d68939738337dfddea629b5", size = 488446, upload-time = "2025-05-26T12:46:07.43Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/e0/ade8619846645461c012498f02b93a659e50f07d9d9a6ffefdf5ea2c02a0/narwhals-1.41.0-py3-none-any.whl", hash = "sha256:d958336b40952e4c4b7aeef259a7074851da0800cf902186a58f2faeff97be02", size = 357968, upload-time = "2025-05-26T12:46:05.207Z" },
 ]
 
 [[package]]
@@ -1678,20 +1618,6 @@ wheels = [
 ]
 
 [[package]]
-name = "polars"
-version = "1.30.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/82/b6/8dbdf626c0705a57f052708c9fc0860ffc2aa97955930d5faaf6a66fcfd3/polars-1.30.0.tar.gz", hash = "sha256:dfe94ae84a5efd9ba74e616e3e125b24ca155494a931890a8f17480737c4db45", size = 4668318, upload-time = "2025-05-21T13:33:24.175Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/48/e9b2cb379abcc9f7aff2e701098fcdb9fe6d85dc4ad4cec7b35d39c70951/polars-1.30.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:4c33bc97c29b7112f0e689a2f8a33143973a3ff466c70b25c7fd1880225de6dd", size = 35704342, upload-time = "2025-05-21T13:32:22.996Z" },
-    { url = "https://files.pythonhosted.org/packages/36/ca/f545f61282f75eea4dfde4db2944963dcd59abd50c20e33a1c894da44dad/polars-1.30.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:e3d05914c364b8e39a5b10dcf97e84d76e516b3b1693880bf189a93aab3ca00d", size = 32459857, upload-time = "2025-05-21T13:32:27.728Z" },
-    { url = "https://files.pythonhosted.org/packages/76/20/e018cd87d7cb6f8684355f31f4e193222455a6e8f7b942f4a2934f5969c7/polars-1.30.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1a52af3862082b868c1febeae650af8ae8a2105d2cb28f0449179a7b44f54ccf", size = 36267243, upload-time = "2025-05-21T13:32:31.796Z" },
-    { url = "https://files.pythonhosted.org/packages/cb/e7/b88b973021be07b13d91b9301cc14392c994225ef5107a32a8ffd3fd6424/polars-1.30.0-cp39-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:ffb3ef133454275d4254442257c5f71dd6e393ce365c97997dadeb6fa9d6d4b5", size = 33416871, upload-time = "2025-05-21T13:32:35.077Z" },
-    { url = "https://files.pythonhosted.org/packages/dd/7c/d46d4381adeac537b8520b653dc30cb8b7edbf59883d71fbb989e9005de1/polars-1.30.0-cp39-abi3-win_amd64.whl", hash = "sha256:c26b633a9bd530c5fc09d317fca3bb3e16c772bd7df7549a9d8ec1934773cc5d", size = 36363630, upload-time = "2025-05-21T13:32:38.286Z" },
-    { url = "https://files.pythonhosted.org/packages/fb/b5/5056d0c12aadb57390d0627492bef8b1abf3549474abb9ae0fd4e2bfa885/polars-1.30.0-cp39-abi3-win_arm64.whl", hash = "sha256:476f1bde65bc7b4d9f80af370645c2981b5798d67c151055e58534e89e96f2a8", size = 32643590, upload-time = "2025-05-21T13:32:42.107Z" },
-]
-
-[[package]]
 name = "propcache"
 version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1874,20 +1800,6 @@ wheels = [
 ]
 
 [[package]]
-name = "referencing"
-version = "0.36.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "attrs", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "rpds-py", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-    { name = "typing-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/db/98b5c277be99dd18bfd91dd04e1b759cad18d1a338188c936e92f921c7e2/referencing-0.36.2.tar.gz", hash = "sha256:df2e89862cd09deabbdba16944cc3f10feb6b3e6f18e902f7cc25609a34775aa", size = 74744, upload-time = "2025-01-25T08:48:16.138Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/b1/3baf80dc6d2b7bc27a95a67752d0208e410351e3feb4eb78de5f77454d8d/referencing-0.36.2-py3-none-any.whl", hash = "sha256:e8699adbbf8b5c7de96d8ffa0eb5c158b3beafce084968e2ea8bb08c6794dcd0", size = 26775, upload-time = "2025-01-25T08:48:14.241Z" },
-]
-
-[[package]]
 name = "requests"
 version = "2.32.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1913,28 +1825,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a1/53/830aa4c3066a8ab0ae9a9955976fb770fe9c6102117c8ec4ab3ea62d89e8/rich-14.0.0.tar.gz", hash = "sha256:82f1bc23a6a21ebca4ae0c45af9bdbc492ed20231dcb63f297d6d1021a9d5725", size = 224078, upload-time = "2025-03-30T14:15:14.23Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/9b/63f4c7ebc259242c89b3acafdb37b41d1185c07ff0011164674e9076b491/rich-14.0.0-py3-none-any.whl", hash = "sha256:1c9491e1951aac09caffd42f448ee3d04e58923ffe14993f6e83068dc395d7e0", size = 243229, upload-time = "2025-03-30T14:15:12.283Z" },
-]
-
-[[package]]
-name = "rpds-py"
-version = "0.25.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8c/a6/60184b7fc00dd3ca80ac635dd5b8577d444c57e8e8742cecabfacb829921/rpds_py-0.25.1.tar.gz", hash = "sha256:8960b6dac09b62dac26e75d7e2c4a22efb835d827a7278c34f72b2b84fa160e3", size = 27304, upload-time = "2025-05-21T12:46:12.502Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/81/28ab0408391b1dc57393653b6a0cf2014cc282cc2909e4615e63e58262be/rpds_py-0.25.1-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:b5ffe453cde61f73fea9430223c81d29e2fbf412a6073951102146c84e19e34c", size = 364647, upload-time = "2025-05-21T12:43:28.559Z" },
-    { url = "https://files.pythonhosted.org/packages/2c/9a/7797f04cad0d5e56310e1238434f71fc6939d0bc517192a18bb99a72a95f/rpds_py-0.25.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:115874ae5e2fdcfc16b2aedc95b5eef4aebe91b28e7e21951eda8a5dc0d3461b", size = 350454, upload-time = "2025-05-21T12:43:30.615Z" },
-    { url = "https://files.pythonhosted.org/packages/69/3c/93d2ef941b04898011e5d6eaa56a1acf46a3b4c9f4b3ad1bbcbafa0bee1f/rpds_py-0.25.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a714bf6e5e81b0e570d01f56e0c89c6375101b8463999ead3a93a5d2a4af91fa", size = 389665, upload-time = "2025-05-21T12:43:32.629Z" },
-    { url = "https://files.pythonhosted.org/packages/c1/57/ad0e31e928751dde8903a11102559628d24173428a0f85e25e187defb2c1/rpds_py-0.25.1-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:35634369325906bcd01577da4c19e3b9541a15e99f31e91a02d010816b49bfda", size = 403873, upload-time = "2025-05-21T12:43:34.576Z" },
-    { url = "https://files.pythonhosted.org/packages/16/ad/c0c652fa9bba778b4f54980a02962748479dc09632e1fd34e5282cf2556c/rpds_py-0.25.1-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:d4cb2b3ddc16710548801c6fcc0cfcdeeff9dafbc983f77265877793f2660309", size = 525866, upload-time = "2025-05-21T12:43:36.123Z" },
-    { url = "https://files.pythonhosted.org/packages/2a/39/3e1839bc527e6fcf48d5fec4770070f872cdee6c6fbc9b259932f4e88a38/rpds_py-0.25.1-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:9ceca1cf097ed77e1a51f1dbc8d174d10cb5931c188a4505ff9f3e119dfe519b", size = 416886, upload-time = "2025-05-21T12:43:38.034Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/95/dd6b91cd4560da41df9d7030a038298a67d24f8ca38e150562644c829c48/rpds_py-0.25.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2c2cd1a4b0c2b8c5e31ffff50d09f39906fe351389ba143c195566056c13a7ea", size = 390666, upload-time = "2025-05-21T12:43:40.065Z" },
-    { url = "https://files.pythonhosted.org/packages/64/48/1be88a820e7494ce0a15c2d390ccb7c52212370badabf128e6a7bb4cb802/rpds_py-0.25.1-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:1de336a4b164c9188cb23f3703adb74a7623ab32d20090d0e9bf499a2203ad65", size = 425109, upload-time = "2025-05-21T12:43:42.263Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/07/3e2a17927ef6d7720b9949ec1b37d1e963b829ad0387f7af18d923d5cfa5/rpds_py-0.25.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:9fca84a15333e925dd59ce01da0ffe2ffe0d6e5d29a9eeba2148916d1824948c", size = 567244, upload-time = "2025-05-21T12:43:43.846Z" },
-    { url = "https://files.pythonhosted.org/packages/d2/e5/76cf010998deccc4f95305d827847e2eae9c568099c06b405cf96384762b/rpds_py-0.25.1-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:88ec04afe0c59fa64e2f6ea0dd9657e04fc83e38de90f6de201954b4d4eb59bd", size = 596023, upload-time = "2025-05-21T12:43:45.932Z" },
-    { url = "https://files.pythonhosted.org/packages/52/9a/df55efd84403736ba37a5a6377b70aad0fd1cb469a9109ee8a1e21299a1c/rpds_py-0.25.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a8bd2f19e312ce3e1d2c635618e8a8d8132892bb746a7cf74780a489f0f6cdcb", size = 561634, upload-time = "2025-05-21T12:43:48.263Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/aa/dc3620dd8db84454aaf9374bd318f1aa02578bba5e567f5bf6b79492aca4/rpds_py-0.25.1-cp312-cp312-win32.whl", hash = "sha256:e5e2f7280d8d0d3ef06f3ec1b4fd598d386cc6f0721e54f09109a8132182fbfe", size = 222713, upload-time = "2025-05-21T12:43:49.897Z" },
-    { url = "https://files.pythonhosted.org/packages/a3/7f/7cef485269a50ed5b4e9bae145f512d2a111ca638ae70cc101f661b4defd/rpds_py-0.25.1-cp312-cp312-win_amd64.whl", hash = "sha256:db58483f71c5db67d643857404da360dce3573031586034b7d59f245144cc192", size = 235280, upload-time = "2025-05-21T12:43:51.893Z" },
-    { url = "https://files.pythonhosted.org/packages/99/f2/c2d64f6564f32af913bf5f3f7ae41c7c263c5ae4c4e8f1a17af8af66cd46/rpds_py-0.25.1-cp312-cp312-win_arm64.whl", hash = "sha256:6d50841c425d16faf3206ddbba44c21aa3310a0cebc3c1cdfc3e3f4f9f6f5728", size = 225399, upload-time = "2025-05-21T12:43:53.351Z" },
 ]
 
 [[package]]
@@ -2275,19 +2165,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8a/78/16493d9c386d8e60e442a35feac5e00f0913c0f4b7c217c11e8ec2ff53e0/urllib3-2.4.0.tar.gz", hash = "sha256:414bc6535b787febd7567804cc015fee39daab8ad86268f1310a9250697de466", size = 390672, upload-time = "2025-04-10T15:23:39.232Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/11/cc635220681e93a0183390e26485430ca2c7b5f9d33b15c74c2861cb8091/urllib3-2.4.0-py3-none-any.whl", hash = "sha256:4e16665048960a0900c702d4a66415956a584919c03361cac9f1df5c5dd7e813", size = 128680, upload-time = "2025-04-10T15:23:37.377Z" },
-]
-
-[[package]]
-name = "vl-convert-python"
-version = "1.8.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/15/08/06945bff9655c5b0520a8d1b2550cd8007e106ebec45a33840035420e0d2/vl_convert_python-1.8.0.tar.gz", hash = "sha256:ceca613ca5551c55270a15ca48d0f3a7de1e949e0f127310e9b0f6570ea3fbbb", size = 4651586, upload-time = "2025-05-28T00:06:47.6Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/5a/9dca7d8ff56e82c298e9ef381cfc803e262b85b7c59f2515d0e9f81a75b6/vl_convert_python-1.8.0-cp37-abi3-macosx_10_12_x86_64.whl", hash = "sha256:f663317fc280b07553534195c1e31c4ca882d9c8601430211b078196db5ed227", size = 29956698, upload-time = "2025-05-28T00:06:29.533Z" },
-    { url = "https://files.pythonhosted.org/packages/42/e2/325e6b5895482b2534e7462c012f237c66ffb02fb3af45eec0accab2f8d4/vl_convert_python-1.8.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:81f6380019ceadf070a79f85aa624475a6568093f70de0e151a32e91ecbcaacf", size = 28831173, upload-time = "2025-05-28T00:06:32.925Z" },
-    { url = "https://files.pythonhosted.org/packages/09/fa/1dd944c9e9898e59e31c385bdce215aca543acc555de20b8bf4dc60ddb89/vl_convert_python-1.8.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3388e3913287867b3553c10f81ca2d85268216a5a75e7c71b9c1b59887c1977e", size = 31668750, upload-time = "2025-05-28T00:06:36.158Z" },
-    { url = "https://files.pythonhosted.org/packages/a7/6b/48f6d47a92eaf6f0dd235146307a7eb0d179b78d2faebc53aca3f1e49177/vl_convert_python-1.8.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b51264998e8fcc43dbce801484a950cfe6513cdc4c46b20604ef50989855a617", size = 32970141, upload-time = "2025-05-28T00:06:41.323Z" },
-    { url = "https://files.pythonhosted.org/packages/f8/6f/29dce05f9167e3a01ab74d79eeadd531bc24cf59e3a7fc3736af476ca431/vl_convert_python-1.8.0-cp37-abi3-win_amd64.whl", hash = "sha256:9f1146b791ed27916f54c45e1d66af53a40eb26e5aaea1892f33eb9a935039ab", size = 31318167, upload-time = "2025-05-28T00:06:44.881Z" },
 ]
 
 [[package]]
