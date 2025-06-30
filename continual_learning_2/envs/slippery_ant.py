@@ -13,11 +13,12 @@ from etils import epath
 
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.envs.base import (
+    Agent,
     JittableContinualLearningEnv,
     JittableVectorEnv,
     Timestep,
 )
-from continual_learning_2.types import Agent, EnvState, Observation
+from continual_learning_2.types import EnvState, Observation
 
 
 class SlipperyAnt(Ant):
@@ -45,7 +46,7 @@ class SlipperyAnt(Ant):
         #### We set the friction programmatically
         model = sys.mj_model
         model.geom_friction[:] = np.array([friction, 0.5, 0.5])
-        sys = sys.replace(model=model)
+        sys = sys.replace(mj_model=model)
 
         n_frames = 5
 
@@ -71,7 +72,7 @@ class SlipperyAnt(Ant):
 
         kwargs["n_frames"] = kwargs.get("n_frames", n_frames)
 
-        PipelineEnv.__init__(sys=sys, backend=backend, **kwargs)  # pyright: ignore[reportArgumentType]
+        PipelineEnv.__init__(self, sys=sys, backend=backend, **kwargs)  # pyright: ignore[reportArgumentType]
 
         self._ctrl_cost_weight = ctrl_cost_weight
         self._use_contact_forces = use_contact_forces
@@ -195,7 +196,7 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
 
 class ContinualAnt(JittableContinualLearningEnv):
     def __init__(self, seed: int, config: EnvConfig):
-        self.num_envs = config.num_envs
+        self._num_envs = config.num_envs
 
         rng = np.random.default_rng(seed)
         self.seed = seed
@@ -232,7 +233,7 @@ class ContinualAnt(JittableContinualLearningEnv):
 
     @property
     def num_envs(self) -> int:
-        return self.num_envs
+        return self._num_envs
 
     def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float] | None:
         del agent, forgetting

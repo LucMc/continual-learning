@@ -26,7 +26,6 @@ from continual_learning_2.configs import (
 from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.configs.optim import AdamConfig
 from continual_learning_2.configs.rl import (
-    NetworkConfig,
     PolicyNetworkConfig,
     PPOConfig,
     ValueFunctionConfig,
@@ -410,7 +409,7 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
                 "training": train_cfg,
             },
         )
-        benchmark = get_benchmark(env_cfg)
+        benchmark = get_benchmark(seed, env_cfg)
         if not isinstance(benchmark, ContinualLearningEnv):
             raise ValueError(
                 "Benchmark must not be an end-to-end JAX environment. Use JittableContinualPPOTrainer for that."
@@ -427,8 +426,11 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
         )
         ppo_config = dataclasses.replace(
             ppo_config,
-            network=dataclasses.replace(
-                ppo_config.policy_config.network, output_size=action_dim
+            policy_config=dataclasses.replace(
+                ppo_config.policy_config,
+                network=dataclasses.replace(
+                    ppo_config.policy_config.network, output_size=action_dim
+                ),
             ),
         )
 
@@ -627,7 +629,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 "training": train_cfg,
             },
         )
-        benchmark = get_benchmark(env_cfg)
+        benchmark = get_benchmark(seed, env_cfg)
         if not isinstance(benchmark, JittableContinualLearningEnv):
             raise ValueError(
                 "Benchmark must be an end-to-end JAX environment. Use ContinualPPOTrainer otherwise."
@@ -644,8 +646,11 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         )
         ppo_config = dataclasses.replace(
             ppo_config,
-            network=dataclasses.replace(
-                ppo_config.policy_config.network, output_size=action_dim
+            policy_config=dataclasses.replace(
+                ppo_config.policy_config,
+                network=dataclasses.replace(
+                    ppo_config.policy_config.network, output_size=action_dim
+                ),
             ),
         )
 
