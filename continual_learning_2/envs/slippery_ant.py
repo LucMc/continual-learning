@@ -17,7 +17,7 @@ from continual_learning_2.envs.base import (
     JittableVectorEnv,
     Timestep,
 )
-from continual_learning_2.types import Agent, EnvState
+from continual_learning_2.types import Agent, EnvState, Observation
 
 
 class SlipperyAnt(Ant):
@@ -162,7 +162,7 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
 
         self.checkpoint = env_checkpoint
 
-    def init(self):
+    def init(self) -> tuple[State, Observation]:
         if self.checkpoint is not None:
             state = self.checkpoint
         else:
@@ -176,7 +176,7 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
 
         return state, obs
 
-    def step(self, state: State, action):
+    def step(self, state: State, action) -> tuple[State, Timestep]:
         assert isinstance(action, jax.Array)
         state = self.envs.step(state, action)
 
@@ -210,12 +210,12 @@ class ContinualAnt(JittableContinualLearningEnv):
             yield self._get_task(task, self.saved_envs)
             self.saved_envs = None
 
-    def save(self) -> dict:
-        return {"current_task": self.current_task}
+    def save(self, env_state: EnvState) -> dict:
+        return {"current_task": self.current_task, "env_state": env_state}
 
-    def load(self, checkpoint: dict, envs_checkpoint: EnvState):
+    def load(self, checkpoint: dict):
         self.current_task = checkpoint["current_task"]
-        self.saved_env_state = envs_checkpoint
+        self.saved_env_state = checkpoint["env_state"]
 
     def _get_task(self, task_id: int, env_checkpoint: EnvState) -> JittableVectorEnv:
         friction = self.frictions[task_id]

@@ -248,6 +248,25 @@ def accumulate_concatenated_metrics(metrics: LogDict) -> LogDict:
     return ret  # pyright: ignore[reportReturnType]
 
 
+def get_last_metrics(metrics: LogDict) -> LogDict:
+    ret = {}
+    for k in metrics:
+        item = metrics[k]
+        if not isinstance(item, Histogram):
+            ret[k] = item[-1]  # pyright: ignore[reportIndexIssue]
+        else:
+            total_events = item.total_events[-1]  # pyright: ignore[reportIndexIssue]
+            data = None
+            if item.data is not None:
+                data = item.data[-1]  # pyright: ignore[reportIndexIssue]
+            np_histogram = None
+            if item.np_histogram is not None:
+                np_histogram = item.np_histogram[0][-1], item.np_histogram[1][-1]
+            ret[k] = Histogram(total_events, data, np_histogram)
+
+    return ret  # pyright: ignore[reportReturnType]
+
+
 class Logger:
     cfg: LoggingConfig
 
