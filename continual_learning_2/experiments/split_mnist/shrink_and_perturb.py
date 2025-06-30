@@ -1,12 +1,12 @@
+import jax
 import os
 import time
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
-    LoggingConfig,
-    MLPConfig,
+    LoggingConfig
 )
-from continual_learning_2.configs import ShrinkAndPerterbConfig, AdamConfig
+from continual_learning_2.configs import ShrinkAndPerterbConfig, AdamConfig, MLPConfig, TrainingConfig
 
 
 def shrink_and_perturb_mnist_experiment():
@@ -14,7 +14,7 @@ def shrink_and_perturb_mnist_experiment():
     start = time.time()
     optim_conf = ShrinkAndPerterbConfig(
         tx=AdamConfig(learning_rate=1e-3),
-        param_noise_fn=x,
+        param_noise_fn=jax.nn.initializers.he_uniform(),
         seed=SEED,
         shrink=0.8,
         perturb=0.01,

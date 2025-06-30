@@ -1,24 +1,24 @@
-import os
 import jax
+import os
 import time
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
-    LoggingConfig,
-    TrainingConfig,
+    LoggingConfig
 )
-from continual_learning_2.configs import RedoConfig, AdamConfig, MLPConfig
+from continual_learning_2.configs import ShrinkAndPerterbConfig, AdamConfig, MLPConfig, TrainingConfig
 
 
-def redo_mnist_experiment():
+def shrink_and_perturb_split_cifar10_experiment():
     SEED = 42
     start = time.time()
-    optim_conf = RedoConfig(
+    optim_conf = ShrinkAndPerterbConfig(
         tx=AdamConfig(learning_rate=1e-3),
-        update_frequency=100,
-        score_threshold=0.1,
+        param_noise_fn=jax.nn.initializers.he_uniform(),
         seed=SEED,
-        weight_init_fn=jax.nn.initializers.he_uniform(),
+        shrink=0.8,
+        perturb=0.01,
+        every_n=1,
     )
 
     # Add validation to say what the available options are for dataset etc
@@ -27,7 +27,7 @@ def redo_mnist_experiment():
         model_config=MLPConfig(output_size=10),
         optim_cfg=optim_conf,
         data_cfg=DatasetConfig(
-            name="split_mnist",
+            name="split_cifar10",
             seed=SEED,
             batch_size=64,
             num_tasks=10,
@@ -38,10 +38,10 @@ def redo_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"redo_{SEED}",
+            run_name=f"shrink_and_perturb_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
-            group="split_mnist",
+            group="split_cifar10",
             wandb_mode="online",
             interval=100,
             eval_during_training=True,
@@ -54,4 +54,4 @@ def redo_mnist_experiment():
 
 
 if __name__ == "__main__":
-    redo_mnist_experiment()
+    shrink_and_perturb_split_cifar10_experiment()

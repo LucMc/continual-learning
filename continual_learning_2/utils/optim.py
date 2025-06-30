@@ -9,7 +9,7 @@ from flax.training.train_state import TrainState
 import optax
 
 import continual_learning.optim as optim
-
+from typing import Callable
 
 def process_params(params: PyTree):
     out_layer_name = "output"
@@ -133,9 +133,11 @@ def attach_reset_method(
     return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
 def reset_weights(
+    key_tree: PRNGKeyArray,
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
-    initial_weights: PyTree[Float[Array, "..."]],
+    # initial_weights: PyTree[Float[Array, "..."]],
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     replacement_rate: Float[Array, ""] = None,
 ):
     weight_layer_names = list(layer_w.keys())
@@ -155,8 +157,9 @@ def reset_weights(
         )
 
         in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
+        random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)
         _in_layer_w = jnp.where(
-            in_reset_mask, initial_weights[w_in_layer], layer_w[w_in_layer]
+            in_reset_mask, random_weights, layer_w[w_in_layer]
         )
 
         _out_layer_w = jnp.where(

@@ -15,7 +15,7 @@ from jaxtyping import (
 )
 from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
-from typing import Tuple
+from typing import Tuple, Callable
 from chex import dataclass
 import optax
 import jax
@@ -28,21 +28,11 @@ from dataclasses import field
 import continual_learning_2.utils.optim as utils
 
 
-# TODO: Features are bundled with params and don't need to passed in explicitly!
-
 @dataclass
 class RedoOptimState:
-    initial_weights: PyTree[Float[Array, "..."]]
-    utilities: Float[Array, "#n_layers"]
-    mean_feature_act: Float[Array, ""]
-
-    # rng: PRNGKeyArray  # = random.PRNGKey(0)
+    # initial_weights: PyTree[Float[Array, "..."]]
+    rng: PRNGKeyArray
     time_step: int = 0
-    # scale: float = 1.0
-    # step_size: float = 0.001
-    # replacement_rate: float = 0.01
-    # decay_rate: float = 0.9
-    # update_frequency: int = 10
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
@@ -60,9 +50,11 @@ def get_score(  # averages over a batch
 
 # -------------- Main Redo Optimiser body ---------------
 def redo(
+    seed: int,
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     update_frequency: int = 100,
     score_threshold: float = 0.1,
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
 ) -> optax.GradientTransformationExtraArgs:
     """ Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902) """
 
@@ -72,9 +64,8 @@ def redo(
         del params  # Delete params?
 
         return RedoOptimState(
-            initial_weights=deepcopy(weights),
-            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
-            mean_feature_act=jnp.zeros(0),
+            # initial_weights=deepcopy(weights),
+            rng=jax.random.PRNGKey(seed),
             **kwargs,
         )
 
@@ -110,9 +101,11 @@ def redo(
 
             reset_mask = jax.tree.map(get_reset_mask, scores)
 
+            key_tree = utils.gen_key_tree(state.rng, weights)
+
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
-                reset_mask, weights, state.initial_weights
+                key_tree, reset_mask, weights, weight_init_fn # state.initial_weights
             )
 
             # Update bias

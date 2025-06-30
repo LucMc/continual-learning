@@ -47,7 +47,7 @@ def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> dict[str, floa
     logits = model.apply_fn(model.params, x, training=False)
     loss = optax.softmax_cross_entropy(logits, y).mean()
     accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
-    return {"eval_loss": loss, "eval_accuracy": accuracy} # Removed float()
+    return {"eval_loss": loss, "eval_accuracy": accuracy} # Removed float() as this breaks mnist
 
 
 class SplitDataset(ContinualLearningDataset):
@@ -164,6 +164,7 @@ class SplitDataset(ContinualLearningDataset):
                 num_records=len(ds),
                 shuffle=False,
                 num_epochs=1,
+                seed=self.seed
             ),
             operations=[
                 *self.operations,

@@ -23,7 +23,7 @@ class AdamConfig(OptimizerConfig):
 # Reset method configs
 @dataclass(frozen=True)
 class ShrinkAndPerterbConfig(ResetMethodConfig):
-    param_noise_fn: Callable = nn.initializers.xavier_normal()
+    param_noise_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     shrink: float = 0.8
     perturb: float = 0.01
@@ -31,6 +31,8 @@ class ShrinkAndPerterbConfig(ResetMethodConfig):
 
 @dataclass(frozen=True)
 class RedoConfig(ResetMethodConfig):
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform()
+    seed: int = 42
     update_frequency: int = 100
     score_threshold: float = 0.1
     

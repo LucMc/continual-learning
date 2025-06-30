@@ -8,10 +8,12 @@ import optax
 from chex import dataclass
 import continual_learning_2.utils.optim as utils
 
+
 @dataclass
 class ShrinkPerturbOptimState:
     count: chex.Array
     rng: chex.PRNGKey
+    logs: dict
 
 
 def shrink_perturb(
@@ -21,11 +23,13 @@ def shrink_perturb(
     perturb: float = 0.01,
     every_n: int = 1,
 ) -> optax.GradientTransformationExtraArgs:
-    """ Shrink and perturb: [Ash & Adams, 2020](https://arxiv.org/abs/1910.08475) """
+    """Shrink and perturb: [Ash & Adams, 2020](https://arxiv.org/abs/1910.08475)"""
 
     def init(params):
         del params
-        return ShrinkPerturbOptimState(count=jnp.zeros([], jnp.int32), rng=random.PRNGKey(seed))
+        return ShrinkPerturbOptimState(
+            count=jnp.zeros([], jnp.int32), rng=random.PRNGKey(seed), logs={}
+        )
 
     def update(updates, state, params=None, features=None, tx_state=None):
         if params is None:
@@ -43,11 +47,11 @@ def shrink_perturb(
             new_params = jax.tree_map(
                 lambda w, b, k: {
                     "kernel": w * shrink + param_noise_fn(k, shape=w.shape) * perturb,
-                    "bias": b
+                    "bias": b,
                 },
                 weights,
                 bias,
-                noise_key_tree
+                noise_key_tree,
             )
             new_params.update(excluded)
 
@@ -55,12 +59,7 @@ def shrink_perturb(
             return {"params": new_params}, new_state, tx_state
 
         should_apply = (state.count % every_n == 0) & (state.count > 0)
-        
-        return jax.lax.cond(
-            should_apply,
-            apply_shrink_perturb,
-            no_shrink_perturb,
-            params
-        )
+
+        return jax.lax.cond(should_apply, apply_shrink_perturb, no_shrink_perturb, params)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
