@@ -31,23 +31,14 @@ from dataclasses import field
 import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CBPOptimState
 
-"""
-TODO: Test get_reset_mask gets utilities for marture nodes, and sets 1 for immature nodes. This means,
-lower utility gets more decay/noise essentially.
-
-Does moving out towards 0 and in towards initial actually help or should both be towards initial?
-
-"""
-
 # -------------- CCBP Weight reset ---------------
 def continuous_weight_reset(
     reset_mask: PyTree[Float[Array, "#neurons"]], 
     layer_w: PyTree[Float[Array, "..."]],
     initial_weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = 0.01,
+    replacement_rate: Float[Array, ""] = 0.001,
 ):
-    # TODO: Combine with other reset weights method or at least flatten like it
     layer_names = list(reset_mask.keys())
     logs = {}
 
@@ -112,6 +103,8 @@ def ccbp2(
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
 ) -> optax.GradientTransformationExtraArgs:
+    """ Continuous Continual Backpropergation (CCBP) """
+
     def init(params: optax.Params, **kwargs):
         weights, bias, _ = utils.process_params(params["params"])
 
@@ -122,7 +115,6 @@ def ccbp2(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
-            accumulated_features_to_replace=0,
             **kwargs,
         )
 
@@ -188,8 +180,8 @@ def ccbp2(
             # Update ages
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), a + 1
-                ),  # Clip to stop huge ages unnessesarily
+                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold+1)
+                ),  # Clip to stop huge ages
                 state.ages,
                 reset_mask,
             )

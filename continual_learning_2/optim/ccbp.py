@@ -29,7 +29,6 @@ from dataclasses import field
 import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CBPOptimState
 
-# TODO: update momentums proportional to utility too? Like the reset methods do?
 
 # -------------- CCBP Weight reset ---------------
 def reset_weights(

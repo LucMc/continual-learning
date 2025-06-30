@@ -36,7 +36,7 @@ def ccbp_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name="ccbp",
+            run_name=f"ccbp_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_mnist",

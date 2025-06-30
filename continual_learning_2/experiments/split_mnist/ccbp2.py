@@ -4,13 +4,13 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
     LoggingConfig,
-    MLPConfig,
 )
-from continual_learning_2.configs import CCBP2Config, AdamConfig
+from continual_learning_2.configs import CCBP2Config, AdamConfig, MLPConfig, TrainingConfig
 
 
 def ccbp2_mnist_experiment():
     SEED = 42
+
     start = time.time()
     optim_conf = CCBP2Config(
         tx=AdamConfig(learning_rate=1e-3),
@@ -36,7 +36,7 @@ def ccbp2_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name="ccbp2",
+            run_name=f"ccbp2_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_mnist",

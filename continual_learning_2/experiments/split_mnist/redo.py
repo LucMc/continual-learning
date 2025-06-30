@@ -4,9 +4,9 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
     LoggingConfig,
-    MLPConfig,
+    TrainingConfig,
 )
-from continual_learning_2.configs import RedoConfig, AdamConfig
+from continual_learning_2.configs import RedoConfig, AdamConfig, MLPConfig
 
 
 def redo_mnist_experiment():
@@ -33,7 +33,7 @@ def redo_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name="redo",
+            run_name=f"redo_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_mnist",

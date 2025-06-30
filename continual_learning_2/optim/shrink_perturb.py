@@ -21,7 +21,7 @@ def shrink_perturb(
     perturb: float = 0.01,
     every_n: int = 1,
 ) -> optax.GradientTransformationExtraArgs:
-    """Shrink and perturb: [Ash & Adams, 2020](https://arxiv.org/abs/1910.08475) """
+    """ Shrink and perturb: [Ash & Adams, 2020](https://arxiv.org/abs/1910.08475) """
 
     def init(params):
         del params

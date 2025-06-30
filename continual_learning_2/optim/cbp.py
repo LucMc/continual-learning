@@ -28,19 +28,7 @@ from dataclasses import field
 import continual_learning_2.utils.optim as utils
 
 """
-This is an implementation of continual back propergation (CBP): https://www.nature.com/articles/s41586-024-07711-7
-
-:: Testing ::
-  * See testing list in test_reset.py
-
-:: Implementation ::
-  * Implement accumulated nodes to reset for inexact division by replacement rate
-
-:: Errors ::
-  * Assert statements throughout, check mask is always false when replacement rate is 0 and n_to_replace is also always zero etc same with maturity_threshold
-  * Is utility a good measure/ do we outperform random weight reinitialisation?
-"""
-
+This is an implementation of continual back propergation (CBP): """
 
 @dataclass
 class CBPOptimState:
@@ -48,7 +36,6 @@ class CBPOptimState:
     utilities: Float[Array, "#n_layers"]
     mean_feature_act: Float[Array, ""]
     ages: Array
-    accumulated_features_to_replace: int
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0, "avg_util": 0, "std_util": 0})
 
 
@@ -87,8 +74,9 @@ def cbp(
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
-    accumulate: bool = False,
 ) -> optax.GradientTransformationExtraArgs:
+    """ Continual Backpropergation (CBP): [Sokar et al.](https://www.nature.com/articles/s41586-024-07711-7) """
+
     def init(params: optax.Params, **kwargs):
         weights, bias, _ = utils.process_params(params["params"])
 
@@ -99,7 +87,6 @@ def cbp(
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
             mean_feature_act=jnp.zeros(0),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
-            accumulated_features_to_replace=0,
             **kwargs,
         )
 

@@ -38,7 +38,7 @@ def shrink_and_perturb_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name="redo",
+            run_name=f"shrink_and_perturb_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_mnist",

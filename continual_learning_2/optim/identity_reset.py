@@ -6,6 +6,7 @@ class IdentityState:
     logs: dict 
 
 def identity_reset(*args, **kwargs):
+    """ Identity reset method """
     
     def init_fn(params, *args, **kwargs):
         return IdentityState(logs={})

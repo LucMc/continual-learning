@@ -5,7 +5,6 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 )
 from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.configs import (
-    CBPConfig,
     AdamConfig,
     DatasetConfig,
     LoggingConfig,
@@ -35,7 +34,7 @@ def adam_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name="adam",
+            run_name=f"adam_{SEED}",
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_mnist",

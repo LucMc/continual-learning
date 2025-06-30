@@ -27,11 +27,6 @@ from dataclasses import field
 
 import continual_learning_2.utils.optim as utils
 
-"""
-This file implements ReDo: 
-https://github.com/google/dopamine/blob/master/dopamine/labs/redo/weight_recyclers.py
-as an optax optimizer
-"""
 
 # TODO: Features are bundled with params and don't need to passed in explicitly!
 
@@ -69,6 +64,8 @@ def redo(
     update_frequency: int = 100,
     score_threshold: float = 0.1,
 ) -> optax.GradientTransformationExtraArgs:
+    """ Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902) """
+
     def init(params: optax.Params, **kwargs):
         weights, bias, _ = utils.process_params(params["params"])
 
