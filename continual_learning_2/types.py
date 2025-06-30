@@ -79,13 +79,18 @@ class Rollout(NamedTuple):
     # Standard timestep data
     observations: Float[Observation, "timestep env"]
     actions: Float[Action, "timestep env"]
-    rewards: Float[np.ndarray, "timestep env 1"]
-    dones: Float[np.ndarray, "timestep env 1"]
+    rewards: Float[Reward, "timestep env 1"]
+    dones: Float[Done, "timestep env 1"]
 
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None
-    values: Float[np.ndarray, "timestep env 1"] | None = None
+    values: Float[Value, "timestep env 1"] | None = None
 
     # Computed statistics about observed rewards
-    returns: Float[np.ndarray, "timestep env 1"] | None = None
-    advantages: Float[np.ndarray, "timestep env 1"] | None = None
+    returns: Float[Value, "timestep env 1"] | None = None
+    advantages: Float[Value, "timestep env 1"] | None = None
+
+    # Logs
+    final_episode_returns: Float[Value, "timestep env 1"] | None = None
+    final_episode_lenghts: Float[Done, "timestep env 1"] | None = None
+    final_observations: Float[Observation, "timestep env"] | None = None

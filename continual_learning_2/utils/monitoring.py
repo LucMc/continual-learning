@@ -60,13 +60,13 @@ def get_logs(
 
 
 def explained_variance(
-    y_pred: Float[npt.NDArray, " total_num_steps"],
-    y_true: Float[npt.NDArray, " total_num_steps"],
+    y_pred: Float[npt.NDArray | Array, " total_num_steps"],
+    y_true: Float[npt.NDArray | Array, " total_num_steps"],
 ) -> float:
     # From SB3 https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/common/utils.py#L50
     assert y_true.ndim == 1 and y_pred.ndim == 1
-    var_y = np.var(y_true)
-    return np.nan if var_y == 0 else float(1 - np.var(y_true - y_pred) / var_y)
+    var_y = jnp.var(y_true)
+    return jnp.nan if var_y == 0 else float(1 - jnp.var(y_true - y_pred) / var_y)
 
 
 def get_dormant_neuron_logs(

@@ -9,6 +9,7 @@ import chex
 import distrax
 import flax.traverse_util
 import jax
+import jax.experimental
 import jax.flatten_util
 import jax.numpy as jnp
 import numpy as np
@@ -642,13 +643,14 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         self.start_step = self.total_steps = 0
         self.steps_per_task = train_cfg.num_steps // env_cfg.num_tasks
 
-    def save(self, env_state: EnvState, metrics: dict[str, float] | None):
+    def save(self, experiment_state: State, metrics: dict[str, float] | None):
+        agent_state, _, env_state = experiment_state
         self.ckpt_mgr.save(
             self.total_steps,
             args=ocp.args.Composite(
-                policy=ocp.args.StandardSave(self.policy),
-                vf=ocp.args.StandardSave(self.vf),
-                key=ocp.args.JaxRandomKeySave(self.key),
+                policy=ocp.args.StandardSave(agent_state.policy),
+                vf=ocp.args.StandardSave(agent_state.vf),
+                key=ocp.args.JaxRandomKeySave(agent_state.key),
                 benchmark=ocp.args.PyTreeSave(self.benchmark.save(env_state)),
             ),
             metrics=metrics,
@@ -688,23 +690,31 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         for _, envs in enumerate(self.benchmark.tasks):
             env_state, obs = envs.init()
 
-            def rollout(state: State) -> tuple[State, Timestep]:
-                # TODO: Episode lengths / returns here for logging
-                # TODO: maybe callback to log SPS / episodic metrics?
-
-                def step(state: State, _) -> tuple[State, Timestep]:
+            def rollout(state: State) -> tuple[State, Rollout]:
+                def step(state: State, _) -> tuple[State, Rollout]:
                     (policy, vf, key, total_steps), observation, env_states = state
                     key, actions, log_probs, values = self._sample_action_value_and_log_prob(
                         key, policy, vf, observation
                     )
                     env_states, data = envs.step(env_states, actions)
 
-                    # TODO: mix in log probs & values in timestep, prob requires a new type
+                    rollout = Rollout(
+                        observations=observation,
+                        actions=actions,
+                        rewards=data.reward,
+                        dones=jnp.logical_or(data.terminated, data.truncated),
+                        log_probs=log_probs,
+                        values=values,
+                        final_episode_lenghts=data.final_episode_lengths,
+                        final_episode_returns=data.final_episode_returns,
+                        final_observations=data.final_observation,
+                    )
+
                     return (
                         TrainerState(policy, vf, key, total_steps + self.benchmark.num_envs),
                         data.next_observation,
                         env_states,
-                    ), data
+                    ), rollout
 
                 return jax.lax.scan(
                     step,
@@ -717,27 +727,45 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             def train_step(state: State, _) -> tuple[State, LogDict]:
                 state, data = rollout(state)
                 agent_state, observation, env_states = state
+
+                assert data.final_observations is not None
+                next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
                 key, policy, vf, logs = self.update(
                     agent_state.key,
                     agent_state.policy,
                     agent_state.vf,
                     data,
-                    next_obs=observation,
+                    next_obs=next_obs,
                     cfg=self.cfg,
                 )
 
-                # TODO: maybe here if total_steps % some value = do callback and logging and stuff?
-                #     metrics = None
-                #     if self.total_steps % self.logger.cfg.eval_interval == 0:
-                #         metrics = self.benchmark.evaluate(
-                #             self, forgetting=self.logger.cfg.catastrophic_forgetting
-                #         )
-
-                return (
+                state = (
                     TrainerState(policy, vf, key, agent_state.total_steps),
                     observation,
                     env_states,
-                ), logs
+                )
+
+                # Logging
+                def logging_cb(state: State, logs: LogDict) -> None:
+                    self.total_steps += self.benchmark.num_envs * self.cfg.num_rollout_steps
+                    logs = logs | {
+                        "charts/SPS": (self.total_steps - self.start_step)
+                        / (time.time() - start_time)
+                    }
+                    self.logger.log(logs, step=self.total_steps)
+                    self.save(state)
+
+                assert data.final_episode_lenghts is not None
+                assert data.final_episode_returns is not None
+                running_logs = logs | {
+                    "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
+                    "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
+                }
+                jax.experimental.io_callback(logging_cb, None, state, running_logs)
+
+                # TODO: eval?
+
+                return state, logs
 
             ((self.policy, self.vf, self.key, self.total_steps), _, _), logs = jax.lax.scan(
                 train_step,
