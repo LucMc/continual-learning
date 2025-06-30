@@ -2,21 +2,42 @@ from dataclasses import dataclass
 
 import jax
 
+from continual_learning_2.configs.models import CNNConfig, MLPConfig, ResNetConfig
+from continual_learning_2.types import StdType
+
 from .optim import OptimizerConfig
+
+NetworkConfigType = MLPConfig | CNNConfig | ResNetConfig
 
 
 @dataclass(frozen=True)
 class NetworkConfig:
-    optim_config: OptimizerConfig
+    optimizer: OptimizerConfig
+    network: NetworkConfigType
 
     kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
 
 
 @dataclass(frozen=True)
+class PolicyNetworkConfig:
+    optimizer: OptimizerConfig
+    network: NetworkConfigType
+    log_std_min: float = -20.0
+    log_std_max: float = 2.0
+    std_type: StdType = StdType.PARAM
+
+
+@dataclass(frozen=True)
+class ValueFunctionConfig:
+    optimizer: OptimizerConfig
+    network: NetworkConfigType
+
+
+@dataclass(frozen=True)
 class PPOConfig:
-    policy_config: NetworkConfig
-    vf_config: NetworkConfig
+    policy_config: PolicyNetworkConfig
+    vf_config: ValueFunctionConfig
     clip_eps: float = 0.2
     clip_vf_loss: bool = True
     entropy_coefficient: float = 5e-3

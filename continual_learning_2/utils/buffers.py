@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 
 from continual_learning_2.envs.base import ContinualLearningEnv
 from continual_learning_2.types import Action, Done, Observation, Reward, Rollout
@@ -82,7 +82,7 @@ class RolloutBuffer:
         obs: Float[Observation, " env"],
         action: Float[Action, " env"],
         reward: Float[Reward, " env"],
-        done: Float[Done, " env"],
+        done: Bool[Done, " env"],
         value: Float[Reward, " env"] | None = None,
         log_prob: Float[Reward, " env"] | None = None,
     ):

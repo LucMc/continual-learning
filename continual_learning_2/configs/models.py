@@ -8,7 +8,7 @@ import jax.numpy as jnp
 
 @dataclass
 class MLPConfig:
-    output_size: int
+    output_size: int = 1
     hidden_size: int = 256
     num_layers: int = 2
     dropout: float | None = None
@@ -22,7 +22,7 @@ class MLPConfig:
 
 @dataclass
 class CNNConfig:
-    output_size: int
+    output_size: int = 1
 
     # ConvNet feature extractor
     features: Sequence[int] = (64, 128, 256)
@@ -47,7 +47,7 @@ class CNNConfig:
 
 @dataclass
 class ResNetConfig:
-    output_size: int
+    output_size: int = 1
 
     # ConvNet feature extractor
     stage_sizes: Sequence[int] = (2, 2, 2, 2)

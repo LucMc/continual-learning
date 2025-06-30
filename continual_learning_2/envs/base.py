@@ -10,7 +10,6 @@ from continual_learning_2.types import (
     EnvState,
     EpisodeLengths,
     EpisodeReturns,
-    EpisodeStarted,
     Observation,
     Reward,
 )

@@ -1,4 +1,5 @@
 # pyright: reportCallIssue=false
+import dataclasses
 import os
 import time
 from collections import deque
@@ -22,15 +23,23 @@ from continual_learning_2.configs import (
     EnvConfig,
     LoggingConfig,
 )
-from continual_learning_2.configs.rl import PPOConfig
+from continual_learning_2.configs.models import MLPConfig
+from continual_learning_2.configs.optim import AdamConfig
+from continual_learning_2.configs.rl import (
+    NetworkConfig,
+    PolicyNetworkConfig,
+    PPOConfig,
+    ValueFunctionConfig,
+)
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import (
     ContinualLearningEnv,
     VectorEnv,
     get_benchmark,
 )
-from continual_learning_2.envs.base import JittableContinualLearningEnv, Timestep
-from continual_learning_2.models import get_model
+from continual_learning_2.envs.base import JittableContinualLearningEnv
+from continual_learning_2.models import get_model, get_model_cls
+from continual_learning_2.models.rl import Policy
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.types import (
     Action,
@@ -39,6 +48,7 @@ from continual_learning_2.types import (
     LogProb,
     Observation,
     Rollout,
+    StdType,
     Value,
 )
 from continual_learning_2.utils.buffers import RolloutBuffer, compute_gae_scan
@@ -105,7 +115,7 @@ class PPO:
         policy: TrainState,
         vf: TrainState,
         data: Rollout,
-        next_obs: Float[Observation, " ..."],
+        next_obs: Observation,
         cfg: PPOConfig,
     ) -> tuple[PRNGKeyArray, TrainState, TrainState, LogDict]:
         key, last_values_key = jax.random.split(key)
@@ -409,7 +419,21 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
         self.benchmark = benchmark
         self.train_cfg = train_cfg
 
-        policy_module = get_model(ppo_config.policy_config)
+        # Load correct action dimension
+        action_dim = (
+            self.benchmark.action_dim * 2
+            if ppo_config.policy_config.std_type == StdType.MLP_HEAD
+            else self.benchmark.action_dim
+        )
+        ppo_config = dataclasses.replace(
+            ppo_config,
+            network=dataclasses.replace(
+                ppo_config.policy_config.network, output_size=action_dim
+            ),
+        )
+
+        policy_network_module = get_model_cls(ppo_config.policy_config.network)
+        policy_module = Policy(policy_network_module, ppo_config.policy_config)
         self.policy = TrainState.create(
             apply_fn=jax.jit(policy_module.apply, static_argnames=("training", "mutable")),
             params=policy_module.lazy_init(
@@ -418,9 +442,9 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
                 training=False,
                 mutable=DenyList(["activations", "preactivations"]),
             ),
-            tx=get_optimizer(ppo_config.policy_config.optim_config),
-            kernel_init=ppo_config.policy_config.kernel_init,
-            bias_init=ppo_config.policy_config.bias_init,
+            tx=get_optimizer(ppo_config.policy_config.optimizer),
+            kernel_init=ppo_config.policy_config.network.kernel_init,
+            bias_init=ppo_config.policy_config.network.bias_init,
         )
 
         vf_module = get_model(ppo_config.vf_config)
@@ -432,13 +456,13 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
                 training=False,
                 mutable=DenyList(["activations", "preactivations"]),
             ),
-            tx=get_optimizer(ppo_config.vf_config.optim_config),
-            kernel_init=ppo_config.vf_config.kernel_init,
-            bias_init=ppo_config.vf_config.bias_init,
+            tx=get_optimizer(ppo_config.vf_config.optimizer),
+            kernel_init=ppo_config.vf_config.network.kernel_init,
+            bias_init=ppo_config.vf_config.network.bias_init,
         )
 
         self.start_step = self.total_steps = 0
-        self.steps_per_task = train_cfg.num_steps // env_cfg.num_tasks
+        self.steps_per_task = train_cfg.steps_per_task // env_cfg.num_tasks
         self.buffer = RolloutBuffer(ppo_config.num_rollout_steps, self.benchmark)
         self.episodic_returns: Deque[float] = deque([], maxlen=20 * self.benchmark.num_envs)
         self.episodic_lengths: Deque[int] = deque([], maxlen=20 * self.benchmark.num_envs)
@@ -612,7 +636,21 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         self.benchmark = benchmark
         self.train_cfg = train_cfg
 
-        policy_module = get_model(ppo_config.policy_config)
+        # Load correct action dimension
+        action_dim = (
+            self.benchmark.action_dim * 2
+            if ppo_config.policy_config.std_type == StdType.MLP_HEAD
+            else self.benchmark.action_dim
+        )
+        ppo_config = dataclasses.replace(
+            ppo_config,
+            network=dataclasses.replace(
+                ppo_config.policy_config.network, output_size=action_dim
+            ),
+        )
+
+        policy_network_module = get_model_cls(ppo_config.policy_config.network)
+        policy_module = Policy(policy_network_module, ppo_config.policy_config)
         self.policy = TrainState.create(
             apply_fn=jax.jit(policy_module.apply, static_argnames=("training", "mutable")),
             params=policy_module.lazy_init(
@@ -621,9 +659,9 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 training=False,
                 mutable=DenyList(["activations", "preactivations"]),
             ),
-            tx=get_optimizer(ppo_config.policy_config.optim_config),
-            kernel_init=ppo_config.policy_config.kernel_init,
-            bias_init=ppo_config.policy_config.bias_init,
+            tx=get_optimizer(ppo_config.policy_config.optimizer),
+            kernel_init=ppo_config.policy_config.network.kernel_init,
+            bias_init=ppo_config.policy_config.network.bias_init,
         )
 
         vf_module = get_model(ppo_config.vf_config)
@@ -635,13 +673,13 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 training=False,
                 mutable=DenyList(["activations", "preactivations"]),
             ),
-            tx=get_optimizer(ppo_config.vf_config.optim_config),
-            kernel_init=ppo_config.vf_config.kernel_init,
-            bias_init=ppo_config.vf_config.bias_init,
+            tx=get_optimizer(ppo_config.vf_config.optimizer),
+            kernel_init=ppo_config.vf_config.network.kernel_init,
+            bias_init=ppo_config.vf_config.network.bias_init,
         )
 
         self.start_step = self.total_steps = 0
-        self.steps_per_task = train_cfg.num_steps // env_cfg.num_tasks
+        self.steps_per_task = train_cfg.steps_per_task
 
     def save(self, experiment_state: State, metrics: dict[str, float] | None):
         agent_state, _, env_state = experiment_state
@@ -780,3 +818,40 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             )
 
             self.logger.log(get_last_metrics(logs))
+
+
+if __name__ == "__main__":
+    import os
+    import time
+
+    SEED = 42
+
+    start = time.time()
+    trainer = JittedContinualPPOTrainer(
+        seed=SEED,
+        ppo_config=PPOConfig(
+            policy_config=PolicyNetworkConfig(
+                optimizer=AdamConfig(learning_rate=3e-4),
+                network=MLPConfig(),
+            ),
+            vf_config=ValueFunctionConfig(
+                optimizer=AdamConfig(learning_rate=3e-4),
+                network=MLPConfig(),
+            ),
+        ),
+        env_cfg=EnvConfig("slippery_ant", num_envs=10, num_tasks=5),
+        train_cfg=RLTrainingConfig(
+            resume=True,
+            steps_per_task=1_000_000,
+        ),
+        logs_cfg=LoggingConfig(
+            run_name="continual_ant_debug_0",
+            wandb_entity="evangelos-ch",
+            wandb_project="continual_learning_2",
+            wandb_mode="disabled",
+        ),
+    )
+
+    trainer.train()
+
+    print(f"Training time: {time.time() - start:.2f} seconds")

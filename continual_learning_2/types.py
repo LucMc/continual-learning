@@ -80,7 +80,7 @@ class Rollout(NamedTuple):
     observations: Float[Observation, "timestep env"]
     actions: Float[Action, "timestep env"]
     rewards: Float[Reward, "timestep env 1"]
-    dones: Float[Done, "timestep env 1"]
+    dones: Bool[npt.NDArray | Array, "timestep env 1"]
 
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None
@@ -92,5 +92,5 @@ class Rollout(NamedTuple):
 
     # Logs
     final_episode_returns: Float[Value, "timestep env 1"] | None = None
-    final_episode_lenghts: Float[Done, "timestep env 1"] | None = None
+    final_episode_lenghts: Float[npt.NDArray | Array, "timestep env 1"] | None = None
     final_observations: Float[Observation, "timestep env"] | None = None
