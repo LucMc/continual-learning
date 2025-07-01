@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 
-@dataclass
+@dataclass(frozen=True)
 class MLPConfig:
     output_size: int = 1
     hidden_size: int = 256

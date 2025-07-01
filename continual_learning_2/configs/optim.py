@@ -3,11 +3,12 @@ from dataclasses import dataclass
 import optax
 
 
-@dataclass
+@dataclass(frozen=True)
 class OptimizerConfig:
     learning_rate: float | optax.Schedule
 
 
+@dataclass(frozen=True)
 class AdamConfig(OptimizerConfig):
     beta1: float = 0.9
     beta2: float = 0.999

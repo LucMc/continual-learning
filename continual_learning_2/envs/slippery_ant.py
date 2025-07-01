@@ -36,7 +36,7 @@ class SlipperyAnt(Ant):
         contact_force_range=(-1.0, 1.0),
         reset_noise_scale=0.1,
         exclude_current_positions_from_observation=True,
-        backend="generalized",
+        backend="mjx",
         **kwargs,
     ):
         #### This whole loop is copypasted from the parent class, except
@@ -127,7 +127,9 @@ class AutoResetWrapper(Wrapper):
         # Save final obs
         assert isinstance(state.obs, jax.Array)
         state.info.update(
-            final_observation=jnp.where(state.done, state.obs, jnp.zeros_like(state.obs))
+            final_observation=jnp.where(
+                state.done[:, None], state.obs, jnp.zeros_like(state.obs)
+            )
         )
 
         if "steps" in state.info:
@@ -156,8 +158,8 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
         episode_length: int,
         env_checkpoint: EnvState | None,
     ):
-        self.envs = VmapWrapper(env, batch_size=num_envs)
-        self.envs = EpisodeWrapper(self.envs, episode_length=episode_length, action_repeat=1)
+        self.envs = EpisodeWrapper(env, episode_length=episode_length, action_repeat=1)
+        self.envs = VmapWrapper(self.envs, batch_size=num_envs)
         self.envs = AutoResetWrapper(self.envs)
         self.key = jax.random.PRNGKey(seed)
 

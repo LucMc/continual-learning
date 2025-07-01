@@ -449,8 +449,8 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
             bias_init=ppo_config.policy_config.network.bias_init,
         )
 
-        vf_module = get_model(ppo_config.vf_config)
-        self.value_function = TrainState.create(
+        vf_module = get_model(ppo_config.vf_config.network)
+        self.vf = TrainState.create(
             apply_fn=jax.jit(vf_module.apply, static_argnames=("training", "mutable")),
             params=vf_module.lazy_init(
                 vf_init_key,
@@ -486,11 +486,13 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
     def load(self, step: int):
         if step == -1:
             latest_step = self.ckpt_mgr.latest_step()
-            assert latest_step is not None, "No checkpoint found"
+            if latest_step is None:
+                return
+
             step = latest_step
 
         ckpt = self.ckpt_mgr.restore(
-            self.ckpt_mgr.latest_step() if step == -1 else step,
+            step,
             args=ocp.args.Composite(
                 policy=ocp.args.StandardRestore(self.policy),
                 vf=ocp.args.StandardRestore(self.vf),
@@ -669,8 +671,8 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             bias_init=ppo_config.policy_config.network.bias_init,
         )
 
-        vf_module = get_model(ppo_config.vf_config)
-        self.value_function = TrainState.create(
+        vf_module = get_model(ppo_config.vf_config.network)
+        self.vf = TrainState.create(
             apply_fn=jax.jit(vf_module.apply, static_argnames=("training", "mutable")),
             params=vf_module.lazy_init(
                 vf_init_key,
@@ -702,7 +704,9 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
     def load(self, step: int):
         if step == -1:
             latest_step = self.ckpt_mgr.latest_step()
-            assert latest_step is not None, "No checkpoint found"
+            if latest_step is None:
+                return
+
             step = latest_step
 
         # Get dummy env state so we can use PyTreeRestore
@@ -710,7 +714,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         dummy_state = task.init()
 
         ckpt = self.ckpt_mgr.restore(
-            self.ckpt_mgr.latest_step() if step == -1 else step,
+            step,
             args=ocp.args.Composite(
                 policy=ocp.args.StandardRestore(self.policy),
                 vf=ocp.args.StandardRestore(self.vf),
@@ -772,7 +776,9 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 agent_state, observation, env_states = state
 
                 assert data.final_observations is not None
-                next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
+                next_obs = jnp.where(
+                    data.dones[-1][:, None], data.final_observations[-1], observation
+                )
                 key, policy, vf, logs = self.update(
                     agent_state.key,
                     agent_state.policy,
