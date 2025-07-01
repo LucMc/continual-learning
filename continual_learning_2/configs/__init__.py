@@ -9,7 +9,6 @@ from .optim import (
     RedoConfig,
     CBPConfig,
     CCBPConfig,
-    CCBP2Config,
     OptimizerConfig,
     ResetMethodConfig,
 )
@@ -26,7 +25,6 @@ __all__ = [
     "RedoConfig",
     "CBPConfig",
     "CCBPConfig",
-    "CCBP2Config",
     "OptimizerConfig",
     "ResetMethodConfig",
 ]

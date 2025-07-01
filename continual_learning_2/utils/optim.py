@@ -11,39 +11,45 @@ import optax
 import continual_learning.optim as optim
 from typing import Callable
 
-def process_params(params: PyTree):
-    out_layer_name = "output"
-    # Removed deep copy of params however be careful as changes to `weights` and `bias` are
+#
+# def process_params(params: PyTree):
+#     out_layer_name = "output"
+#     # Removed deep copy of params however be careful as changes to `weights` and `bias` are
+#
+#     excluded = {
+#         out_layer_name: params[out_layer_name]
+#     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+#     bias = {}
+#     weights = {}
+#
+#     for layer_name in params.keys():
+#         # For layer norm etc
+#         if type(params[layer_name]) != dict:
+#             excluded.update({layer_name: params[layer_name]})
+#             continue
+#
+#         elif not ("kernel" in params[layer_name].keys()):
+#             excluded.update({layer_name: params[layer_name]})
+#             continue
+#
+#         bias[layer_name] = params[layer_name]["bias"]
+#         weights[layer_name] = params[layer_name]["kernel"]
+#
+#     # out_w_mag = get_out_weights_mag(weights)
+#
+#     # Remove output layer
+#     # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
+#     weights.pop(out_layer_name)
+#     bias.pop(out_layer_name)
+#
+#     return weights, bias, excluded
 
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
 
-    for layer_name in params.keys():
-        # For layer norm etc
-        if type(params[layer_name]) != dict:
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        elif not ("kernel" in params[layer_name].keys()):
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        bias[layer_name] = params[layer_name]["bias"]
-        weights[layer_name] = params[layer_name]["kernel"]
-
-    # out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, excluded
-
-
+# def extract_weights_biases(params):
+#     flat_params = flax.traverse_util.flatten_dict(params)
+#     weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
+#     biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+#
 def get_out_weights_mag(weights): #TODO: Check/test
     w_mags = jax.tree.map(
         lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
@@ -53,37 +59,37 @@ def get_out_weights_mag(weights): #TODO: Check/test
     return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
 
 
-def process_params_with_outmag(params: PyTree):
-    # TODO: Make out_w_mag optional so can be used by redo too
-    out_layer_name = "output"
-
-    excluded = {
-        out_layer_name: params[out_layer_name]
-    }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-    bias = {}
-    weights = {}
-
-    for layer_name in params.keys():
-        # For layer norm etc
-        if type(params[layer_name]) != dict:
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        elif not ("kernel" in params[layer_name].keys()):
-            excluded.update({layer_name: params[layer_name]})
-            continue
-
-        bias[layer_name] = params[layer_name]["bias"]
-        weights[layer_name] = params[layer_name]["kernel"]
-
-    out_w_mag = get_out_weights_mag(weights)
-
-    # Remove output layer
-    weights.pop(out_layer_name)
-    bias.pop(out_layer_name)
-
-    return weights, bias, out_w_mag, excluded
-
+# def process_params_with_outmag(params: PyTree):
+#     # TODO: Make out_w_mag optional so can be used by redo too
+#     out_layer_name = "output"
+#
+#     excluded = {
+#         out_layer_name: params[out_layer_name]
+#     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
+#     bias = {}
+#     weights = {}
+#
+#     for layer_name in params.keys():
+#         # For layer norm etc
+#         if type(params[layer_name]) != dict:
+#             excluded.update({layer_name: params[layer_name]})
+#             continue
+#
+#         elif not ("kernel" in params[layer_name].keys()):
+#             excluded.update({layer_name: params[layer_name]})
+#             continue
+#
+#         bias[layer_name] = params[layer_name]["bias"]
+#         weights[layer_name] = params[layer_name]["kernel"]
+#
+#     out_w_mag = get_out_weights_mag(weights)
+#
+#     # Remove output layer
+#     weights.pop(out_layer_name)
+#     bias.pop(out_layer_name)
+#
+#     return weights, bias, out_w_mag, excluded
+#
 
 
 def attach_reset_method(
@@ -132,6 +138,104 @@ def attach_reset_method(
 
     return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
+def new_reset_weights(
+    key_tree: PRNGKeyArray,
+    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    replacement_rate: Float[Array, ""] = None,
+):
+    all_layer_names = list(layer_w.keys())
+    all_mask_names = list(reset_mask.keys()) # Just to check layer names are the same
+    logs = {}
+
+    def expand_mask_for_weights(mask_1d, weight_shape, mask_type='incoming'):
+        # seperate masks for in/out similar to the official ReDo
+        if len(weight_shape) == 2:  # Dense
+            if mask_type == 'incoming':
+                return mask_1d[None, :]
+            else:  # outgoing
+                return mask_1d[:, None]
+                
+        elif len(weight_shape) == 4:  # Conv
+            if mask_type == 'incoming':
+                return mask_1d[None, None, None, :]
+            else:  # outgoing
+                return mask_1d[None, None, :, None]
+        else:
+            raise ValueError(f"Unsupported weight shape: {weight_shape}")
+
+    # assert all_layer_names[-1] == 'output', "Last layer should be Dense with name 'output'"
+
+    for idx, layer_name in enumerate(all_layer_names[:-1]):
+        assert layer_name in all_mask_names, f"Layer names should be identical: {layer_name} not in {all_mask_names}"
+
+        in_mask_1d = reset_mask[layer_name]
+        assert in_mask_1d.dtype == bool, f"Mask type isn't bool for {layer_name}"
+        
+        # Reset incoming weights
+        in_weight_mask = expand_mask_for_weights(
+            in_mask_1d, layer_w[layer_name].shape, mask_type='incoming'
+        )
+        
+        random_weights = weight_init_fn(key_tree[layer_name], layer_w[layer_name].shape)
+        layer_w[layer_name] = jnp.where(
+            in_weight_mask, random_weights, layer_w[layer_name]
+        )
+        
+        # Reset outgoing weights
+        if idx + 1 < len(all_layer_names):
+            next_layer = all_layer_names[idx + 1]
+            out_weight_shape = layer_w[next_layer].shape
+            
+            if len(out_weight_shape) == 2:  # Dense layer
+                if len(layer_w[layer_name].shape) == 4: # Check if previous layer was conv
+                    spatial_size = out_weight_shape[0] // in_mask_1d.size
+                    out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
+                else: # Dense -> Dense
+                    out_mask_1d = in_mask_1d
+                    
+            elif len(out_weight_shape) == 4:  # Conv layer
+                # Check if input channels match
+                expected_in_channels = out_weight_shape[2]
+                out_mask_1d = in_mask_1d
+            
+            # Apply outgoing mask
+            out_weight_mask = expand_mask_for_weights(
+                out_mask_1d, out_weight_shape, mask_type='outgoing'
+            )
+            
+            layer_w[next_layer] = jnp.where(
+                out_weight_mask, jnp.zeros_like(layer_w[next_layer]), layer_w[next_layer]
+            )
+        
+        # Count reset neurons
+        n_reset = in_mask_1d.sum()
+        logs[layer_name] = {"nodes_reset": n_reset}
+
+    # Handle last layer seperately as there is no outgoing reset
+    last_layer = all_layer_names[-1]
+    output_mask_1d = reset_mask[last_layer]
+    output_weight_shape = layer_w[last_layer].shape
+
+    if len(out_weight_shape) == 2:  # Dense
+        assert out_mask_1d.size == out_weight_shape[0], \
+            f"Mask size {out_mask_1d.size} != weight dim {out_weight_shape[0]}"
+
+    # Only reset incoming weights for output layer
+    output_weight_mask = expand_mask_for_weights(
+        output_mask_1d, output_weight_shape, mask_type='incoming'
+    )
+    
+    random_weights = weight_init_fn(key_tree[last_layer], output_weight_shape)
+    layer_w[last_layer] = jnp.where(
+        output_weight_mask, random_weights, layer_w[last_layer]
+    )
+    
+    logs[last_layer] = {"nodes_reset": output_mask_1d.sum()}
+
+    return layer_w, logs
+
 def reset_weights(
     key_tree: PRNGKeyArray,
     reset_mask: PyTree[Bool[Array, "#neurons"]],
@@ -151,10 +255,11 @@ def reset_weights(
         m_in_layer = activation_layer_names[i]
         m_out_layer = activation_layer_names[i + 1]
 
+        # mask_broadcast = jax.lax.select(len(layer_w[w_in_layer])==4, [None,None,None,1], [])
         assert reset_mask[m_in_layer].dtype == bool, "Mask type isn't bool"
-        assert len(reset_mask[m_in_layer].flatten()) == layer_w[w_out_layer].shape[0], (  # ?
-            f"Reset mask shape incorrect: {len(reset_mask[m_in_layer].flatten())} should be {layer_w[w_out_layer].shape[0]}"
-        )
+        # assert len(reset_mask[m_in_layer].flatten()) == layer_w[w_out_layer].shape[0], (  # ?
+        #     f"Reset mask shape incorrect: {len(reset_mask[m_in_layer].flatten())} should be {layer_w[w_out_layer].shape[0]}"
+        # )
 
         in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
         random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)

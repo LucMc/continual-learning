@@ -5,7 +5,6 @@ from continual_learning_2.configs.optim import (
     AdamConfig,
     CBPConfig,
     CCBPConfig,
-    CCBP2Config,
     RedoConfig,
     ShrinkAndPerterbConfig,
     OptimizerConfig,
@@ -14,7 +13,6 @@ from continual_learning_2.utils.optim import attach_reset_method
 
 from .redo import redo
 from .ccbp import ccbp
-from .ccbp_2 import ccbp2
 from .shrink_perturb import shrink_perturb
 from .cbp import cbp
 from .identity_reset import identity_reset
@@ -48,10 +46,6 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
     elif isinstance(config, CCBPConfig):
         return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
                                    ("reset_method", ccbp(**config.__dict__)))
-
-    elif isinstance(config, CCBP2Config):
-        return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
-                                   ("reset_method", ccbp2(**config.__dict__)))
     else:
         raise ValueError(f"Unsupported optimizer config type: {type(config)}")
 

@@ -38,19 +38,15 @@ class RedoConfig(ResetMethodConfig):
     
 @dataclass(frozen=True)
 class CBPConfig(ResetMethodConfig):
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform()
+    seed: int = 42
     replacement_rate: float = 0.1
     decay_rate: float = 0.99
     maturity_threshold: int = 20
     
 @dataclass(frozen=True)
 class CCBPConfig(ResetMethodConfig):
-    replacement_rate: float
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform()
+    replacement_rate: float = 0.1
     decay_rate: float = 0.99
     maturity_threshold: float = 20
-    
-@dataclass(frozen=True)
-class CCBP2Config(ResetMethodConfig):
-    replacement_rate: float = 0.001
-    decay_rate: float = 0.99
-    maturity_threshold: float = 20
-    

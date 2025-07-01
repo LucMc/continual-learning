@@ -45,7 +45,7 @@ class CNN(nn.Module):
                 if self.config.dropout is not None:
                     x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
 
-                self.sow("activations", f"conv_{feature}_{layer}_act", flatten_last(x))
+                self.sow("activations", f"conv_{feature}_{layer}_act", x)
 
             if self.config.use_max_pooling:
                 x = nn.max_pool(
@@ -56,11 +56,11 @@ class CNN(nn.Module):
         x = x.reshape((x.shape[0], -1))
         for layer in range(self.config.num_dense_layers):
             x = Dense(self.config.dense_hidden_size)(x)
-            self.sow("preactivations", f"layer_{layer}_pre", x)
+            self.sow("preactivations", f"Dense_{layer}_pre", x)
             x = self.config.activation_fn(x)
             if self.config.dropout is not None:
                 x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
-            self.sow("activations", f"layer_{layer}_act", x)
+            self.sow("activations", f"Dense_{layer}_act", x)
 
         self.sow("preactivations", "output_pre", x)
         x = Dense(self.config.output_size, name="output")(x)

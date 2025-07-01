@@ -15,7 +15,7 @@ from jaxtyping import (
     Int,
 )
 from flax.training.train_state import TrainState
-from typing import Tuple
+from typing import Tuple, Callable
 from chex import dataclass
 import optax
 import jax
@@ -32,10 +32,9 @@ This is an implementation of continual back propergation (CBP): """
 
 @dataclass
 class CBPOptimState:
-    initial_weights: PyTree[Float[Array, "..."]]
     utilities: Float[Array, "#n_layers"]
-    mean_feature_act: Float[Array, ""]
     ages: Array
+    rng: PRNGKeyArray
     logs: FrozenDict = FrozenDict({"avg_age": 0, "nodes_reset": 0, "avg_util": 0, "std_util": 0})
 
 
@@ -71,22 +70,26 @@ def get_reset_mask(
 
 # -------------- Main CBP Optimiser body ---------------
 def cbp(
+    seed: int,
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    # out_layer_name: str = 
 ) -> optax.GradientTransformationExtraArgs:
     """ Continual Backpropergation (CBP): [Sokar et al.](https://www.nature.com/articles/s41586-024-07711-7) """
 
     def init(params: optax.Params, **kwargs):
-        weights, bias, _ = utils.process_params(params["params"])
+        flat_params = flax.traverse_util.flatten_dict(params["params"])
+        biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
 
-        del params  # Delete params?
+        del params
 
         return CBPOptimState(
-            initial_weights=deepcopy(weights),
-            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), bias),
-            mean_feature_act=jnp.zeros(0),
-            ages=jax.tree.map(lambda x: jnp.zeros_like(x), bias),
+            # initial_weights=deepcopy(weights),
+            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
+            ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
+            rng=jax.random.PRNGKey(seed),
             **kwargs,
         )
 
@@ -103,11 +106,23 @@ def cbp(
         ) -> Tuple[optax.Updates, CBPOptimState]:
             # assert features, "Features must be provided in update"
             # _features = features["activations"][0]
+            out_layer_name = "output"
 
-            weights, bias, out_w_mag, excluded = utils.process_params_with_outmag(params["params"])
+            # Exclude final layer as it has no out weight mag
+            excluded = params["params"].pop(out_layer_name)
+            features.pop(out_layer_name+"_act")
+
+            flat_params = flax.traverse_util.flatten_dict(params["params"])
+
+            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
+            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+
+            out_w_mag = utils.get_out_weights_mag(weights)
+
+            # weights, bias, out_w_mag, excluded = utils.process_params_with_outmag(params["params"])
 
             # new_rng, util_key = random.split(rng)
-            # key_tree = utils.gen_key_tree(util_key, weights)
+            key_tree = utils.gen_key_tree(state.rng, weights)
 
             # vmap utility calculation over batch
             batched_util_calculation = jax.vmap(
@@ -141,8 +156,8 @@ def cbp(
             )
 
             # reset weights given mask
-            _weights, reset_logs = utils.reset_weights(
-                reset_mask, weights, state.initial_weights
+            _weights, reset_logs = utils.new_reset_weights(
+                key_tree, reset_mask, weights, weight_init_fn # state.initial_weights
             )
 
             # reset bias given mask
