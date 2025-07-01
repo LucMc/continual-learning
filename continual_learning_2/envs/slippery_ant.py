@@ -187,9 +187,9 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
 
         return state, Timestep(
             next_observation=state.obs,
-            reward=state.reward,
-            terminated=state.done - state.info["truncation"],
-            truncated=state.info["truncation"],
+            reward=state.reward[:, None],
+            terminated=(state.done - state.info["truncation"])[:, None],
+            truncated=state.info["truncation"][:, None],
             final_episode_returns=state.info["final_episode_returns"],
             final_episode_lengths=state.info["final_episode_lengths"],
             final_observation=state.info["final_observation"],

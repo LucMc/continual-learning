@@ -62,11 +62,11 @@ def get_logs(
 def explained_variance(
     y_pred: Float[npt.NDArray | Array, " total_num_steps"],
     y_true: Float[npt.NDArray | Array, " total_num_steps"],
-) -> float:
+) -> Float[Array, ""]:
     # From SB3 https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/common/utils.py#L50
     assert y_true.ndim == 1 and y_pred.ndim == 1
     var_y = jnp.var(y_true)
-    return jnp.nan if var_y == 0 else float(1 - jnp.var(y_true - y_pred) / var_y)
+    return jnp.where(var_y == 0, jnp.nan, 1 - jnp.var(y_true - y_pred) / var_y)
 
 
 def get_dormant_neuron_logs(
@@ -200,17 +200,16 @@ def average_histograms_concatenated(histograms: Histogram) -> Histogram:
     assert histograms.np_histogram is not None
     global_min = jnp.min(histograms.np_histogram[0])
     global_max = jnp.max(histograms.np_histogram[0])
-    print("TODO: Check that edges.shape is something like [EPOCHS,BATCHES,64] or something")
-    breakpoint()
     max_edges = histograms.np_histogram[1].shape[-1]
 
     target_bin_edges = jnp.linspace(global_min, global_max, 2 * max_edges - 1)
     target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
 
+    # TODO: we must flatten batch dims cause jnp interp just doesn't work unless we custom vmap it maybe?
     @jax.vmap
     def resample(data):
         counts, bin_edges = data
-        original_bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        original_bin_centers = (bin_edges[..., :-1] + bin_edges[..., 1:]) / 2
         resampled_counts = jnp.interp(target_bin_centers, original_bin_centers, counts)
         return resampled_counts
 

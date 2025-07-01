@@ -251,7 +251,7 @@ class PPO:
                     data.observations,
                     training=True,
                     rngs={"dropout": dropout_key},
-                    mutable=["preactivations", "activations"],
+                    mutable=("preactivations", "activations"),
                 )
 
                 chex.assert_equal_shape((new_values, data.returns))
@@ -269,7 +269,7 @@ class PPO:
 
             (_, (logs, intermediates)), vf_grads = jax.value_and_grad(
                 value_function_loss, has_aux=True
-            )(vf.params, data)
+            )(vf.params)
             vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
             grads_hist_dict = pytree_histogram(vf_grads["params"])
 
@@ -310,7 +310,7 @@ class PPO:
             )
 
         def train_minibatch(carry, minibatch: Rollout):
-            key, policy, vf = carry
+            policy, vf, key = carry
             policy, key, policy_logs = update_policy(policy, minibatch, key, cfg)
             vf, key, vf_logs = update_value_function(vf, minibatch, key, cfg)
             return (policy, vf, key), (policy_logs | vf_logs)
@@ -322,8 +322,12 @@ class PPO:
             rollout_size = data.observations.shape[0] * data.observations.shape[1]
 
             permutation = jax.random.permutation(permutation_key, rollout_size)
-            data = jax.tree.map(lambda x: x.reshape((rollout_size, *x.shape[2:])), data)
-            shuffled_data = jax.tree.map(lambda x: jnp.take(x, permutation, axis=0), data)
+            minibatched_data = jax.tree.map(
+                lambda x: x.reshape((rollout_size, *x.shape[2:])), data
+            )
+            shuffled_data = jax.tree.map(
+                lambda x: jnp.take(x, permutation, axis=0), minibatched_data
+            )
 
             minibatches = jax.tree.map(
                 lambda x: x.reshape(cfg.num_gradient_steps, -1, *x.shape[1:]),
@@ -776,9 +780,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 agent_state, observation, env_states = state
 
                 assert data.final_observations is not None
-                next_obs = jnp.where(
-                    data.dones[-1][:, None], data.final_observations[-1], observation
-                )
+                next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
                 key, policy, vf, logs = self.update(
                     agent_state.key,
                     agent_state.policy,
