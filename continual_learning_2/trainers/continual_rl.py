@@ -57,7 +57,6 @@ from continual_learning_2.utils.monitoring import (
     compute_srank,
     explained_variance,
     get_dormant_neuron_logs,
-    get_last_metrics,
     get_linearised_neuron_logs,
     get_logs,
     prefix_dict,
@@ -792,30 +791,30 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             )
             agent_state, observation, env_states = state
 
-            # assert data.final_observations is not None
-            # next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
-            # key, policy, vf, logs = self.update(
-            #     agent_state.key,
-            #     agent_state.policy,
-            #     agent_state.vf,
-            #     data,
-            #     next_obs=next_obs,
-            #     cfg=self.cfg,
-            # )
+            assert data.final_observations is not None
+            next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
+            key, policy, vf, logs = self.update(
+                agent_state.key,
+                agent_state.policy,
+                agent_state.vf,
+                data,
+                next_obs=next_obs,
+                cfg=self.cfg,
+            )
 
-            # state = (
-            #     TrainerState(policy, vf, key, agent_state.total_steps),
-            #     observation,
-            #     env_states,
-            # )
+            state = (
+                TrainerState(policy, vf, key, agent_state.total_steps),
+                observation,
+                env_states,
+            )
 
-            # # Logging
-            # assert data.final_episode_lenghts is not None
-            # assert data.final_episode_returns is not None
-            # logs = logs | {
-            #     "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
-            #     "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
-            # }
+            # Logging
+            assert data.final_episode_lenghts is not None
+            assert data.final_episode_returns is not None
+            logs = logs | {
+                "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
+                "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
+            }
             logs = {}
 
             # TODO: eval?
