@@ -361,7 +361,7 @@ class RLCheckpoints:
 
     def __init__(self, seed: int, logs_cfg: LoggingConfig):
         self.ckpt_mgr = ocp.CheckpointManager(
-            logs_cfg.checkpoint_dir / f"{logs_cfg.run_name}_{seed}",
+            logs_cfg.checkpoint_dir.absolute() / f"{logs_cfg.run_name}_{seed}",
             options=ocp.CheckpointManagerOptions(
                 save_decision_policy=ocp_mgrs.AnySavePolicy(
                     [
@@ -441,7 +441,7 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
         policy_network_module = get_model_cls(ppo_config.policy_config.network)
         policy_module = Policy(policy_network_module, ppo_config.policy_config)
         self.policy = TrainState.create(
-            apply_fn=jax.jit(policy_module.apply, static_argnames=("training", "mutable")),
+            apply_fn=policy_module.apply,
             params=policy_module.lazy_init(
                 policy_init_key,
                 self.benchmark.observation_spec,
@@ -455,7 +455,7 @@ class ContinualPPOTrainer(PPO, RLCheckpoints):
 
         vf_module = get_model(ppo_config.vf_config.network)
         self.vf = TrainState.create(
-            apply_fn=jax.jit(vf_module.apply, static_argnames=("training", "mutable")),
+            apply_fn=vf_module.apply,
             params=vf_module.lazy_init(
                 vf_init_key,
                 self.benchmark.observation_spec,
@@ -663,7 +663,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         policy_network_module = get_model_cls(ppo_config.policy_config.network)
         policy_module = Policy(policy_network_module, ppo_config.policy_config)
         self.policy = TrainState.create(
-            apply_fn=jax.jit(policy_module.apply, static_argnames=("training", "mutable")),
+            apply_fn=policy_module.apply,
             params=policy_module.lazy_init(
                 policy_init_key,
                 self.benchmark.observation_spec,
@@ -677,7 +677,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
 
         vf_module = get_model(ppo_config.vf_config.network)
         self.vf = TrainState.create(
-            apply_fn=jax.jit(vf_module.apply, static_argnames=("training", "mutable")),
+            apply_fn=vf_module.apply,
             params=vf_module.lazy_init(
                 vf_init_key,
                 self.benchmark.observation_spec,
@@ -692,8 +692,12 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         self.start_step = self.total_steps = 0
         self.steps_per_task = train_cfg.steps_per_task
 
-    def save(self, experiment_state: State, metrics: dict[str, float] | None):
+    def save(self, experiment_state: State, metrics: dict[str, float] | None = None):
         agent_state, _, env_state = experiment_state
+        env_state = jax.tree.map(
+            lambda x: jnp.zeros((1,)) if np.prod(x.shape) == 0 else x, env_state
+        )
+
         self.ckpt_mgr.save(
             self.total_steps,
             args=ocp.args.Composite(
@@ -716,6 +720,9 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         # Get dummy env state so we can use PyTreeRestore
         task = next(self.benchmark.tasks)
         dummy_state = task.init()
+        dummy_state = jax.tree.map(
+            lambda x: ocp.PLACEHOLDER if np.prod(x.shape) == 0 else x, dummy_state
+        )
 
         ckpt = self.ckpt_mgr.restore(
             step,
@@ -736,101 +743,110 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         if self.train_cfg.resume:
             self.load(step=self.train_cfg.resume_from_step)
 
+        def rollout(state: State) -> tuple[State, Rollout]:
+            def step(state: State, _) -> tuple[State, Rollout]:
+                (policy, vf, key, total_steps), observation, env_states = state
+                key, actions, log_probs, values = self._sample_action_value_and_log_prob(
+                    key, policy, vf, observation
+                )
+                env_states, data = envs.step(env_states, actions)
+
+                def _print(x: int):
+                    if x % 1_000 == 0:
+                        print(f"{x}, SPS: {x / (time.time() - start_time)}")
+
+                jax.experimental.io_callback(_print, None, total_steps)
+
+                rollout = Rollout(
+                    observations=observation,
+                    actions=actions,
+                    rewards=data.reward,
+                    dones=jnp.logical_or(data.terminated, data.truncated),
+                    log_probs=log_probs,
+                    values=values,
+                    final_episode_lenghts=data.final_episode_lengths,
+                    final_episode_returns=data.final_episode_returns,
+                    final_observations=data.final_observation,
+                )
+
+                return (
+                    TrainerState(policy, vf, key, total_steps + self.benchmark.num_envs),
+                    data.next_observation,
+                    env_states,
+                ), rollout
+
+            return jax.lax.scan(
+                step,
+                state,
+                None,
+                length=self.cfg.num_rollout_steps // self.benchmark.num_envs,
+            )
+
+        @jax.jit
+        def train_step(state: State) -> tuple[State, LogDict]:
+            state, data = rollout(state)
+            jax.debug.print(
+                "Steps: {steps}, {data}",
+                steps=state[0].total_steps,
+                data=jax.tree.map(lambda x: x.shape, data),
+            )
+            agent_state, observation, env_states = state
+
+            # assert data.final_observations is not None
+            # next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
+            # key, policy, vf, logs = self.update(
+            #     agent_state.key,
+            #     agent_state.policy,
+            #     agent_state.vf,
+            #     data,
+            #     next_obs=next_obs,
+            #     cfg=self.cfg,
+            # )
+
+            # state = (
+            #     TrainerState(policy, vf, key, agent_state.total_steps),
+            #     observation,
+            #     env_states,
+            # )
+
+            # # Logging
+            # assert data.final_episode_lenghts is not None
+            # assert data.final_episode_returns is not None
+            # logs = logs | {
+            #     "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
+            #     "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
+            # }
+            logs = {}
+
+            # TODO: eval?
+
+            return state, logs
+
         start_time = time.time()
 
         for _, envs in enumerate(self.benchmark.tasks):
             env_state, obs = envs.init()
+            logs = {}
 
-            def rollout(state: State) -> tuple[State, Rollout]:
-                def step(state: State, _) -> tuple[State, Rollout]:
-                    (policy, vf, key, total_steps), observation, env_states = state
-                    key, actions, log_probs, values = self._sample_action_value_and_log_prob(
-                        key, policy, vf, observation
+            for _ in range(
+                self.total_steps % self.steps_per_task,
+                self.steps_per_task,
+                self.cfg.num_rollout_steps,
+            ):
+                state, logs = train_step(
+                    (
+                        TrainerState(self.policy, self.vf, self.key, self.total_steps),
+                        obs,
+                        env_state,
                     )
-                    env_states, data = envs.step(env_states, actions)
-
-                    rollout = Rollout(
-                        observations=observation,
-                        actions=actions,
-                        rewards=data.reward,
-                        dones=jnp.logical_or(data.terminated, data.truncated),
-                        log_probs=log_probs,
-                        values=values,
-                        final_episode_lenghts=data.final_episode_lengths,
-                        final_episode_returns=data.final_episode_returns,
-                        final_observations=data.final_observation,
-                    )
-
-                    return (
-                        TrainerState(policy, vf, key, total_steps + self.benchmark.num_envs),
-                        data.next_observation,
-                        env_states,
-                    ), rollout
-
-                return jax.lax.scan(
-                    step,
-                    state,
-                    None,
-                    length=self.cfg.num_rollout_steps,
                 )
-
-            @jax.jit
-            def train_step(state: State, _) -> tuple[State, LogDict]:
-                state, data = rollout(state)
-                agent_state, observation, env_states = state
-
-                assert data.final_observations is not None
-                next_obs = jnp.where(data.dones[-1], data.final_observations[-1], observation)
-                key, policy, vf, logs = self.update(
-                    agent_state.key,
-                    agent_state.policy,
-                    agent_state.vf,
-                    data,
-                    next_obs=next_obs,
-                    cfg=self.cfg,
-                )
-
-                state = (
-                    TrainerState(policy, vf, key, agent_state.total_steps),
-                    observation,
-                    env_states,
-                )
-
-                # Logging
-                def logging_cb(state: State, logs: LogDict) -> None:
-                    self.total_steps += self.benchmark.num_envs * self.cfg.num_rollout_steps
-                    logs = logs | {
-                        "charts/SPS": (self.total_steps - self.start_step)
-                        / (time.time() - start_time)
-                    }
-                    self.logger.log(logs, step=self.total_steps)
-                    self.save(state)
-
-                assert data.final_episode_lenghts is not None
-                assert data.final_episode_returns is not None
-                running_logs = logs | {
-                    "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
-                    "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
+                (self.policy, self.vf, self.key, self.total_steps) = state[0]
+                logs = logs | {
+                    "charts/SPS": (self.total_steps - self.start_step)
+                    / (time.time() - start_time)
                 }
-                jax.experimental.io_callback(logging_cb, None, state, running_logs)
-
-                # TODO: eval?
-
-                return state, logs
-
-            ((self.policy, self.vf, self.key, self.total_steps), _, _), logs = jax.lax.scan(
-                train_step,
-                (
-                    TrainerState(self.policy, self.vf, self.key, self.total_steps),
-                    obs,
-                    env_state,
-                ),
-                None,
-                length=(self.total_steps % self.steps_per_task)
-                // (self.cfg.num_rollout_steps * self.benchmark.num_envs),
-            )
-
-            self.logger.log(get_last_metrics(logs))
+                self.logger.log(logs, step=self.total_steps)
+                # self.save(state)
 
 
 if __name__ == "__main__":
@@ -852,7 +868,7 @@ if __name__ == "__main__":
                 network=MLPConfig(),
             ),
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=10, num_tasks=5),
+        env_cfg=EnvConfig("slippery_ant", num_envs=2000, num_tasks=5, episode_length=500),
         train_cfg=RLTrainingConfig(
             resume=True,
             steps_per_task=1_000_000,

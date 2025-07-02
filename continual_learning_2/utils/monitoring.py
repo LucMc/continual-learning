@@ -205,7 +205,6 @@ def average_histograms_concatenated(histograms: Histogram) -> Histogram:
     target_bin_edges = jnp.linspace(global_min, global_max, 2 * max_edges - 1)
     target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
 
-    # TODO: we must flatten batch dims cause jnp interp just doesn't work unless we custom vmap it maybe?
     @jax.vmap
     def resample(data):
         counts, bin_edges = data
@@ -213,11 +212,15 @@ def average_histograms_concatenated(histograms: Histogram) -> Histogram:
         resampled_counts = jnp.interp(target_bin_centers, original_bin_centers, counts)
         return resampled_counts
 
-    resampled_counts = resample(histograms.np_histogram)
-    averaged_counts = jnp.average(resampled_counts, axis=0, weights=histograms.total_events)
+    flattened_histograms = jax.tree.map(
+        lambda x: x.reshape(-1, x.shape[-1]).astype(jnp.float32), histograms.np_histogram
+    )
+    flattened_events = jnp.reshape(histograms.total_events, -1)
+    resampled_counts = resample(flattened_histograms)
+    averaged_counts = jnp.average(resampled_counts, axis=0, weights=flattened_events)
 
     return Histogram(
-        total_events=jnp.sum(histograms.total_events).item(),
+        total_events=jnp.sum(histograms.total_events),  # pyright: ignore[reportArgumentType]
         np_histogram=(averaged_counts, target_bin_edges),
     )
 

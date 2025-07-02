@@ -10,7 +10,7 @@ class LoggingConfig:
     wandb_project: str
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
 
-    checkpoint_dir: Path = Path("checkpoints")
+    checkpoint_dir: Path = Path("./checkpoints").absolute()
     best_metric: str = "metrics/eval_score"
 
     interval: int = 100

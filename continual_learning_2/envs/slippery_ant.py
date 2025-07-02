@@ -199,6 +199,7 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
 class ContinualAnt(JittableContinualLearningEnv):
     def __init__(self, seed: int, config: EnvConfig):
         self._num_envs = config.num_envs
+        self._episode_length = config.episode_length
 
         rng = np.random.default_rng(seed)
         self.seed = seed
@@ -229,7 +230,7 @@ class ContinualAnt(JittableContinualLearningEnv):
             seed=self.seed,
             env=SlipperyAnt(friction=friction),
             num_envs=self.num_envs,
-            episode_length=1_000,
+            episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,
         )
 
