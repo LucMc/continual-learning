@@ -107,7 +107,7 @@ def redo(
             key_tree = utils.gen_key_tree(state.rng, weights)
 
             # reset weights given mask
-            _weights, reset_logs = utils.new_reset_weights(
+            _weights, reset_logs = utils.reset_weights(
                 key_tree, reset_mask, weights, weight_init_fn # state.initial_weights
             )
 

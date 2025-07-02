@@ -1,4 +1,4 @@
-from cgitb import reset
+import flax
 from flax import struct
 import flax.linen as nn
 from flax.core import FrozenDict
@@ -32,47 +32,6 @@ import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CBPOptimState
 
 # -------------- CCBP Weight reset ---------------
-def continuous_weight_reset(
-    reset_mask: PyTree[Float[Array, "#neurons"]], 
-    layer_w: PyTree[Float[Array, "..."]],
-    initial_weights: PyTree[Float[Array, "..."]],
-    utilities: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = 0.001,
-):
-    layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(layer_names) - 1):
-        in_layer = layer_names[i]
-        out_layer = layer_names[i + 1]
-
-        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
-
-        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-
-        stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
-            (1 - replacement_rate) * layer_w[in_layer]
-        )
-        stepped_util_in_weights = utilities[in_layer]*layer_w[in_layer] + (1-utilities[in_layer])*stepped_in_weights
-        _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
-
-        stepped_out_weights = (replacement_rate * zero_out_weights) + (
-            (1 - replacement_rate) * layer_w[out_layer]
-        )
-
-        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        stepped_util_out_weights = utilities[out_layer]*layer_w[out_layer] + (1-utilities[out_layer])*stepped_out_weights
-
-        _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
-
-        layer_w[in_layer] = _in_layer_w
-        layer_w[out_layer] = _out_layer_w
-
-        logs[in_layer] = {"nodes_reset": 0} # n_reset no longer applicable
-    logs[out_layer] = {"nodes_reset": 0}
-    return layer_w, logs
-
-
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
@@ -104,21 +63,25 @@ def ccbp(
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    out_layer_name: str = "output"
 ) -> optax.GradientTransformationExtraArgs:
     """ Continuous Continual Backpropergation (CCBP) """
 
-    flat_params = flax.traverse_util.flatten_dict(params["params"])
-    biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+    def init(params: optax.Params, **kwargs):
+        flat_params = flax.traverse_util.flatten_dict(params["params"])
+        biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+        biases.pop(out_layer_name)
 
-    del params
 
-    return CBPOptimState(
-        # initial_weights=deepcopy(weights),
-        utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
-        ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
-        rng=jax.random.PRNGKey(seed),
-        **kwargs,
-    )
+        del params
+
+        return CBPOptimState(
+            # initial_weights=deepcopy(weights),
+            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
+            ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
+            rng=jax.random.PRNGKey(seed),
+            **kwargs,
+        )
 
     @jax.jit
     def update(
@@ -128,16 +91,25 @@ def ccbp(
         features: Array | None = None,
         tx_state: optax.OptState | None = None
     ) -> tuple[optax.Updates, CBPOptimState]:
-        def _ccbp2(
+        def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-
+            # Separate weights and biases from params
             flat_params = flax.traverse_util.flatten_dict(params["params"])
+
             weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
             biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+
             out_w_mag = utils.get_out_weights_mag(weights)
 
-            key_tree = utils.gen_key_tree(state.rng, weights)
+            # Exclude final layer as it has no out weight mag
+            # excluded = params["params"].pop(out_layer_name)
+            weights.pop(out_layer_name)
+            biases.pop(out_layer_name)
+            features.pop(out_layer_name+"_act")
+
+            new_rng, util_key = random.split(state.rng)
+            key_tree = utils.gen_key_tree(util_key, weights)
 
             # vmap utility calculation over batch
             batched_util_calculation = jax.vmap(
@@ -169,20 +141,13 @@ def ccbp(
             )
 
             # reset weights given mask
-            print("Make the continuous weight reset method for ccbp(2)!")
-            breakpoint()
-            _weights, reset_logs = continuous_weight_reset( # TODO
-                reset_mask, weights, weight_init_fn, _utility, replacement_rate
+            _weights, reset_logs = utils.continuous_reset_weights( # TODO
+                key_tree, reset_mask, weights, weight_init_fn, _utility, replacement_rate
             )
 
             # reset bias given mask
             # Expermiment: reset bias/continuous reset bias/ leave bias alone
-            # _bias = jax.tree.map(
-            #     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
-            #     reset_mask,
-            #     bias,
-            # )
-            _bias = bias
+            _biases = biases
 
             # Update ages
             _ages = jax.tree.map(
@@ -201,10 +166,10 @@ def ccbp(
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
             # Logging
-            for layer_name in bias.keys():
+            for layer_name in biases.keys():
                 new_params[layer_name] = {
                     "kernel": _weights[layer_name],
-                    "bias": _bias[layer_name],
+                    "bias": _biases[layer_name],
                 }
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["avg_util"] += avg_util[layer_name]
@@ -212,12 +177,12 @@ def ccbp(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
-                ages=_ages, logs=FrozenDict(_logs), utilities=_utility
+                ages=_ages, logs=FrozenDict(_logs), rng=new_rng, utilities=_utility
             )
-            new_params.update(excluded)
+            # new_params.update({out_layer_name: excluded})
 
             return {"params": new_params}, new_state, tx_state
 
-        return _ccbp2(updates)
+        return _ccbp(updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)

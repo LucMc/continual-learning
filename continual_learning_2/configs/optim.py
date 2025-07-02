@@ -47,6 +47,7 @@ class CBPConfig(ResetMethodConfig):
 @dataclass(frozen=True)
 class CCBPConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
+    seed: int = 42
     replacement_rate: float = 0.1
     decay_rate: float = 0.99
     maturity_threshold: float = 20
