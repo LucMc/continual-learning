@@ -4,9 +4,9 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
     LoggingConfig,
-    MLPConfig,
 )
-from continual_learning_2.configs import CBPConfig, AdamConfig
+from continual_learning_2.configs import CBPConfig, AdamConfig, MLPConfig, TrainingConfig
+import jax
 
 
 def cbp_mnist_experiment():
@@ -17,6 +17,8 @@ def cbp_mnist_experiment():
         decay_rate=0.9,
         replacement_rate=0.5,
         maturity_threshold=20,
+        seed=42,
+        weight_init_fn=jax.nn.initializers.he_uniform()
     )
 
     # Add validation to say what the available options are for dataset etc

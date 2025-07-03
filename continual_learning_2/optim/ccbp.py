@@ -40,7 +40,7 @@ def get_updated_utility(  # Add batch dim
 ):
     # Remove batch dim from some inputs just in case
     updated_utility = (
-        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features) * out_w_mag
+        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=0) * out_w_mag
     ).flatten()  # Arr[#neurons]
     return nn.softmax(updated_utility)
 
@@ -79,6 +79,7 @@ def ccbp(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
+            mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases), # TODO: Remove
             rng=jax.random.PRNGKey(seed),
             **kwargs,
         )
@@ -94,41 +95,28 @@ def ccbp(
         def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
-            # Separate weights and biases from params
             flat_params = flax.traverse_util.flatten_dict(params["params"])
-
-            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
-            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
-
+            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
             out_w_mag = utils.get_out_weights_mag(weights)
-
-            # Exclude final layer as it has no out weight mag
-            # excluded = params["params"].pop(out_layer_name)
-            weights.pop(out_layer_name)
-            biases.pop(out_layer_name)
-            features.pop(out_layer_name+"_act")
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            # vmap utility calculation over batch
-            batched_util_calculation = jax.vmap(
-                partial(get_updated_utility, decay_rate=decay_rate),
-                in_axes=(None, None, 0),
-            )
-            # Flatten all the structures (for unmatched features/params pytrees)
-            out_w_mag_leaves, _ = jax.tree.flatten(out_w_mag)
-            utilities_leaves, utilities_tree_def = jax.tree.flatten(state.utilities)
-            features_leaves = [f[0] for f in jax.tree.leaves(features)]
+            # Features arrive as tuple so we have to restructure
+            w_mag_tdef = jax.tree.structure(out_w_mag)
+            flat_feats, _ = jax.tree.flatten(features)
 
-            # Apply the calculation to the leaves
-            utility_batch_leaves = [
-                batched_util_calculation(w, u, f)
-                for w, u, f in zip(out_w_mag_leaves, utilities_leaves, features_leaves)
-            ]
-            # Reconstruct the tree
-            _utility_batch = jax.tree.unflatten(utilities_tree_def, utility_batch_leaves)
-            _utility = jax.tree.map(lambda x: x.mean(axis=0), _utility_batch)
+            # Don't need out_layer feats and normalises layer names
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
+
+            _utility = jax.tree.map(
+                partial(get_updated_utility, decay_rate=decay_rate),
+                out_w_mag,
+                state.utilities,
+                # _mean_feature_act,
+                _features,
+            )
 
             reset_mask = jax.tree.map(
                 partial(
@@ -141,8 +129,13 @@ def ccbp(
             )
 
             # reset weights given mask
-            _weights, reset_logs = utils.continuous_reset_weights( # TODO
-                key_tree, reset_mask, weights, weight_init_fn, _utility, replacement_rate
+            _weights, reset_logs = utils.continuous_reset_weights(
+                key_tree,
+                reset_mask,  # No out_layer
+                weights,  # Yes out_layer
+                _utility,
+                weight_init_fn,
+                replacement_rate
             )
 
             # reset bias given mask
@@ -165,21 +158,23 @@ def ccbp(
             avg_util = jax.tree.map(lambda v: v.mean(), _utility)
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
-            # Logging
-            for layer_name in biases.keys():
+            # Logging TODO: Add stats from continuous resetweights
+            for layer_name in weights.keys():  # Exclude output layer
                 new_params[layer_name] = {
                     "kernel": _weights[layer_name],
                     "bias": _biases[layer_name],
                 }
+
+            for layer_name in reset_mask.keys():
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+
+                # _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
                 ages=_ages, logs=FrozenDict(_logs), rng=new_rng, utilities=_utility
             )
-            # new_params.update({out_layer_name: excluded})
 
             return {"params": new_params}, new_state, tx_state
 

@@ -3,10 +3,9 @@ import time
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
-    LoggingConfig,
-    MLPConfig,
+    LoggingConfig
 )
-from continual_learning_2.configs import CCBPConfig, AdamConfig
+from continual_learning_2.configs import CCBPConfig, AdamConfig, MLPConfig, TrainingConfig
 
 
 def ccbp_mnist_experiment():
@@ -14,6 +13,7 @@ def ccbp_mnist_experiment():
     start = time.time()
     optim_conf = CCBPConfig(
         tx=AdamConfig(learning_rate=1e-3),
+        seed=SEED,
         decay_rate=0.9,
         replacement_rate=0.5,
         maturity_threshold=20,

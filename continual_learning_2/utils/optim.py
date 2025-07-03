@@ -11,85 +11,14 @@ import optax
 import continual_learning.optim as optim
 from typing import Callable
 
-#
-# def process_params(params: PyTree):
-#     out_layer_name = "output"
-#     # Removed deep copy of params however be careful as changes to `weights` and `bias` are
-#
-#     excluded = {
-#         out_layer_name: params[out_layer_name]
-#     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-#     bias = {}
-#     weights = {}
-#
-#     for layer_name in params.keys():
-#         # For layer norm etc
-#         if type(params[layer_name]) != dict:
-#             excluded.update({layer_name: params[layer_name]})
-#             continue
-#
-#         elif not ("kernel" in params[layer_name].keys()):
-#             excluded.update({layer_name: params[layer_name]})
-#             continue
-#
-#         bias[layer_name] = params[layer_name]["bias"]
-#         weights[layer_name] = params[layer_name]["kernel"]
-#
-#     # out_w_mag = get_out_weights_mag(weights)
-#
-#     # Remove output layer
-#     # out_w_mag.pop(out_layer_name) # Removes nan for output layer as no out weights
-#     weights.pop(out_layer_name)
-#     bias.pop(out_layer_name)
-#
-#     return weights, bias, excluded
 
-
-# def extract_weights_biases(params):
-#     flat_params = flax.traverse_util.flatten_dict(params)
-#     weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
-#     biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
-#
-def get_out_weights_mag(weights): #TODO: Check/test
+def get_out_weights_mag(weights):  # TODO: Check/test
     w_mags = jax.tree.map(
         lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
     )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of out_layer but should be eqivalent
 
     keys = list(w_mags.keys())
-    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys)- 1)}
-
-
-# def process_params_with_outmag(params: PyTree):
-#     # TODO: Make out_w_mag optional so can be used by redo too
-#     out_layer_name = "output"
-#
-#     excluded = {
-#         out_layer_name: params[out_layer_name]
-#     }  # TODO: pass excluded layer names as inputs to cp optim/final by default
-#     bias = {}
-#     weights = {}
-#
-#     for layer_name in params.keys():
-#         # For layer norm etc
-#         if type(params[layer_name]) != dict:
-#             excluded.update({layer_name: params[layer_name]})
-#             continue
-#
-#         elif not ("kernel" in params[layer_name].keys()):
-#             excluded.update({layer_name: params[layer_name]})
-#             continue
-#
-#         bias[layer_name] = params[layer_name]["bias"]
-#         weights[layer_name] = params[layer_name]["kernel"]
-#
-#     out_w_mag = get_out_weights_mag(weights)
-#
-#     # Remove output layer
-#     weights.pop(out_layer_name)
-#     bias.pop(out_layer_name)
-#
-#     return weights, bias, out_w_mag, excluded
-#
+    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
 
 
 def attach_reset_method(
@@ -139,6 +68,23 @@ def attach_reset_method(
     return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
 
+def expand_mask_for_weights(mask_1d, weight_shape, mask_type="incoming"):
+    # seperate masks for in/out similar to the official ReDo
+    if len(weight_shape) == 2:  # Dense
+        if mask_type == "incoming":
+            return mask_1d[None, :]
+        else:  # outgoing
+            return mask_1d[:, None]
+
+    elif len(weight_shape) == 4:  # Conv
+        if mask_type == "incoming":
+            return mask_1d[None, None, None, :]
+        else:  # outgoing
+            return mask_1d[None, None, :, None]
+    else:
+        raise ValueError(f"Unsupported weight shape: {weight_shape}")
+
+
 def reset_weights(
     key_tree: PRNGKeyArray,
     reset_mask: PyTree[Bool[Array, "#neurons"]],
@@ -147,96 +93,61 @@ def reset_weights(
     replacement_rate: Float[Array, ""] = None,
 ):
     all_layer_names = list(weights.keys())
-    all_mask_names = list(reset_mask.keys()) # Just to check layer names are the same
+    all_mask_names = list(reset_mask.keys())  # Just to check layer names are the same
     logs = {}
 
-    def expand_mask_for_weights(mask_1d, weight_shape, mask_type='incoming'):
-        # seperate masks for in/out similar to the official ReDo
-        if len(weight_shape) == 2:  # Dense
-            if mask_type == 'incoming':
-                return mask_1d[None, :]
-            else:  # outgoing
-                return mask_1d[:, None]
-                
-        elif len(weight_shape) == 4:  # Conv
-            if mask_type == 'incoming':
-                return mask_1d[None, None, None, :]
-            else:  # outgoing
-                return mask_1d[None, None, :, None]
-        else:
-            raise ValueError(f"Unsupported weight shape: {weight_shape}")
-
-    assert all_layer_names[-1] == 'output', "Last layer should be Dense with name 'output'"
+    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
 
     for idx, layer_name in enumerate(all_layer_names[:-1]):
-        assert layer_name in all_mask_names, f"Layer names should be identical: {layer_name} not in {all_mask_names}"
+        assert layer_name in all_mask_names, (
+            f"Layer names should be identical: {layer_name} not in {all_mask_names}"
+        )
 
         in_mask_1d = reset_mask[layer_name]
         assert in_mask_1d.dtype == bool, f"Mask type isn't bool for {layer_name}"
-        
+
         # Reset incoming weights
         in_weight_mask = expand_mask_for_weights(
-            in_mask_1d, weights[layer_name].shape, mask_type='incoming'
+            in_mask_1d, weights[layer_name].shape, mask_type="incoming"
         )
-        
+
         random_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-        weights[layer_name] = jnp.where(
-            in_weight_mask, random_weights, weights[layer_name]
-        )
-        
+        weights[layer_name] = jnp.where(in_weight_mask, random_weights, weights[layer_name])
+
         # Reset outgoing weights
         if idx + 1 < len(all_layer_names):
             next_layer = all_layer_names[idx + 1]
             out_weight_shape = weights[next_layer].shape
-            
+
             if len(out_weight_shape) == 2:  # Dense layer
-                if len(weights[layer_name].shape) == 4: # Check if previous layer was conv
+                if len(weights[layer_name].shape) == 4:  # Check if previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
                     out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
-                else: # Dense -> Dense
+                else:  # Dense -> Dense
                     out_mask_1d = in_mask_1d
-                    
+
             elif len(out_weight_shape) == 4:  # Conv layer
                 # Check if input channels match
                 expected_in_channels = out_weight_shape[2]
                 out_mask_1d = in_mask_1d
-            
+
             # Apply outgoing mask
             out_weight_mask = expand_mask_for_weights(
-                out_mask_1d, out_weight_shape, mask_type='outgoing'
+                out_mask_1d, out_weight_shape, mask_type="outgoing"
             )
-            
+
             weights[next_layer] = jnp.where(
                 out_weight_mask, jnp.zeros_like(weights[next_layer]), weights[next_layer]
             )
-        
+
         # Count reset neurons
         n_reset = in_mask_1d.sum()
         logs[layer_name] = {"nodes_reset": n_reset}
 
-    # Handle last layer seperately as there is no outgoing reset
-    # last_layer = all_layer_names[-1]
-    # output_mask_1d = reset_mask[last_layer]
-    # output_weight_shape = weights[last_layer].shape
-    #
-    # if len(out_weight_shape) == 2:  # Dense
-    #     assert out_mask_1d.size == out_weight_shape[0], \
-    #         f"Mask size {out_mask_1d.size} != weight dim {out_weight_shape[0]}"
-    #
-    # # Only reset incoming weights for output layer
-    # output_weight_mask = expand_mask_for_weights(
-    #     output_mask_1d, output_weight_shape, mask_type='incoming'
-    # )
-    #
-    # random_weights = weight_init_fn(key_tree[last_layer], output_weight_shape)
-    # weights[last_layer] = jnp.where(
-    #     output_weight_mask, random_weights, weights[last_layer]
-    # )
-    #
-    # logs[last_layer] = {"nodes_reset": output_mask_1d.sum()}
     logs[all_layer_names[-1]] = {"nodes_reset": 0}
 
     return weights, logs
+
 
 def old_reset_weights(
     key_tree: PRNGKeyArray,
@@ -265,9 +176,7 @@ def old_reset_weights(
 
         in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
         random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)
-        _in_layer_w = jnp.where(
-            in_reset_mask, random_weights, layer_w[w_in_layer]
-        )
+        _in_layer_w = jnp.where(in_reset_mask, random_weights, layer_w[w_in_layer])
 
         _out_layer_w = jnp.where(
             in_reset_mask, jnp.zeros_like(layer_w[w_out_layer]), layer_w[w_out_layer]
@@ -283,105 +192,92 @@ def old_reset_weights(
 
     return layer_w, logs
 
+
 def continuous_reset_weights(
     key_tree: PRNGKeyArray,
-    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    reset_mask: PyTree[Float[Array, "#neurons"]],
     weights: PyTree[Float[Array, "..."]],
+    utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = None,
+    replacement_rate: Float[Array, ""] = 0.001,
 ):
     all_layer_names = list(weights.keys())
-    all_mask_names = list(reset_mask.keys()) # Just to check layer names are the same
+    all_mask_names = list(reset_mask.keys())
     logs = {}
 
-    def expand_mask_for_weights(mask_1d, weight_shape, mask_type='incoming'):
-        # seperate masks for in/out similar to the official ReDo
-        if len(weight_shape) == 2:  # Dense
-            if mask_type == 'incoming':
-                return mask_1d[None, :]
-            else:  # outgoing
-                return mask_1d[:, None]
-                
-        elif len(weight_shape) == 4:  # Conv
-            if mask_type == 'incoming':
-                return mask_1d[None, None, None, :]
-            else:  # outgoing
-                return mask_1d[None, None, :, None]
-        else:
-            raise ValueError(f"Unsupported weight shape: {weight_shape}")
+    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
 
     for idx, layer_name in enumerate(all_layer_names[:-1]):
-        assert layer_name in all_mask_names, f"Layer names should be identical: {layer_name} not in {all_mask_names}"
+        assert layer_name in all_mask_names, (
+            f"Layer names should be identical: {layer_name} not in {all_mask_names}"
+        )
 
         in_mask_1d = reset_mask[layer_name]
-        assert in_mask_1d.dtype == bool, f"Mask type isn't bool for {layer_name}"
-        
+
         # Reset incoming weights
         in_weight_mask = expand_mask_for_weights(
-            in_mask_1d, weights[layer_name].shape, mask_type='incoming'
+            in_mask_1d, weights[layer_name].shape, mask_type="incoming"
         )
-        
-        random_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-        weights[layer_name] = jnp.where(
-            in_weight_mask, random_weights, weights[layer_name]
+
+        target_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
+
+        stepped_weights = (1 - replacement_rate * in_weight_mask) * weights[layer_name] + (
+            replacement_rate * in_weight_mask
+        ) * target_weights
+
+        weights[layer_name] = (
+            utilities[layer_name] * weights[layer_name]
+            + (1 - utilities[layer_name]) * stepped_weights
         )
-        
+
         # Reset outgoing weights
         if idx + 1 < len(all_layer_names):
             next_layer = all_layer_names[idx + 1]
             out_weight_shape = weights[next_layer].shape
-            
+
+            # Handle shape transitions
             if len(out_weight_shape) == 2:  # Dense layer
-                if len(weights[layer_name].shape) == 4: # Check if previous layer was conv
+                if len(weights[layer_name].shape) == 4:  # Previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
                     out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
-                else: # Dense -> Dense
+                else:  # Dense -> Dense
                     out_mask_1d = in_mask_1d
-                    
             elif len(out_weight_shape) == 4:  # Conv layer
-                # Check if input channels match
-                expected_in_channels = out_weight_shape[2]
                 out_mask_1d = in_mask_1d
-            
-            # Apply outgoing mask
+
             out_weight_mask = expand_mask_for_weights(
-                out_mask_1d, out_weight_shape, mask_type='outgoing'
+                out_mask_1d, out_weight_shape, mask_type="outgoing"
             )
-            
-            weights[next_layer] = jnp.where(
-                out_weight_mask, jnp.zeros_like(weights[next_layer]), weights[next_layer]
+
+            stepped_out = (1 - replacement_rate * out_weight_mask) * weights[next_layer]
+
+            weights[next_layer] = (
+                utilities[next_layer] * weights[next_layer]
+                + (1 - utilities[next_layer]) * stepped_out
             )
-        
-        # Count reset neurons
-        n_reset = in_mask_1d.sum()
-        logs[layer_name] = {"nodes_reset": n_reset}
 
-    # TODO: DO WE WANT TO EVEN RESET THE INCOMING WEIGHTS HERE OR JUST LEAVE IT ALONE??
-    # Handle last layer seperately as there is no outgoing reset
-    last_layer = all_layer_names[-1]
-    output_mask_1d = reset_mask[last_layer]
-    output_weight_shape = weights[last_layer].shape
+        # Logging TODO: Plot these
+        effective_reset = (in_mask_1d * replacement_rate).mean() * (
+            1 - utilities[layer_name]
+        ).mean()
 
-    if len(out_weight_shape) == 2:  # Dense
-        assert out_mask_1d.size == out_weight_shape[0], \
-            f"Mask size {out_mask_1d.size} != weight dim {out_weight_shape[0]}"
+        logs[layer_name] = {
+            "effective_reset_rate": effective_reset,
+            "max_mask_value": in_mask_1d.max(),
+            "mean_mask_value": in_mask_1d.mean(),
+        }
 
-    # Only reset incoming weights for output layer
-    output_weight_mask = expand_mask_for_weights(
-        output_mask_1d, output_weight_shape, mask_type='incoming'
-    )
-    
-    random_weights = weight_init_fn(key_tree[last_layer], output_weight_shape)
-    weights[last_layer] = jnp.where(
-        output_weight_mask, random_weights, weights[last_layer]
-    )
-    
-    logs[last_layer] = {"nodes_reset": output_mask_1d.sum()}
+    logs[all_layer_names[-1]] = {
+        "effective_reset_rate": 0.0,
+        "max_mask_value": 0.0,
+        "mean_mask_value": 0.0,
+    }
 
     return weights, logs
 
+
 def old_continuous_weight_reset(
-    reset_mask: PyTree[Float[Array, "#neurons"]], 
+    reset_mask: PyTree[Float[Array, "#neurons"]],
     layer_w: PyTree[Float[Array, "..."]],
     initial_weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
@@ -401,7 +297,10 @@ def old_continuous_weight_reset(
         stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
             (1 - replacement_rate) * layer_w[in_layer]
         )
-        stepped_util_in_weights = utilities[in_layer]*layer_w[in_layer] + (1-utilities[in_layer])*stepped_in_weights
+        stepped_util_in_weights = (
+            utilities[in_layer] * layer_w[in_layer]
+            + (1 - utilities[in_layer]) * stepped_in_weights
+        )
         _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
 
         stepped_out_weights = (replacement_rate * zero_out_weights) + (
@@ -409,14 +308,17 @@ def old_continuous_weight_reset(
         )
 
         out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        stepped_util_out_weights = utilities[out_layer]*layer_w[out_layer] + (1-utilities[out_layer])*stepped_out_weights
+        stepped_util_out_weights = (
+            utilities[out_layer] * layer_w[out_layer]
+            + (1 - utilities[out_layer]) * stepped_out_weights
+        )
 
         _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
 
         layer_w[in_layer] = _in_layer_w
         layer_w[out_layer] = _out_layer_w
 
-        logs[in_layer] = {"nodes_reset": 0} # n_reset no longer applicable
+        logs[in_layer] = {"nodes_reset": 0}  # n_reset no longer applicable
     logs[out_layer] = {"nodes_reset": 0}
     return layer_w, logs
 
@@ -470,7 +372,9 @@ def reset_optim_params(tx_state, reset_mask):
                 "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
             }
 
-        if isinstance(tx_state, tuple) and len(tx_state)==2: # Make more generic by checking specific type instead
+        if (
+            isinstance(tx_state, tuple) and len(tx_state) == 2
+        ):  # Make more generic by checking specific type instead
             return (reset_params(tx_state[0]),) + tx_state[1:]
 
         # copy other attributes
