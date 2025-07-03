@@ -14,6 +14,7 @@ class LoggingConfig:
     best_metric: str = "metrics/eval_score"
 
     interval: int = 100
+    save: bool = True
     save_interval: int = 1000
     eval_interval: int = 1000
     eval_during_training: bool = False

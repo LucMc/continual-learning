@@ -13,6 +13,7 @@ from continual_learning_2.types import (
     Observation,
     Reward,
 )
+from continual_learning_2.utils.jittable import Jittable
 
 
 class Agent(Protocol):
@@ -43,7 +44,7 @@ class VectorEnv(abc.ABC):
     def load(self, checkpoint: dict): ...
 
 
-class JittableVectorEnv(abc.ABC):
+class JittableVectorEnv(Jittable):
     @abc.abstractmethod
     def init(self) -> tuple[EnvState, Observation]: ...
 

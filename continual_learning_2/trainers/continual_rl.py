@@ -36,7 +36,7 @@ from continual_learning_2.envs import (
     VectorEnv,
     get_benchmark,
 )
-from continual_learning_2.envs.base import JittableContinualLearningEnv
+from continual_learning_2.envs.base import JittableContinualLearningEnv, JittableVectorEnv
 from continual_learning_2.models import get_model, get_model_cls
 from continual_learning_2.models.rl import Policy
 from continual_learning_2.optim import get_optimizer
@@ -131,6 +131,7 @@ class PPO:
                 **get_logs("returns", data.returns),
                 **get_logs("values", data.values),
                 **get_logs("rewards", data.rewards),
+                **get_logs("actions", data.actions),
                 **get_logs("num_episodes", data.dones.sum(axis=1), hist=False, std=False),
                 "approx_entropy": -data.log_probs.mean(),
             },
@@ -140,7 +141,6 @@ class PPO:
             policy: TrainState,
             data: Rollout,
             key: PRNGKeyArray,
-            cfg: PPOConfig,
         ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
             assert data.advantages is not None
             key, dropout_key = jax.random.split(key)
@@ -227,11 +227,10 @@ class PPO:
                     "nn/policy_parameter_norm": jnp.linalg.norm(policy_params_flat),
                     **prefix_dict("nn/policy_gradients", grads_hist_dict),
                     **prefix_dict("nn/policy_parameters", param_hist_dict),
-                    **prefix_dict("nn/policy_activations", activations_hist_dict),
-                    **prefix_dict("nn/policy_dormant_neurons", dormant_neuron_logs),
-                    **prefix_dict("nn/policy_linearised_neurons", linearised_neuron_logs),
-                    **prefix_dict("nn/policy_srank", srank_logs),
-                    **prefix_dict("nn/policy_gradients", grads_hist_dict),
+                    # **prefix_dict("nn/policy_activations", activations_hist_dict),
+                    # **prefix_dict("nn/policy_dormant_neurons", dormant_neuron_logs),
+                    # **prefix_dict("nn/policy_linearised_neurons", linearised_neuron_logs),
+                    # **prefix_dict("nn/policy_srank", srank_logs),
                 },
             )
 
@@ -239,7 +238,6 @@ class PPO:
             vf: TrainState,
             data: Rollout,
             key: PRNGKeyArray,
-            cfg: PPOConfig,
         ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
             key, dropout_key = jax.random.split(key)
 
@@ -254,8 +252,6 @@ class PPO:
                 )
 
                 chex.assert_equal_shape((new_values, data.returns))
-                assert data.values is not None and data.returns is not None
-
                 vf_loss = 0.5 * ((new_values - data.returns) ** 2).mean()
 
                 return cfg.vf_coefficient * vf_loss, (
@@ -301,17 +297,17 @@ class PPO:
                     "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
                     **prefix_dict("nn/vf_gradients", grads_hist_dict),
                     **prefix_dict("nn/vf_parameters", param_hist_dict),
-                    **prefix_dict("nn/vf_activations", activations_hist_dict),
-                    **prefix_dict("nn/vf_dormant_neurons", dormant_neuron_logs),
-                    **prefix_dict("nn/vf_linearised_neurons", linearised_neuron_logs),
-                    **prefix_dict("nn/vf_srank", srank_logs),
+                    # **prefix_dict("nn/vf_activations", activations_hist_dict),
+                    # **prefix_dict("nn/vf_dormant_neurons", dormant_neuron_logs),
+                    # **prefix_dict("nn/vf_linearised_neurons", linearised_neuron_logs),
+                    # **prefix_dict("nn/vf_srank", srank_logs),
                 },
             )
 
         def train_minibatch(carry, minibatch: Rollout):
             policy, vf, key = carry
-            policy, key, policy_logs = update_policy(policy, minibatch, key, cfg)
-            vf, key, vf_logs = update_value_function(vf, minibatch, key, cfg)
+            policy, key, policy_logs = update_policy(policy, minibatch, key)
+            vf, key, vf_logs = update_value_function(vf, minibatch, key)
             return (policy, vf, key), (policy_logs | vf_logs)
 
         def train_epoch(carry, _):
@@ -742,7 +738,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
         if self.train_cfg.resume:
             self.load(step=self.train_cfg.resume_from_step)
 
-        def rollout(state: State) -> tuple[State, Rollout]:
+        def rollout(envs: JittableVectorEnv, state: State) -> tuple[State, Rollout]:
             def step(state: State, _) -> tuple[State, Rollout]:
                 (policy, vf, key, total_steps), observation, env_states = state
                 key, actions, log_probs, values = self._sample_action_value_and_log_prob(
@@ -751,7 +747,7 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
-                    if x % 1_000 == 0:
+                    if x % 10_000 == 0:
                         print(f"{x}, SPS: {x / (time.time() - start_time)}")
 
                 jax.experimental.io_callback(_print, None, total_steps)
@@ -782,13 +778,8 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             )
 
         @jax.jit
-        def train_step(state: State) -> tuple[State, LogDict]:
-            state, data = rollout(state)
-            jax.debug.print(
-                "Steps: {steps}, {data}",
-                steps=state[0].total_steps,
-                data=jax.tree.map(lambda x: x.shape, data),
-            )
+        def train_step(envs: JittableVectorEnv, state: State) -> tuple[State, LogDict]:
+            state, data = rollout(envs, state)
             agent_state, observation, env_states = state
 
             assert data.final_observations is not None
@@ -811,11 +802,13 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
             # Logging
             assert data.final_episode_lenghts is not None
             assert data.final_episode_returns is not None
+            num_episodes = jnp.sum(data.final_episode_lenghts > 0)
+            mean_episode_length = jnp.sum(data.final_episode_lenghts) / num_episodes
+            mean_episode_return = jnp.sum(data.final_episode_returns) / num_episodes
             logs = logs | {
-                "charts/mean_episodic_length": jnp.mean(data.final_episode_lenghts),
-                "charts/mean_episodic_returns": jnp.mean(data.final_episode_returns),
+                "charts/mean_episodic_length": mean_episode_length,
+                "charts/mean_episodic_returns": mean_episode_return,
             }
-            logs = {}
 
             # TODO: eval?
 
@@ -833,19 +826,25 @@ class JittedContinualPPOTrainer(PPO, RLCheckpoints):
                 self.cfg.num_rollout_steps,
             ):
                 state, logs = train_step(
+                    envs,
                     (
                         TrainerState(self.policy, self.vf, self.key, self.total_steps),
                         obs,
                         env_state,
                     )
                 )
-                (self.policy, self.vf, self.key, self.total_steps) = state[0]
+                (self.policy, self.vf, self.key, self.total_steps), obs, env_state = state
                 logs = logs | {
                     "charts/SPS": (self.total_steps - self.start_step)
                     / (time.time() - start_time)
                 }
                 self.logger.log(logs, step=self.total_steps)
-                # self.save(state)
+
+                if self.logger.cfg.save:
+                    self.save(state)
+
+        self.logger.close()
+        self.ckpt_mgr.close()
 
 
 if __name__ == "__main__":
@@ -866,17 +865,21 @@ if __name__ == "__main__":
                 optimizer=AdamConfig(learning_rate=3e-4),
                 network=MLPConfig(),
             ),
+            num_rollout_steps=100_000,
+            num_epochs=16,
+            num_gradient_steps=32,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=2000, num_tasks=5, episode_length=500),
+        env_cfg=EnvConfig("slippery_ant", num_envs=200, num_tasks=5, episode_length=500),
         train_cfg=RLTrainingConfig(
             resume=True,
-            steps_per_task=1_000_000,
+            steps_per_task=2_000_000,
         ),
         logs_cfg=LoggingConfig(
-            run_name="continual_ant_debug_0",
+            run_name="continual_ant_debug_3",
             wandb_entity="evangelos-ch",
             wandb_project="continual_learning_2",
-            wandb_mode="disabled",
+            save=False, # Disable checkpoints cause it's so fast anyway
+            # wandb_mode="disabled",
         ),
     )
 

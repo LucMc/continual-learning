@@ -123,13 +123,12 @@ class AutoResetWrapper(Wrapper):
         pipeline_state = jax.tree.map(
             where_done, state.info["first_pipeline_state"], state.pipeline_state
         )
+        obs = jax.tree.map(where_done, state.info["first_obs"], state.obs)
 
         # Save final obs
         assert isinstance(state.obs, jax.Array)
         state.info.update(
-            final_observation=jnp.where(
-                state.done[:, None], state.obs, jnp.zeros_like(state.obs)
-            )
+            final_observation=jax.tree.map(where_done, state.obs, jnp.zeros_like(state.obs))
         )
 
         if "steps" in state.info:
@@ -145,7 +144,6 @@ class AutoResetWrapper(Wrapper):
                 final_episode_lengths=jnp.where(state.done, lengths, jnp.zeros_like(lengths)),
             )
 
-        obs = jax.tree.map(where_done, state.info["first_obs"], state.obs)
         return state.replace(pipeline_state=pipeline_state, obs=obs)
 
 
@@ -203,7 +201,8 @@ class ContinualAnt(JittableContinualLearningEnv):
 
         rng = np.random.default_rng(seed)
         self.seed = seed
-        self.frictions = rng.uniform(low=0.1, high=2.0, size=config.num_tasks)
+        low, high = np.log10(0.02), np.log10(2.0)
+        self.frictions = np.pow(10, rng.uniform(low=low, high=high, size=config.num_tasks))
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
 
