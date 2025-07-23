@@ -49,8 +49,9 @@ def get_updated_utility(  # Add batch dim
     decay_rate: Float[Array, ""] = 0.9,
 ):
     updated_utility = (
-        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=0) * out_w_mag
+        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
     ).flatten()  # Arr[#neurons]
+
     return updated_utility
 
 
@@ -134,6 +135,12 @@ def cbp(
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])
+
+        # if any(fp[0].startswith("conv") for fp in flat_params.keys()):
+        #     ordered_params = sorted(flat_params.items(), key=lambda x: x[0][0].split('_')[-1])
+        # else:
+        #     ordered_params = flat_params
+
         biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
@@ -159,10 +166,22 @@ def cbp(
         def _cbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
+
             # Separate weights and biases
             flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_feats, _ = jax.tree.flatten(features)
+
+            # HACK: Added id's to layers in CNN as they arrive alphabetically ordered
+            # if any(fp[0].startswith("conv") for fp in flat_params.keys()):
+            #     ordered_params = sorted(flat_params.items(), key=lambda x: x[0][0].split('_')[-1])
+            #     ordered_feats = sorted(flat_feats.items(), key=lambda x: x[0][0].split('_')[-1])
+            # else:
+            #     ordered_params = flat_params
+            #     ordered_feats = flat_feats
+
             weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
+
             out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
@@ -170,7 +189,6 @@ def cbp(
 
             # Features arrive as tuple so we have to restructure
             w_mag_tdef = jax.tree.structure(out_w_mag)
-            flat_feats, _ = jax.tree.flatten(features)
 
             # Don't need out_layer feats and normalises layer names
             _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
@@ -222,13 +240,14 @@ def cbp(
             )
 
             # Bias correction
-            corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
-                weights,  # Uses original weights
-                zeroed_biases,
-                _mean_feature_act,
-                _ages,  # 2
-                reset_mask
-            )
+            # corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
+            #     weights,  # Uses original weights
+            #     zeroed_biases,
+            #     _mean_feature_act,
+            #     _ages,  # 2
+            #     reset_mask
+            # )
+            corrected_biases = biases # TODO: DISABLED FOR NOW
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}

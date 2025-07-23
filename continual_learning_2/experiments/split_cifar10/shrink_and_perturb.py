@@ -7,6 +7,7 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     LoggingConfig
 )
 from continual_learning_2.configs import ShrinkAndPerterbConfig, AdamConfig, MLPConfig, TrainingConfig
+from continual_learning_2.configs.models import CNNConfig
 
 
 def shrink_and_perturb_split_cifar10_experiment():
@@ -24,15 +25,18 @@ def shrink_and_perturb_split_cifar10_experiment():
     # Add validation to say what the available options are for dataset etc
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
-        model_config=MLPConfig(output_size=10),
+        model_config=CNNConfig(output_size=10),
         optim_cfg=optim_conf,
         data_cfg=DatasetConfig(
             name="split_cifar10",
             seed=SEED,
             batch_size=64,
-            num_tasks=10,
-            num_epochs_per_task=20,
-            num_workers=0,  # (os.cpu_count() or 0) // 2,
+            num_tasks=5,
+            num_epochs_per_task=1,
+            # num_workers=0,  # (os.cpu_count() or 0) // 2,
+            dataset_kwargs = {
+                "flatten" : False
+            }
         ),
         train_cfg=TrainingConfig(
             resume=False,

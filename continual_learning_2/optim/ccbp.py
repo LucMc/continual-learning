@@ -142,7 +142,7 @@ def ccbp(
             # Expermiment: reset bias/continuous reset bias/ leave bias alone
             _biases = biases
 
-            # Update ages
+            # Update ages (CLIPPED HERE)
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
                     m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold+1)

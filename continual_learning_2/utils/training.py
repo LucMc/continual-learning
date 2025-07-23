@@ -33,7 +33,6 @@ class TrainState(FlaxTrainState):
         new_params, new_opt_state = self.tx.update(
             grads, self.opt_state, self.params, features=features
         )
-
         return self.replace(
             step=self.step + 1,
             params=new_params,

@@ -34,18 +34,20 @@ class CNN(nn.Module):
             use_bias=self.config.use_bias,
             dtype=self.config.dtype,
         )
+        idx = 0
 
         # ConvNet feature extractor
         for feature in self.config.features:
             for layer in range(self.config.num_convs_per_layer):
-                x = Conv(features=feature, name=f"conv_{feature}_{layer}")(x)
-                self.sow("preactivations", f"conv_{feature}_{layer}_pre", flatten_last(x))
+                x = Conv(features=feature, name=f"{idx}_conv_{feature}_{layer}")(x) # Make variable and sync with others
+                self.sow("preactivations", f"{idx}_conv_{feature}_{layer}_pre", flatten_last(x))
                 x = self.config.activation_fn(x)
 
                 if self.config.dropout is not None:
                     x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
 
-                self.sow("activations", f"conv_{feature}_{layer}_act", x)
+                self.sow("activations", f"{idx}_conv_{feature}_{layer}_act", x)
+                idx += 1 # To fix alphabetical ordering
 
             if self.config.use_max_pooling:
                 x = nn.max_pool(
@@ -55,14 +57,16 @@ class CNN(nn.Module):
         # MLP head
         x = x.reshape((x.shape[0], -1))
         for layer in range(self.config.num_dense_layers):
-            x = Dense(self.config.dense_hidden_size)(x)
-            self.sow("preactivations", f"Dense_{layer}_pre", x)
+            x = Dense(self.config.dense_hidden_size, name=f"{idx}_Dense_{layer}")(x)
+            self.sow("preactivations", f"{idx}_Dense_{layer}_pre", x)
             x = self.config.activation_fn(x)
             if self.config.dropout is not None:
                 x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
-            self.sow("activations", f"Dense_{layer}_act", x)
+            self.sow("activations", f"{idx}_Dense_{layer}_act", x)
+            idx += 1
 
+        # "output" is already last in the order and can stay the same for consistancy with MLP
         self.sow("preactivations", "output_pre", x)
-        x = Dense(self.config.output_size, name="output")(x)
-        self.sow("activations", "output_act", x)
+        x = Dense(self.config.output_size, name=f"output")(x)
+        self.sow("activations", f"output_act", x)
         return x.astype(jnp.float32)

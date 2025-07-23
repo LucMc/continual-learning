@@ -12,14 +12,41 @@ import continual_learning.optim as optim
 from typing import Callable
 
 
-def get_out_weights_mag(weights):  # TODO: Check/test
-    w_mags = jax.tree.map(
-        lambda layer_w: jnp.abs(layer_w).mean(axis=1), weights
-    )  # [2, 10] -> [2,1] mag over w coming out of neuron - LOP does axis 0 of out_layer but should be eqivalent
+def get_out_weights_mag(weights):
 
-    keys = list(w_mags.keys())
-    return {keys[i]: w_mags[keys[i + 1]] for i in range(len(keys) - 1)}
+    def calculate_mag(curr_layer_w, next_layer_w, is_conv_to_dense=False):
 
+        if is_conv_to_dense: # To handle flattening of spacial dims
+
+            num_channels = curr_layer_w.shape[-1]  # Last dim
+            flattened_size = next_layer_w.shape[0]
+            spatial_positions = flattened_size // num_channels
+
+            reshaped_weights = next_layer_w.reshape((spatial_positions, num_channels, -1))
+
+            return jnp.abs(reshaped_weights).mean(axis=(0, 2))
+        
+        elif len(next_layer_w.shape) == 4:  # Conv->Conv
+            return jnp.abs(next_layer_w).mean(axis=(0, 1, 3))
+
+        else:  # Dense->Dense
+            return jnp.abs(next_layer_w).mean(axis=1)
+    
+    keys = list(weights.keys())
+    w_mags = {}
+    
+    for i in range(len(keys) - 1):
+        curr_key = keys[i]
+        next_key = keys[i + 1]
+        curr_weights = weights[curr_key]
+        next_weights = weights[next_key]
+        
+        # Check if this is a conv->dense
+        is_conv_to_dense = (len(curr_weights.shape) == 4 and len(next_weights.shape) == 2)
+        
+        w_mags[curr_key] = calculate_mag(curr_weights, next_weights, is_conv_to_dense)
+    
+    return w_mags
 
 def attach_reset_method(
     *args: tuple[str, optax.GradientTransformation],
@@ -85,6 +112,7 @@ def expand_mask_for_weights(mask_1d, weight_shape, mask_type="incoming"):
         raise ValueError(f"Unsupported weight shape: {weight_shape}")
 
 
+
 def reset_weights(
     key_tree: PRNGKeyArray,
     reset_mask: PyTree[Bool[Array, "#neurons"]],
@@ -127,8 +155,7 @@ def reset_weights(
                     out_mask_1d = in_mask_1d
 
             elif len(out_weight_shape) == 4:  # Conv layer
-                # Check if input channels match
-                expected_in_channels = out_weight_shape[2]
+                # expected_in_channels = out_weight_shape[2]
                 out_mask_1d = in_mask_1d
 
             # Apply outgoing mask
@@ -360,7 +387,6 @@ def reset_optim_params(tx_state, reset_mask):
                 }
             else:
                 raise "Unknown reset method"
-                breakpoint()
 
         if hasattr(tx_state, "mu"):
             new_state_dict["mu"] = {
