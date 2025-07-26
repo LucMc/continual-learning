@@ -1,27 +1,29 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
+from flax import struct
+
+from continual_learning_2.types import Activation
 
 
-@dataclass(frozen=True)
-class MLPConfig:
+@struct.dataclass(frozen=True)
+class MLPConfig(struct.PyTreeNode):
     output_size: int = 1
     hidden_size: int = 256
     num_layers: int = 2
     dropout: float | None = None
 
-    activation_fn: Callable[[jax.Array], jax.Array] = jax.nn.relu
+    activation_fn: Activation = Activation.ReLU
     kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
     use_bias: bool = True
     dtype: jnp.dtype = jnp.bfloat16
 
 
-@dataclass
-class CNNConfig:
+@struct.dataclass(frozen=True)
+class CNNConfig(struct.PyTreeNode):
     output_size: int = 1
 
     # ConvNet feature extractor
@@ -38,22 +40,22 @@ class CNNConfig:
 
     dropout: float | None = None
 
-    activation_fn: Callable[[jax.Array], jax.Array] = jax.nn.relu
+    activation_fn: Activation = Activation.ReLU
     kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
     use_bias: bool = True
     dtype: jnp.dtype = jnp.bfloat16
 
 
-@dataclass
-class ResNetConfig:
+@struct.dataclass(frozen=True)
+class ResNetConfig(struct.PyTreeNode):
     output_size: int = 1
 
     # ConvNet feature extractor
     stage_sizes: Sequence[int] = (2, 2, 2, 2)
     num_filters: int = 64
 
-    activation_fn: Callable[[jax.Array], jax.Array] = jax.nn.relu
+    activation_fn: Activation = Activation.ReLU
     kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
     dtype: jnp.dtype = jnp.bfloat16

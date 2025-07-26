@@ -48,6 +48,7 @@ class Activation(enum.Enum):
     PReLU = enum.member(lambda x: flax.linen.PReLU()(x))  # noqa: E731
     ReLU6 = enum.member(jax.nn.relu6)
     SiLU = enum.member(jax.nn.silu)
+    Swish = enum.member(jax.nn.swish)
     GELU = enum.member(jax.nn.gelu)
     GLU = enum.member(jax.nn.glu)
     Identity = enum.member(lambda x: x)
@@ -80,17 +81,12 @@ class Rollout(NamedTuple):
     observations: Float[Observation, "timestep env"]
     actions: Float[Action, "timestep env"]
     rewards: Float[Reward, "timestep env 1"]
-    dones: Bool[npt.NDArray | Array, "timestep env 1"]
+    terminated: Bool[npt.NDArray | Array, "timestep env 1"]
+    truncated: Bool[npt.NDArray | Array, "timestep env 1"]
+    next_observations: Float[Observation, "timestep env"]
+
+    infos: dict
 
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None
     values: Float[Value, "timestep env 1"] | None = None
-
-    # Computed statistics about observed rewards
-    returns: Float[Value, "timestep env 1"] | None = None
-    advantages: Float[Value, "timestep env 1"] | None = None
-
-    # Logs
-    final_episode_returns: Float[Value, "timestep env 1"] | None = None
-    final_episode_lenghts: Float[npt.NDArray | Array, "timestep env 1"] | None = None
-    final_observations: Float[Observation, "timestep env"] | None = None
