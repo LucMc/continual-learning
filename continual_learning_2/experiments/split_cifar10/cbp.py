@@ -29,8 +29,8 @@ def cbp_split_cifar10_experiment():
             name="split_cifar10",
             seed=SEED,
             batch_size=64,
-            num_tasks=5,
-            num_epochs_per_task=1,
+            num_tasks=10,
+            num_epochs_per_task=2,
             # num_workers=0,  # (os.cpu_count() or 0) // 2,
             dataset_kwargs = {
                 "flatten" : False

@@ -27,7 +27,7 @@ def redo_split_cifar10_experiment():
             seed=SEED,
             batch_size=64,
             num_tasks=10,
-            num_epochs_per_task=5,
+            num_epochs_per_task=2,
             # num_workers=0,  # (os.cpu_count() or 0) // 2,
             dataset_kwargs = {
                 "flatten" : False
@@ -41,7 +41,7 @@ def redo_split_cifar10_experiment():
             wandb_entity="lucmc",
             wandb_project="crl_experiments",
             group="split_cifar10",
-            wandb_mode="disabled",
+            wandb_mode="online",
             interval=100,
             eval_during_training=True,
         ),

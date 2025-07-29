@@ -21,7 +21,6 @@ from continual_learning_2.configs import (
     RedoConfig,
     CBPConfig,
     CCBPConfig,
-    CCBP2Config,
     DatasetConfig,
     LoggingConfig,
     OptimizerConfig,
@@ -41,6 +40,7 @@ from continual_learning_2.utils.monitoring import (
     pytree_histogram,
 )
 from continual_learning_2.utils.training import TrainState
+from continual_learning_2.utils.nn import flatten_last
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -224,12 +224,15 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         )
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
-        activations = intermediates["activations"]
+        activations_full = intermediates["activations"]
+        activations = jax.tree.map(flatten_last, activations_full)
+
         activations_hist_dict = pytree_histogram(activations)
         activations_flat = {
             k: v[0]  # pyright: ignore[reportIndexIssue]
             for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
         }
+        # REMOVED DORMANT NEURON LOGS FOR NOW
         dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 
@@ -243,7 +246,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
 
-        network_state = network_state.apply_gradients(grads=grads, features=activations)
+        network_state = network_state.apply_gradients(grads=grads, features=activations_full)
         network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
@@ -393,11 +396,10 @@ if __name__ == "__main__":
     SEED = 42
 
     start = time.time()
-    optim_conf = CBPConfig(
-            tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5
-        )
+    # optim_conf = RedoConfig(
+    #         tx=AdamConfig(learning_rate=1e-3)
+    #     )
+    optim_conf = tx=AdamConfig(learning_rate=1e-3)
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=CNNConfig(output_size=10),
@@ -414,7 +416,7 @@ if __name__ == "__main__":
             },
         ),
         train_cfg=TrainingConfig(
-            resume=True,
+            resume=False,
         ),
         logs_cfg=LoggingConfig(
             run_name="split_cifar10_debug_1",

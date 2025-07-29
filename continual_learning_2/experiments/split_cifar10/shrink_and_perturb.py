@@ -1,10 +1,11 @@
-import jax
 import os
+import jax
 import time
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     DatasetConfig,
-    LoggingConfig
+    LoggingConfig,
+    TrainingConfig,
 )
 from continual_learning_2.configs import ShrinkAndPerterbConfig, AdamConfig, MLPConfig, TrainingConfig
 from continual_learning_2.configs.models import CNNConfig
@@ -31,8 +32,8 @@ def shrink_and_perturb_split_cifar10_experiment():
             name="split_cifar10",
             seed=SEED,
             batch_size=64,
-            num_tasks=5,
-            num_epochs_per_task=1,
+            num_tasks=10,
+            num_epochs_per_task=2,
             # num_workers=0,  # (os.cpu_count() or 0) // 2,
             dataset_kwargs = {
                 "flatten" : False

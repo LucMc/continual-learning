@@ -1,11 +1,14 @@
-from typing import Callable, NamedTuple
+from typing import Callable
 
 import chex
+import flax
 import jax
 import jax.numpy as jnp
 import jax.random as random
 import optax
 from chex import dataclass
+from copy import deepcopy
+
 import continual_learning_2.utils.optim as utils
 
 
@@ -40,7 +43,10 @@ def shrink_perturb(
             return params, new_state, tx_state
 
         def apply_shrink_perturb(params):
-            weights, bias, excluded = utils.process_params(params["params"])
+            flat_params = flax.traverse_util.flatten_dict(params["params"])
+            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[0] : v for k, v in flat_params.items() if k[-1] == "bias"}
+
             new_rng, noise_rng = random.split(state.rng, num=2)
             noise_key_tree = utils.gen_key_tree(noise_rng, weights)
 
@@ -50,10 +56,9 @@ def shrink_perturb(
                     "bias": b,
                 },
                 weights,
-                bias,
+                biases,
                 noise_key_tree,
             )
-            new_params.update(excluded)
 
             new_state = state.replace(count=(state.count + 1) % every_n, rng=new_rng)
             return {"params": new_params}, new_state, tx_state

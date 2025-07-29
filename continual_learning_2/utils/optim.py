@@ -13,11 +13,8 @@ from typing import Callable
 
 
 def get_out_weights_mag(weights):
-
     def calculate_mag(curr_layer_w, next_layer_w, is_conv_to_dense=False):
-
-        if is_conv_to_dense: # To handle flattening of spacial dims
-
+        if is_conv_to_dense:  # To handle flattening of spacial dims
             num_channels = curr_layer_w.shape[-1]  # Last dim
             flattened_size = next_layer_w.shape[0]
             spatial_positions = flattened_size // num_channels
@@ -25,28 +22,29 @@ def get_out_weights_mag(weights):
             reshaped_weights = next_layer_w.reshape((spatial_positions, num_channels, -1))
 
             return jnp.abs(reshaped_weights).mean(axis=(0, 2))
-        
+
         elif len(next_layer_w.shape) == 4:  # Conv->Conv
             return jnp.abs(next_layer_w).mean(axis=(0, 1, 3))
 
         else:  # Dense->Dense
             return jnp.abs(next_layer_w).mean(axis=1)
-    
+
     keys = list(weights.keys())
     w_mags = {}
-    
+
     for i in range(len(keys) - 1):
         curr_key = keys[i]
         next_key = keys[i + 1]
         curr_weights = weights[curr_key]
         next_weights = weights[next_key]
-        
+
         # Check if this is a conv->dense
-        is_conv_to_dense = (len(curr_weights.shape) == 4 and len(next_weights.shape) == 2)
-        
+        is_conv_to_dense = len(curr_weights.shape) == 4 and len(next_weights.shape) == 2
+
         w_mags[curr_key] = calculate_mag(curr_weights, next_weights, is_conv_to_dense)
-    
+
     return w_mags
+
 
 def attach_reset_method(
     *args: tuple[str, optax.GradientTransformation],
@@ -112,7 +110,6 @@ def expand_mask_for_weights(mask_1d, weight_shape, mask_type="incoming"):
         raise ValueError(f"Unsupported weight shape: {weight_shape}")
 
 
-
 def reset_weights(
     key_tree: PRNGKeyArray,
     reset_mask: PyTree[Bool[Array, "#neurons"]],
@@ -176,50 +173,6 @@ def reset_weights(
     return weights, logs
 
 
-def old_reset_weights(
-    key_tree: PRNGKeyArray,
-    reset_mask: PyTree[Bool[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    # initial_weights: PyTree[Float[Array, "..."]],
-    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = None,
-):
-    weight_layer_names = list(layer_w.keys())
-    activation_layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(weight_layer_names) - 1):
-        w_in_layer = weight_layer_names[i]
-        w_out_layer = weight_layer_names[i + 1]
-
-        m_in_layer = activation_layer_names[i]
-        m_out_layer = activation_layer_names[i + 1]
-
-        # mask_broadcast = jax.lax.select(len(layer_w[w_in_layer])==4, [None,None,None,1], [])
-        assert reset_mask[m_in_layer].dtype == bool, "Mask type isn't bool"
-        # assert len(reset_mask[m_in_layer].flatten()) == layer_w[w_out_layer].shape[0], (  # ?
-        #     f"Reset mask shape incorrect: {len(reset_mask[m_in_layer].flatten())} should be {layer_w[w_out_layer].shape[0]}"
-        # )
-
-        in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
-        random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)
-        _in_layer_w = jnp.where(in_reset_mask, random_weights, layer_w[w_in_layer])
-
-        _out_layer_w = jnp.where(
-            in_reset_mask, jnp.zeros_like(layer_w[w_out_layer]), layer_w[w_out_layer]
-        )
-        n_reset = reset_mask[m_in_layer].sum()
-
-        layer_w[w_in_layer] = _in_layer_w
-        layer_w[w_out_layer] = _out_layer_w
-
-        logs[w_in_layer] = {"nodes_reset": n_reset}
-
-    logs[w_out_layer] = {"nodes_reset": 0}
-
-    return layer_w, logs
-
-
 def continuous_reset_weights(
     key_tree: PRNGKeyArray,
     reset_mask: PyTree[Float[Array, "#neurons"]],
@@ -248,13 +201,15 @@ def continuous_reset_weights(
 
         target_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
-        stepped_weights = (1 - replacement_rate * in_weight_mask) * weights[layer_name] + (
-            replacement_rate * in_weight_mask
+        stepped_weights = (1 - replacement_rate) * weights[layer_name] + (
+            replacement_rate
         ) * target_weights
-
-        weights[layer_name] = (
+        # Softmax ensures these balance
+        weights[layer_name] = jnp.where(
+            in_weight_mask,
             utilities[layer_name] * weights[layer_name]
-            + (1 - utilities[layer_name]) * stepped_weights
+            + (1 - utilities[layer_name]) * stepped_weights,
+            weights[layer_name],
         )
 
         # Reset outgoing weights
@@ -267,20 +222,29 @@ def continuous_reset_weights(
                 if len(weights[layer_name].shape) == 4:  # Previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
                     out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
+                    out_utilities_1d = jnp.repeat(utilities[layer_name], spatial_size)
+
                 else:  # Dense -> Dense
                     out_mask_1d = in_mask_1d
+                    out_utilities_1d = utilities[layer_name]
+
             elif len(out_weight_shape) == 4:  # Conv layer
                 out_mask_1d = in_mask_1d
+                out_utilities_1d = utilities[layer_name]
 
             out_weight_mask = expand_mask_for_weights(
                 out_mask_1d, out_weight_shape, mask_type="outgoing"
             )
 
-            stepped_out = (1 - replacement_rate * out_weight_mask) * weights[next_layer]
+            stepped_out = (1 - replacement_rate) * weights[next_layer] + replacement_rate * jnp.zeros_like(weights[next_layer])
 
-            weights[next_layer] = (
-                utilities[next_layer] * weights[next_layer]
-                + (1 - utilities[next_layer]) * stepped_out
+            expanded_utils = expand_mask_for_weights(
+                out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
+            )
+            weights[next_layer] = jnp.where(
+                out_weight_mask,
+                (expanded_utils * weights[next_layer]) + (1 - expanded_utils) * stepped_out,
+                weights[next_layer],
             )
 
         # Logging TODO: Plot these
@@ -468,4 +432,51 @@ def get_bottom_k_mask(values, n_to_replace):
             return (reset_params(tx_state[0]),) + tx_state[1:]
         else:
             return reset_params(tx_state)
+
+
+def old_reset_weights(
+    key_tree: PRNGKeyArray,
+    reset_mask: PyTree[Bool[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
+    # initial_weights: PyTree[Float[Array, "..."]],
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    replacement_rate: Float[Array, ""] = None,
+):
+    weight_layer_names = list(layer_w.keys())
+    activation_layer_names = list(reset_mask.keys())
+    logs = {}
+
+    for i in range(len(weight_layer_names) - 1):
+        w_in_layer = weight_layer_names[i]
+        w_out_layer = weight_layer_names[i + 1]
+
+        m_in_layer = activation_layer_names[i]
+        m_out_layer = activation_layer_names[i + 1]
+
+        # mask_broadcast = jax.lax.select(len(layer_w[w_in_layer])==4, [None,None,None,1], [])
+        assert reset_mask[m_in_layer].dtype == bool, "Mask type isn't bool"
+        # assert len(reset_mask[m_in_layer].flatten()) == layer_w[w_out_layer].shape[0], (  # ?
+        #     f"Reset mask shape incorrect: {len(reset_mask[m_in_layer].flatten())} should be {layer_w[w_out_layer].shape[0]}"
+        # )
+
+        in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
+        random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)
+        _in_layer_w = jnp.where(in_reset_mask, random_weights, layer_w[w_in_layer])
+
+        _out_layer_w = jnp.where(
+            in_reset_mask, jnp.zeros_like(layer_w[w_out_layer]), layer_w[w_out_layer]
+        )
+        n_reset = reset_mask[m_in_layer].sum()
+
+        layer_w[w_in_layer] = _in_layer_w
+        layer_w[w_out_layer] = _out_layer_w
+
+        logs[w_in_layer] = {"nodes_reset": n_reset}
+
+    logs[w_out_layer] = {"nodes_reset": 0}
+
+    return layer_w, logs
+
+
     """
+

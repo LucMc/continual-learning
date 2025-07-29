@@ -135,12 +135,6 @@ def cbp(
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])
-
-        # if any(fp[0].startswith("conv") for fp in flat_params.keys()):
-        #     ordered_params = sorted(flat_params.items(), key=lambda x: x[0][0].split('_')[-1])
-        # else:
-        #     ordered_params = flat_params
-
         biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
@@ -171,17 +165,8 @@ def cbp(
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
 
-            # HACK: Added id's to layers in CNN as they arrive alphabetically ordered
-            # if any(fp[0].startswith("conv") for fp in flat_params.keys()):
-            #     ordered_params = sorted(flat_params.items(), key=lambda x: x[0][0].split('_')[-1])
-            #     ordered_feats = sorted(flat_feats.items(), key=lambda x: x[0][0].split('_')[-1])
-            # else:
-            #     ordered_params = flat_params
-            #     ordered_feats = flat_feats
-
             weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
-
             out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)

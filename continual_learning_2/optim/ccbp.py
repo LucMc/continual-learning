@@ -40,7 +40,7 @@ def get_updated_utility(  # Add batch dim
 ):
     # Remove batch dim from some inputs just in case
     updated_utility = (
-        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=0) * out_w_mag
+        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
     ).flatten()  # Arr[#neurons]
     return nn.softmax(updated_utility)
 
@@ -96,6 +96,8 @@ def ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CBPOptimState]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_feats, _ = jax.tree.flatten(features)
+
             weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
             out_w_mag = utils.get_out_weights_mag(weights)
@@ -105,7 +107,6 @@ def ccbp(
 
             # Features arrive as tuple so we have to restructure
             w_mag_tdef = jax.tree.structure(out_w_mag)
-            flat_feats, _ = jax.tree.flatten(features)
 
             # Don't need out_layer feats and normalises layer names
             _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
@@ -139,7 +140,7 @@ def ccbp(
             )
 
             # reset bias given mask
-            # Expermiment: reset bias/continuous reset bias/ leave bias alone
+            # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
             _biases = biases
 
             # Update ages (CLIPPED HERE)
