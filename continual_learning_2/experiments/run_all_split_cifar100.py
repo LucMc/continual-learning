@@ -7,7 +7,7 @@ from typing import Literal
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
 )
-from continual_learning_2.configs.models import MLPConfig
+from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.configs import (
     AdamConfig,
     CBPConfig,
@@ -74,24 +74,27 @@ def run_all_mnist():
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
-            model_config=MLPConfig(output_size=10),
+            model_config=CNNConfig(output_size=10),
             optim_cfg=opt,
             data_cfg=DatasetConfig(
-                name="split_mnist",
+                name="split_cifar100",
                 seed=args.seed,
                 batch_size=64,
-                num_tasks=10,
+                num_tasks=100,
                 num_epochs_per_task=1,
-                num_workers=0,  # (os.cpu_count() or 0) // 2,
+                # num_workers=0,  # (os.cpu_count() or 0) // 2,
+                dataset_kwargs = {
+                    "flatten" : False
+                }
             ),
             train_cfg=TrainingConfig(
-                resume=args.resume,
+                resume=False,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="split_mnist",
+                group="split_cifar100",
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,

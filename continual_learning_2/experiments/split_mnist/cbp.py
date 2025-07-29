@@ -9,26 +9,34 @@ from continual_learning_2.configs import CBPConfig, AdamConfig, MLPConfig, Train
 import jax
 
 
+@dataclass(frozen=True)
+class Args:
+    seed: int = 42
+    wandb_mode: Literal["online", "offline", "disabled"] = "online"
+    wandb_project: str | None = None
+    wandb_entity: str | None = None
+    data_dir: Path = Path("./experiment_results")
+    resume: bool = False
+
 def cbp_mnist_experiment():
-    SEED = 42
     start = time.time()
     optim_conf = CBPConfig(
         tx=AdamConfig(learning_rate=1e-3),
         decay_rate=0.9,
         replacement_rate=0.5,
         maturity_threshold=20,
-        seed=42,
+        seed=args.seed,
         weight_init_fn=jax.nn.initializers.he_uniform()
     )
 
     # Add validation to say what the available options are for dataset etc
     trainer = HeadResetClassificationCSLTrainer(
-        seed=SEED,
+        seed=args.seed,
         model_config=MLPConfig(output_size=10),
         optim_cfg=optim_conf,
         data_cfg=DatasetConfig(
             name="split_mnist",
-            seed=SEED,
+            seed=args.seed,
             batch_size=64,
             num_tasks=10,
             num_epochs_per_task=20,
@@ -39,10 +47,10 @@ def cbp_mnist_experiment():
         ),
         logs_cfg=LoggingConfig(
             run_name=f"cbp_{SEED}",
-            wandb_entity="lucmc",
-            wandb_project="crl_experiments",
+            wandb_entity=args.wandb_entity,
+            wandb_project=args.wandb_project,
             group="split_mnist",
-            wandb_mode="online",
+            wandb_mode=args.wandb_mode,
             interval=100,
             eval_during_training=True,
         ),

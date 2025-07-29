@@ -9,6 +9,14 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 from continual_learning_2.configs import CBPConfig, AdamConfig
 from continual_learning_2.configs.models import CNNConfig
 
+# @dataclass(frozen=True)
+# class Args:
+#     seed: int = 1
+#     wandb_mode: Literal["online", "offline", "disabled"] = "online"
+#     wandb_project: str | None = None
+#     wandb_entity: str | None = None
+#     data_dir: Path = Path("./experiment_results")
+#     resume: bool = False
 
 def cbp_split_cifar10_experiment():
     SEED = 42

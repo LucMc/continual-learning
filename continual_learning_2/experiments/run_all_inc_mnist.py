@@ -77,7 +77,7 @@ def run_all_mnist():
             model_config=MLPConfig(output_size=10),
             optim_cfg=opt,
             data_cfg=DatasetConfig(
-                name="split_mnist",
+                name="classinc_mnist",
                 seed=args.seed,
                 batch_size=64,
                 num_tasks=10,
@@ -91,7 +91,7 @@ def run_all_mnist():
                 run_name=f"{opt_name}_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="split_mnist",
+                group="classinc_mnist",
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,

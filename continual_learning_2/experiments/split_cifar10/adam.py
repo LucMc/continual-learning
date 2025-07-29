@@ -17,7 +17,7 @@ from continual_learning_2.configs import (
 
 @dataclass(frozen=True)
 class Args:
-    seed: int = 1
+    seed: int = 42
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str | None = None
     wandb_entity: str | None = None

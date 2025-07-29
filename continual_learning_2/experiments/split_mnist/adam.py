@@ -15,7 +15,7 @@ from continual_learning_2.configs import (
 def adam_mnist_experiment():
     SEED = 42
     start = time.time()
-    optim_conf = tx = AdamConfig(learning_rate=1e-3)
+    optim_conf = AdamConfig(learning_rate=1e-3)
 
     # Add validation to say what the available options are for dataset etc
     trainer = HeadResetClassificationCSLTrainer(
