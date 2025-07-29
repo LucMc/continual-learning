@@ -10,10 +10,6 @@ dependencies = [
     "gymnasium[mujoco]>=1.0.0",
     "jaxtyping>=0.2.34",
     "metaworld>=3.0",
-    "tensorboard",
-    "polars",
-    "altair",
-    "vl-convert-python",
     "numpy>=2.1.2",
     "orbax-checkpoint>=0.11.16",
     "tyro>=0.8.11",
@@ -32,7 +28,7 @@ metal = ["jax<=0.5.0", "jax-metal>=0.1.0; sys_platform == 'darwin'"]
 cuda12 = ["jax[cuda12]>=0.5.0"]
 tpu = ["jax[tpu]>=0.5.0"]
 testing = ["chex>=0.1.89", "pytest>=8.3.5"]
-profile = ["tensorflow>=2.19.0", "tensorboard>=2.19.0"]
+profile = ["tensorflow-cpu>=2.19.0", "tensorboard>=2.19.0"]
 
 [tool.uv]
 prerelease = "allow"
@@ -44,6 +40,7 @@ conflicts = [
         { extra = "tpu" },
     ],
 ]
+environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 
 [tool.ruff]
 ignore = ["F722"]

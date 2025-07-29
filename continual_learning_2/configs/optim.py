@@ -5,8 +5,13 @@ from typing import Callable
 import chex
 import optax
 
+<<<<<<< HEAD
 # Base configs
 @dataclass
+=======
+
+@dataclass(frozen=True)
+>>>>>>> origin/ltnt-15-clean-up-the-codebase
 class OptimizerConfig:
     learning_rate: float | optax.Schedule
 
@@ -15,6 +20,7 @@ class ResetMethodConfig:
     tx: OptimizerConfig
 
 # Standard optimizer configs
+@dataclass(frozen=True)
 class AdamConfig(OptimizerConfig):
     beta1: float = 0.9
     beta2: float = 0.999

@@ -1,34 +1,35 @@
+import os
 from ast import Tuple
-from chex import dataclass
+from functools import partial
+from pathlib import Path
+from pprint import pprint
+
+import brax.envs
+import distrax
+import flax.linen as nn
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import jax.random as random
-from jaxtyping import Array, Float, PRNGKeyArray
-import flax.linen as nn
-from flax.training.train_state import TrainState
-import gymnasium as gym
 import numpy as np
 import optax
-import distrax
-from pprint import pprint
-from functools import partial
-import wandb
 import tyro
-import os
-from pathlib import Path
-from continual_learning.nn import ActorNet, ValueNet
-import brax.envs
+from chex import dataclass
+from flax.training.train_state import TrainState
+from jaxtyping import Array, Float, PRNGKeyArray
 
+import wandb
+from continual_learning.nn import ActorNet, ValueNet
 from continual_learning.rl.ppo import PPO, Config
 
 
 @dataclass(frozen=True)
 class BraxConfig(Config):
-    env_id: str = "ant" # BRAX env name
-    training_steps: int = 500_000*256  # total training time-steps
+    env_id: str = "ant"  # BRAX env name
+    training_steps: int = 500_000 * 256  # total training time-steps
     n_envs: int = 32  # number of parralel training envs
     rollout_steps: int = 1024 * 16  # env steps per rollout
-    batch_size: int = 64*4  # minibatch size
+    batch_size: int = 64 * 4  # minibatch size
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,8 @@ class BraxPPO(PPO, BraxConfig):
             "mean rollout reward": np.mean(rewards),
             "advantage_mean": jnp.mean(advantages),
             "advantage_std": jnp.std(advantages),
-            "explained_variance": 1 - (jnp.var(advantages.flatten()) / jnp.var(returns.flatten())+1e-8),  # fmt: skip
+            "explained_variance": 1
+            - (jnp.var(advantages.flatten()) / jnp.var(returns.flatten()) + 1e-8),  # fmt: skip
             "actor_lr": actor_ts.opt_state[-1].hyperparams["learning_rate"],
             "action_dist_std": stds.mean(),
             "value lr": value_ts.opt_state[-1].hyperparams["learning_rate"],
@@ -112,7 +114,6 @@ class BraxPPO(PPO, BraxConfig):
             infos,
         )
 
-
     def make_env(self, video_folder: str = None, env_args: dict = {}):
         return brax.envs.wrappers.training.wrap(brax.envs.get_environment(self.env_id))
 
@@ -124,9 +125,7 @@ class BraxPPO(PPO, BraxConfig):
 
         if ppo_agent.log_video_every:
             base_video_dir = Path("videos")
-            video_folder = base_video_dir / str(
-                len(os.listdir(base_video_dir))
-            )
+            video_folder = base_video_dir / str(len(os.listdir(base_video_dir)))
             os.makedirs(video_folder)
             env_args = {"render_mode": "rgb_array"}
         else:
@@ -143,7 +142,9 @@ class BraxPPO(PPO, BraxConfig):
             )
 
         ckpt_path = "./checkpoints"
-        assert not ppo_agent.rollout_steps % ppo_agent.batch_size, "Must have rollout steps divisible into batches"
+        assert not ppo_agent.rollout_steps % ppo_agent.batch_size, (
+            "Must have rollout steps divisible into batches"
+        )
 
         key = random.PRNGKey(ppo_agent.seed)
         env_keys, actor_key, value_key, key = random.split(key, num=4)
@@ -153,7 +154,9 @@ class BraxPPO(PPO, BraxConfig):
         states = env.reset(initial_reset_keys)
         current_global_step = 0
 
-        actor_ts, value_ts = setup_network_trainstates(states.obs, env.action_size, actor_key, value_key)
+        actor_ts, value_ts = setup_network_trainstates(
+            states.obs, env.action_size, actor_key, value_key
+        )
 
         while current_global_step < ppo_agent.training_steps:
             print("\ncurrent_global_step:", current_global_step)

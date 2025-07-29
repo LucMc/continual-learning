@@ -24,11 +24,14 @@ class MLP(nn.Module):
             x = Dense(self.config.hidden_size, name=f"layer_{i}")(x)
             self.sow("preactivations", f"layer_{i}_pre", x)
             x = self.config.activation_fn(x)
+
             if self.config.dropout is not None:
                 x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
+
             self.sow("activations", f"layer_{i}_act", x)
 
         self.sow("preactivations", "output_pre", x)
-        x = nn.Dense(self.config.output_size, name="output")(x)
+        x = Dense(self.config.output_size, name="output")(x)
         self.sow("activations", "output_act", x)
+
         return x.astype(jnp.float32)

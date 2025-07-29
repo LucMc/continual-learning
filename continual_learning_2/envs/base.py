@@ -8,12 +8,10 @@ from continual_learning_2.types import (
     Action,
     Done,
     EnvState,
-    EpisodeLengths,
-    EpisodeReturns,
-    EpisodeStarted,
     Observation,
     Reward,
 )
+from continual_learning_2.utils.jittable import Jittable
 
 
 class Agent(Protocol):
@@ -25,9 +23,7 @@ class Timestep(NamedTuple):
     reward: Reward
     terminated: Done
     truncated: Done
-    final_episode_returns: EpisodeReturns
-    final_episode_lengths: EpisodeLengths
-    final_observation: Observation
+    info: dict
 
 
 class VectorEnv(abc.ABC):
@@ -44,7 +40,7 @@ class VectorEnv(abc.ABC):
     def load(self, checkpoint: dict): ...
 
 
-class JittableVectorEnv(abc.ABC):
+class JittableVectorEnv(Jittable):
     @abc.abstractmethod
     def init(self) -> tuple[EnvState, Observation]: ...
 

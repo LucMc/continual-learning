@@ -23,6 +23,11 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
     if isinstance(config, AdamConfig):
         tx = optax.adam(
             config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon
+        return optax.chain(
+            # optax.clip_by_global_norm(1.0),
+            optax.adam(
+                config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon
+            ),
         )
         if is_inner:
             return tx

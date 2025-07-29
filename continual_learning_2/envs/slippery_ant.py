@@ -5,19 +5,20 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+from brax import envs as brax_envs
 from brax.envs.ant import Ant
 from brax.envs.base import PipelineEnv, State
-from brax.envs.wrappers.training import EpisodeWrapper, VmapWrapper, Wrapper
 from brax.io import mjcf
 from etils import epath
 
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.envs.base import (
+    Agent,
     JittableContinualLearningEnv,
     JittableVectorEnv,
     Timestep,
 )
-from continual_learning_2.types import Agent, EnvState, Observation
+from continual_learning_2.types import Action, EnvState, Observation
 
 
 class SlipperyAnt(Ant):
@@ -45,7 +46,7 @@ class SlipperyAnt(Ant):
         #### We set the friction programmatically
         model = sys.mj_model
         model.geom_friction[:] = np.array([friction, 0.5, 0.5])
-        sys = sys.replace(model=model)
+        sys = sys.replace(mj_model=model)
 
         n_frames = 5
 
@@ -71,7 +72,7 @@ class SlipperyAnt(Ant):
 
         kwargs["n_frames"] = kwargs.get("n_frames", n_frames)
 
-        PipelineEnv.__init__(sys=sys, backend=backend, **kwargs)  # pyright: ignore[reportArgumentType]
+        PipelineEnv.__init__(self, sys=sys, backend=backend, **kwargs)  # pyright: ignore[reportArgumentType]
 
         self._ctrl_cost_weight = ctrl_cost_weight
         self._use_contact_forces = use_contact_forces
@@ -89,63 +90,6 @@ class SlipperyAnt(Ant):
             raise NotImplementedError("use_contact_forces not implemented.")
 
 
-class AutoResetWrapper(Wrapper):
-    """Custom AutoResetWrapper that's more like Gymnasium in behaviour.
-
-    The default Brax AutoResetWrapper loses the final observation.
-    """
-
-    def reset(self, rng: jax.Array) -> State:
-        state = self.env.reset(rng)
-        state.info["first_pipeline_state"] = state.pipeline_state
-        state.info["first_obs"] = state.obs
-        state.info["final_episode_returns"] = jnp.zeros_like(state.reward)
-        state.info["final_episode_lengths"] = jnp.zeros_like(state.reward)
-
-        assert isinstance(state.obs, jax.Array)
-        state.info["final_observation"] = jnp.zeros_like(state.obs)
-        return state
-
-    def step(self, state: State, action: jax.Array) -> State:
-        # Get rid of any done flags from previous steps
-        state = state.replace(done=jnp.zeros_like(state.done))
-
-        state = self.env.step(state, action)
-
-        # The actual autoreset
-        def where_done(x, y):
-            done = state.done
-            if done.shape:
-                done = jnp.reshape(done, [x.shape[0]] + [1] * (len(x.shape) - 1))  # type: ignore
-            return jnp.where(done, x, y)
-
-        pipeline_state = jax.tree.map(
-            where_done, state.info["first_pipeline_state"], state.pipeline_state
-        )
-
-        # Save final obs
-        assert isinstance(state.obs, jax.Array)
-        state.info.update(
-            final_observation=jnp.where(state.done, state.obs, jnp.zeros_like(state.obs))
-        )
-
-        if "steps" in state.info:
-            steps = state.info["steps"]
-            steps = jnp.where(state.done, jnp.zeros_like(steps), steps)
-            state.info.update(steps=steps)
-
-        if "episode_metrics" in state.info:
-            returns = state.info["episode_metrics"]["sum_reward"]
-            lengths = state.info["episode_metrics"]["length"]
-            state.info.update(
-                final_episode_returns=jnp.where(state.done, returns, jnp.zeros_like(returns)),
-                final_episode_lengths=jnp.where(state.done, lengths, jnp.zeros_like(lengths)),
-            )
-
-        obs = jax.tree.map(where_done, state.info["first_obs"], state.obs)
-        return state.replace(pipeline_state=pipeline_state, obs=obs)
-
-
 class JittableVectorEnvWrapper(JittableVectorEnv):
     def __init__(
         self,
@@ -153,12 +97,18 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
         env: PipelineEnv,
         num_envs: int,
         episode_length: int,
-        env_checkpoint: EnvState | None,
+        env_checkpoint: EnvState | None = None,
+        reward_gain: float = 1.0,
     ):
-        self.envs = VmapWrapper(env, batch_size=num_envs)
-        self.envs = EpisodeWrapper(self.envs, episode_length=episode_length, action_repeat=1)
-        self.envs = AutoResetWrapper(self.envs)
-        self.key = jax.random.PRNGKey(seed)
+        envs = brax_envs.training.wrap(
+            env,
+            episode_length=episode_length,
+            action_repeat=1,
+        )
+
+        self.envs = envs
+        self.key = jax.random.split(jax.random.PRNGKey(seed), num_envs)
+        self.reward_gain = reward_gain
 
         self.checkpoint = env_checkpoint
 
@@ -166,42 +116,39 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
         if self.checkpoint is not None:
             state = self.checkpoint
         else:
-            self.key, reset_key = jax.random.split(self.key)
-            state = self.envs.reset(reset_key)
+            state = jax.jit(self.envs.reset)(self.key)
 
         obs = state.obs
 
-        assert state.pipeline_state is not None
         assert isinstance(obs, jax.Array)
-
         return state, obs
 
-    def step(self, state: State, action) -> tuple[State, Timestep]:
+    def step(self, state: State, action: Action) -> tuple[State, Timestep]:
         assert isinstance(action, jax.Array)
-        state = self.envs.step(state, action)
+        next_state = self.envs.step(state, action)
 
-        assert isinstance(state.obs, jax.Array)
-
-        return state, Timestep(
-            next_observation=state.obs,
-            reward=state.reward,
-            terminated=state.done - state.info["truncation"],
-            truncated=state.info["truncation"],
-            final_episode_returns=state.info["final_episode_returns"],
-            final_episode_lengths=state.info["final_episode_lengths"],
-            final_observation=state.info["final_observation"],
+        assert isinstance(next_state.obs, jax.Array)
+        return next_state, Timestep(
+            next_observation=next_state.obs,
+            reward=self.reward_gain * next_state.reward,
+            terminated=(next_state.done * (1 - state.info["truncation"])),
+            truncated=next_state.info["truncation"],
+            info=next_state.info,
         )
 
 
 class ContinualAnt(JittableContinualLearningEnv):
     def __init__(self, seed: int, config: EnvConfig):
-        self.num_envs = config.num_envs
+        self._num_envs = config.num_envs
+        self._episode_length = config.episode_length
 
         rng = np.random.default_rng(seed)
         self.seed = seed
-        self.frictions = rng.uniform(low=0.1, high=2.0, size=config.num_tasks)
+        low, high = np.log10(0.02), np.log10(2.0)
+        self.frictions = np.pow(10, rng.uniform(low=low, high=high, size=config.num_tasks))
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
+        self.reward_gain = 1.0
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:
@@ -226,13 +173,14 @@ class ContinualAnt(JittableContinualLearningEnv):
             seed=self.seed,
             env=SlipperyAnt(friction=friction),
             num_envs=self.num_envs,
-            episode_length=1_000,
+            episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,
+            reward_gain=self.reward_gain,
         )
 
     @property
     def num_envs(self) -> int:
-        return self.num_envs
+        return self._num_envs
 
     def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float] | None:
         del agent, forgetting

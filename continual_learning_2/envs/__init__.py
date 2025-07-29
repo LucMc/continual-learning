@@ -6,13 +6,17 @@ from .base import (
     JittableVectorEnv,
     VectorEnv,
 )
+from .slippery_ant import ContinualAnt
 
 
 def get_benchmark(
+    seed: int,
     env_config: EnvConfig,
 ) -> ContinualLearningEnv | JittableContinualLearningEnv:
-    # TODO
-    ...
+    if env_config.name == "slippery_ant":
+        return ContinualAnt(seed, env_config)
+    else:
+        raise ValueError(f"Unknown environment: {env_config.name}")
 
 
 __all__ = [
@@ -20,4 +24,5 @@ __all__ = [
     "JittableVectorEnv",
     "VectorEnv",
     "JittableContinualLearningEnv",
+    "ContinualAnt",
 ]

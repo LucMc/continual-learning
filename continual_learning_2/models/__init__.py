@@ -16,3 +16,14 @@ def get_model(cfg) -> nn.Module:
         return ResNet(cfg)
     else:
         raise ValueError(f"Unknown model configuration: {cfg}")
+
+
+def get_model_cls(cfg) -> type[nn.Module]:
+    if isinstance(cfg, MLPConfig):
+        return MLP
+    elif isinstance(cfg, CNNConfig):
+        return CNN
+    elif isinstance(cfg, ResNetConfig):
+        return ResNet
+    else:
+        raise ValueError(f"Unknown model configuration: {cfg}")

@@ -48,6 +48,7 @@ class Activation(enum.Enum):
     PReLU = enum.member(lambda x: flax.linen.PReLU()(x))  # noqa: E731
     ReLU6 = enum.member(jax.nn.relu6)
     SiLU = enum.member(jax.nn.silu)
+    Swish = enum.member(jax.nn.swish)
     GELU = enum.member(jax.nn.gelu)
     GLU = enum.member(jax.nn.glu)
     Identity = enum.member(lambda x: x)
@@ -81,6 +82,11 @@ class Rollout(NamedTuple):
     actions: Float[Action, "timestep env"]
     rewards: Float[Reward, "timestep env 1"]
     dones: Shaped[Done, "timestep env 1"]
+    terminated: Bool[npt.NDArray | Array, "timestep env 1"]
+    truncated: Bool[npt.NDArray | Array, "timestep env 1"]
+    next_observations: Float[Observation, "timestep env"]
+
+    infos: dict
 
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None
