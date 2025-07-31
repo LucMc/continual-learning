@@ -55,10 +55,10 @@ def adam_split_cifar10_experiment() -> None:
         ),
         logs_cfg=LoggingConfig(
             run_name=f"adam_{args.seed}",
-            wandb_entity="lucmc",
-            wandb_project="crl_experiments",
+            wandb_entity=args.wandb_entity,
+            wandb_project=args.wandb_project,
             group="split_cifar10",
-            wandb_mode="online",
+            wandb_mode=args.wandb_mode,
             interval=100,
             eval_during_training=True,
         ),

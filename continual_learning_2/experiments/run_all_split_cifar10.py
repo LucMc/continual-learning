@@ -70,12 +70,12 @@ def run_all_mnist():
     }
 
     exp_start = time.time()
-    for opt_name, opt in optimizers.items():
+    for opt_name, opt_conf in optimizers.items():
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
             model_config=CNNConfig(output_size=10),
-            optim_cfg=opt,
+            optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="split_cifar10",
                 seed=args.seed,

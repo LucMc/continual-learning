@@ -89,25 +89,19 @@ def redo(
             return params, new_state, tx_state
 
         def _redo(updates: optax.Updates,) -> Tuple[optax.Updates, RedoOptimState]:  # fmt: skip
-            # weights, bias, excluded = utils.process_params(params["params"], features)
             flat_params = flax.traverse_util.flatten_dict(params["params"])
-            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
-            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+
+            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
+            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
 
             scores = {
                 key.split('_act')[0]: get_score(feature_tuple[0])
                 for key, feature_tuple in zip(features.keys(), features.values())
-                # for key, feature_tuple in features.items()
             }
-            # scores = jax.tree.map(
-            #     lambda f: get_score(f[0]), features
-            # )  # Scores, avged over batches: PyTree[#neurons]
-            #
             reset_mask = jax.tree.map(get_reset_mask, scores)
             key_tree = utils.gen_key_tree(state.rng, weights)
 
             # reset weights given mask
-            # order = sorted(features, lambda k:
             _weights, reset_logs = utils.reset_weights(
                 key_tree, reset_mask, weights, weight_init_fn # state.initial_weights
             )
@@ -132,8 +126,9 @@ def redo(
 
             # Reset optim, i.e. Adamw params
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
+            flat_new_params, _ = jax.tree.flatten(new_params)
 
-            return {"params": new_params}, new_state, _tx_state
+            return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
         return jax.lax.cond(state.time_step % update_frequency == 0, _redo, no_update, updates)
 

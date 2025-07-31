@@ -28,7 +28,7 @@ class Args:
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
 
-def run_all_mnist():
+def run_all_inc_mnist():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -49,8 +49,8 @@ def run_all_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            replacement_rate=0.01,
+            maturity_threshold=5,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -63,19 +63,23 @@ def run_all_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.8,
+            shrink=0.7, # 0.8
             perturb=0.01,
             every_n=1,
         ),
     }
+    optimizers.pop("cbp")
+    optimizers.pop("adam")
+    optimizers.pop("redo")
+    optimizers.pop("shrink_and_perturb")
 
     exp_start = time.time()
-    for opt_name, opt in optimizers.items():
+    for opt_name, opt_conf in optimizers.items():
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
             model_config=MLPConfig(output_size=10),
-            optim_cfg=opt,
+            optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="classinc_mnist",
                 seed=args.seed,
@@ -105,4 +109,4 @@ def run_all_mnist():
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
 
 if __name__ == "__main__":
-    run_all_mnist()
+    run_all_inc_mnist()

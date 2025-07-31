@@ -5,6 +5,8 @@ from .training import TrainingConfig
 from .envs import EnvConfig
 from .optim import (
     AdamConfig,
+    AdamwConfig,
+    MuonConfig,
     ShrinkAndPerterbConfig,
     RedoConfig,
     CBPConfig,
@@ -21,6 +23,8 @@ __all__ = [
     "TrainingConfig",
     "EnvConfig",
     "AdamConfig",
+    "AdamwConfig",
+    "MuonConfig",
     "ShrinkAndPerterbConfig",
     "RedoConfig",
     "CBPConfig",

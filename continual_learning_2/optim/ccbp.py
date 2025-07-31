@@ -69,9 +69,8 @@ def ccbp(
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])
-        biases = {k[0]: v for k, v in flat_params.items() if k[-1] == 'bias'}
+        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
         biases.pop(out_layer_name)
-
 
         del params
 
@@ -98,8 +97,8 @@ def ccbp(
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
 
-            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
             out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
@@ -176,8 +175,10 @@ def ccbp(
             new_state = state.replace(
                 ages=_ages, logs=FrozenDict(_logs), rng=new_rng, utilities=_utility
             )
+            flat_new_params, _ = jax.tree.flatten(new_params)
+            # TODO: Update bias and tx_state
 
-            return {"params": new_params}, new_state, tx_state
+            return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, tx_state
 
         return _ccbp(updates)
 

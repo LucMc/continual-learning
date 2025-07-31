@@ -7,7 +7,7 @@ from typing import Literal
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
 )
-from continual_learning_2.configs.models import CNNConfig
+from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.configs import (
     AdamConfig,
     CBPConfig,
@@ -28,7 +28,7 @@ class Args:
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
 
-def run_all_cifar100():
+def run_all_mnist():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -74,27 +74,24 @@ def run_all_cifar100():
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
-            model_config=CNNConfig(output_size=100),
+            model_config=MLPConfig(output_size=10),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
-                name="split_cifar100",
+                name="permuted_mnist",
                 seed=args.seed,
                 batch_size=64,
-                num_tasks=100,
-                num_epochs_per_task=5,
-                # num_workers=0,  # (os.cpu_count() or 0) // 2,
-                dataset_kwargs = {
-                    "flatten" : False
-                }
+                num_tasks=10,
+                num_epochs_per_task=1,
+                num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(
-                resume=False,
+                resume=args.resume,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="split_cifar100",
+                group="classinc_mnist",
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
@@ -108,4 +105,4 @@ def run_all_cifar100():
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
 
 if __name__ == "__main__":
-    run_all_cifar100()
+    run_all_inc_mnist()

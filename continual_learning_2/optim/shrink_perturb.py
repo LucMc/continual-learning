@@ -50,7 +50,7 @@ def shrink_perturb(
             new_rng, noise_rng = random.split(state.rng, num=2)
             noise_key_tree = utils.gen_key_tree(noise_rng, weights)
 
-            new_params = jax.tree_map(
+            new_params = jax.tree.map(
                 lambda w, b, k: {
                     "kernel": w * shrink + param_noise_fn(k, shape=w.shape) * perturb,
                     "bias": b,

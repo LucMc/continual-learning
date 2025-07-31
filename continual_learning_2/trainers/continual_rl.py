@@ -71,22 +71,25 @@ class PPO:
             policy_params, vf_params = policy_and_vf_params
             key, dropout_key = jax.random.split(key)
 
-            values = vf.apply_fn(
+            values, value_intermediates = vf.apply_fn(
                 vf_params,
                 data.observations,
                 training=True,
                 rngs={"dropout": dropout_key},
-            ).squeeze(-1)
+                mutable=("activations", "preactivations")
+            )
+            values = values.squeeze(-1)
 
             if cfg.normalize_advantages:
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
             # Policy
-            dist = policy.apply_fn(
+            dist, actor_intermediates = policy.apply_fn(
                 policy_params,
                 data.observations,
                 training=True,
                 rngs={"dropout": dropout_key},
+                mutable=("activations", "preactivations")
             )
             log_probs = dist.log_prob(data.actions)
             ratio = jnp.exp((log_ratio := log_probs - data.log_probs))
@@ -99,6 +102,8 @@ class PPO:
 
             # VF
             vf_loss = cfg.vf_coefficient * 0.5 * jnp.power(value_targets - values, 2).mean()
+            # vf_loss = jnp.minimum(jnp.power(value_targets - values, 2),
+            #                       (value_targets - jnp.clip(values, data.values - 0.2, data.values + 0.2)**2)).mean()
 
             total_loss = policy_loss + vf_loss + entropy_loss
 
@@ -106,7 +111,11 @@ class PPO:
             approx_kl = jax.lax.stop_gradient(((ratio - 1) - log_ratio).mean())
             clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > cfg.clip_eps).mean())
 
-            return total_loss, {
+            # Intermediates
+            actor_feats = actor_intermediates["activations"]["main"]
+            value_feats = value_intermediates["activations"]
+
+            return total_loss, ({
                 "metrics/total_loss": total_loss,
                 "metrics/policy_loss": policy_loss,
                 "metrics/vf_loss": vf_loss,
@@ -114,14 +123,14 @@ class PPO:
                 "metrics/approx_kl": approx_kl,
                 "metrics/clip_fracs": clip_fracs,
                 "metrics/values": values.mean(),
-            }
+            }, actor_feats, value_feats)
 
         def update_minibatch(carry, xs):
             policy, vf, key = carry
             data, advantages, value_targets = xs
 
             key, loss_key = jax.random.split(key)
-            (_, metrics), grads = jax.value_and_grad(loss, has_aux=True)(
+            (_, (metrics, actor_feats, value_feats)), grads = jax.value_and_grad(loss, has_aux=True)(
                 (policy.params, vf.params), loss_key, data, advantages, value_targets
             )
             policy_grads, vf_grads = grads[0], grads[1]
@@ -129,7 +138,7 @@ class PPO:
             # Update policy
             policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
             policy_grads_hist_dict = pytree_histogram(policy_grads["params"])
-            policy = policy.apply_gradients(grads=policy_grads)
+            policy = policy.apply_gradients(grads=policy_grads, features=actor_feats)
 
             policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
             policy_param_hist_dict = pytree_histogram(policy.params["params"])
@@ -137,7 +146,7 @@ class PPO:
             # Updave vf
             vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
             vf_grads_hist_dict = pytree_histogram(vf_grads["params"])
-            vf = vf.apply_gradients(grads=vf_grads)
+            vf = vf.apply_gradients(grads=vf_grads, features=value_feats)
 
             vf_params_flat, _ = jax.flatten_util.ravel_pytree(vf.params)
             vf_param_hist_dict = pytree_histogram(vf.params["params"])
@@ -246,6 +255,7 @@ class JittedContinualPPOTrainer(PPO):
 
         policy_network_module = get_model_cls(ppo_config.policy_config.network)
         policy_module = Policy(policy_network_module, ppo_config.policy_config)
+
         self.policy = TrainState.create(
             apply_fn=policy_module.apply,
             params=policy_module.lazy_init(
@@ -380,7 +390,7 @@ class JittedContinualPPOTrainer(PPO):
 
 
 if __name__ == "__main__":
-    SEED = 42
+    SEED = 44
 
     start = time.time()
     trainer = JittedContinualPPOTrainer(
@@ -421,18 +431,17 @@ if __name__ == "__main__":
         ),
         env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=1, episode_length=1000),
         train_cfg=RLTrainingConfig(
-            resume=True,
-            steps_per_task=50_000_000,
+            resume=False,
+            steps_per_task=150_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name="continual_ant_debug_12",
-            wandb_entity="evangelos-ch",
-            wandb_project="continual_learning_2",
+            wandb_entity="lucmc",
+            wandb_project="crl_experiments",
             save=False,  # Disable checkpoints cause it's so fast anyway
-            # wandb_mode="disabled",
+            wandb_mode="online",
         ),
     )
 
     trainer.train()
 
-    print(f"Training time: {time.time() - start:.2f} seconds")

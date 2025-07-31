@@ -135,7 +135,7 @@ def cbp(
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])
-        biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
+        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
         del params
@@ -165,8 +165,8 @@ def cbp(
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
 
-            weights = {k[0]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[0]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
             out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
@@ -264,7 +264,9 @@ def cbp(
             )
             # Reset optim, i.e. Adamw params
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
-            return {"params": new_params}, new_state, _tx_state
+            flat_new_params, _ = jax.tree.flatten(new_params)
+
+            return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
         return _cbp(updates)
 

@@ -130,7 +130,7 @@ class SplitDataset(ContinualLearningDataset):
             range(num_classes_in_task * task_id, num_classes_in_task * (task_id + 1))
         )
 
-        ds = self._dataset_train.filter(lambda x: x["label"] in classes_in_task)
+        ds = self._dataset_train.filter(lambda x: x[self.data_label] in classes_in_task)
 
         return grain.DataLoader(
             data_source=ds,
@@ -156,7 +156,7 @@ class SplitDataset(ContinualLearningDataset):
             range(num_classes_in_task * task_id, num_classes_in_task * (task_id + 1))
         )
 
-        ds = self._dataset_test.filter(lambda x: x["label"] in classes_in_task)
+        ds = self._dataset_test.filter(lambda x: x[self.data_label] in classes_in_task)
 
         return grain.DataLoader(
             data_source=ds,
@@ -327,6 +327,7 @@ class ClassIncrementalDataset(SplitDataset):
         self.class_increment = self.NUM_CLASSES // self.num_tasks
         self.class_order = rng.permutation(self.NUM_CLASSES)
         self.current_task = 0
+        self.resumed_loader = None
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
@@ -335,7 +336,7 @@ class ClassIncrementalDataset(SplitDataset):
             raise ValueError(f"Invalid task id: {task_id}")
 
         num_classes = self.class_increment * (task_id + 1)
-        ds = self._dataset_train.filter(lambda x: x["label"] in self.class_order[:num_classes])
+        ds = self._dataset_train.filter(lambda x: x[self.data_label] in self.class_order[:num_classes])
 
         return grain.DataLoader(
             data_source=ds,
@@ -356,7 +357,7 @@ class ClassIncrementalDataset(SplitDataset):
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
-        ds = self._dataset_test.filter(lambda x: x["label"] in list(range(task_id)))
+        ds = self._dataset_test.filter(lambda x: x[self.data_label] in list(range(task_id+1)))
 
         return grain.DataLoader(
             data_source=ds,

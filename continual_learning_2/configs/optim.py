@@ -1,27 +1,35 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import jax
 import flax.linen as nn
 from typing import Callable
 import chex
 import optax
 
-<<<<<<< HEAD
 # Base configs
-@dataclass
-=======
-
 @dataclass(frozen=True)
->>>>>>> origin/ltnt-15-clean-up-the-codebase
 class OptimizerConfig:
     learning_rate: float | optax.Schedule
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, unsafe_hash=True)
 class ResetMethodConfig:
     tx: OptimizerConfig
 
 # Standard optimizer configs
 @dataclass(frozen=True)
 class AdamConfig(OptimizerConfig):
+    beta1: float = 0.9
+    beta2: float = 0.999
+    epsilon: float = 1e-8
+
+@dataclass(frozen=True)
+class AdamwConfig(OptimizerConfig):
+    beta1: float = 0.9
+    beta2: float = 0.999
+    epsilon: float = 1e-8
+    decay: float = 1e-4
+
+@dataclass(frozen=True)
+class MuonConfig(OptimizerConfig):
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 1e-8
@@ -35,7 +43,7 @@ class ShrinkAndPerterbConfig(ResetMethodConfig):
     perturb: float = 0.01
     every_n: int = 1
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, unsafe_hash=True)
 class RedoConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42

@@ -32,7 +32,7 @@ class ProcessCIFAR(grain.RandomMapTransform):
         return x
 
     def random_map(self, element: dict, rng: np.random.Generator) -> DatasetItem:
-        x, y = element["img"], element["label"]
+        x, y = element["img"], element["fine_label"]
 
         # Max normalisation
         x = np.array(x, dtype=np.float32) / 255
@@ -57,9 +57,10 @@ class CIFAR:
     num_classes: int
     flatten: bool = False
 
-    def __init__(self, num_classes: int, flatten: bool = False):
+    def __init__(self, num_classes: int, flatten: bool = False, data_label: str = "label"):
         self.num_classes = num_classes
         self.flatten = flatten
+        self.data_label = data_label
 
     @property
     def operations(self):
@@ -79,37 +80,41 @@ class SplitCIFAR10(CIFAR, SplitDataset):
     NUM_CLASSES: int = 10
     DATASET_PATH = "cifar10"
     KEEP_IN_MEMORY: bool | None = True
+    DATA_LABEL: str = "label"
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):
         SplitDataset.__init__(self, config)
-        CIFAR.__init__(self, self.NUM_CLASSES, flatten)
+        CIFAR.__init__(self, self.NUM_CLASSES, flatten, self.DATA_LABEL)
 
 
 class ClassIncrementalCIFAR10(CIFAR, ClassIncrementalDataset):
     NUM_CLASSES: int = 10
     DATASET_PATH = "cifar10"
     KEEP_IN_MEMORY: bool | None = True
+    DATA_LABEL: str = "label"
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):
         ClassIncrementalDataset.__init__(self, config)
-        CIFAR.__init__(self, self.NUM_CLASSES, flatten)
+        CIFAR.__init__(self, self.NUM_CLASSES, flatten, self.DATA_LABEL)
 
 
 class SplitCIFAR100(CIFAR, SplitDataset):
     NUM_CLASSES: int = 100
     DATASET_PATH = "cifar100"
     KEEP_IN_MEMORY: bool | None = True
+    DATA_LABEL: str = "fine_label" # As oposed to corse_label
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):
         SplitDataset.__init__(self, config)
-        CIFAR.__init__(self, self.NUM_CLASSES, flatten)
+        CIFAR.__init__(self, self.NUM_CLASSES, flatten, self.DATA_LABEL)
 
 
 class ClassIncrementalCIFAR100(CIFAR, ClassIncrementalDataset):
     NUM_CLASSES: int = 100
     DATASET_PATH = "cifar100"
-    KEEP_IN_MEMORY: bool | None = True
+    KEEP_IN_MEMORY: bool | None = True 
+    DATA_LABEL: str = "fine_label"
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):
         ClassIncrementalDataset.__init__(self, config)
-        CIFAR.__init__(self, self.NUM_CLASSES, flatten)
+        CIFAR.__init__(self, self.NUM_CLASSES, flatten, self.DATA_LABEL)

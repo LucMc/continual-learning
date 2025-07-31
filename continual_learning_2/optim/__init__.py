@@ -3,6 +3,8 @@ import jax
 import flax.linen as nn
 from continual_learning_2.configs.optim import (
     AdamConfig,
+    AdamwConfig,
+    MuonConfig,
     CBPConfig,
     CCBPConfig,
     RedoConfig,
@@ -18,13 +20,13 @@ from .cbp import cbp
 from .identity_reset import identity_reset
 
 
-
 def get_optimizer(config: OptimizerConfig, is_inner=False):
+    rm_config = config.__dict__.copy()
+
+    # Inner optimizers
     if isinstance(config, AdamConfig):
-        tx = optax.adam(
-            config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon
-        return optax.chain(
-            # optax.clip_by_global_norm(1.0),
+        tx = optax.chain(
+            optax.clip_by_global_norm(1.0),
             optax.adam(
                 config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon
             ),
@@ -32,25 +34,65 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
         if is_inner:
             return tx
         else:
-            return attach_reset_method(("tx", tx),
-                                   ("reset_method", identity_reset(**config.__dict__)))
+            return attach_reset_method(
+                ("tx", tx), ("reset_method", identity_reset(**config.__dict__))
+            )
+
+    if isinstance(config, AdamwConfig):
+        tx = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adamw(
+                config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon, weight_decay=config.decay
+            ),
+        )
+        if is_inner:
+            return tx
+        else:
+            return attach_reset_method(
+                ("tx", tx), ("reset_method", identity_reset(**config.__dict__))
+            )
 
 
+    if isinstance(config, MuonConfig):
+        tx = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.contrib.muon(
+                config.learning_rate,
+                adam_b1=config.beta1,
+                adam_b2=config.beta2,
+                adam_eps_root=config.epsilon,
+            ),
+        )
+        if is_inner:
+            return tx
+        else:
+            return attach_reset_method(
+                ("tx", tx), ("reset_method", identity_reset(**config.__dict__))
+            )
+
+    # Outer/reset methods
     elif isinstance(config, ShrinkAndPerterbConfig):
-        return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
-                                   ("reset_method", shrink_perturb(**config.__dict__)))
+        return attach_reset_method(
+            ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
+            ("reset_method", shrink_perturb(**rm_config)),
+        )
 
     elif isinstance(config, RedoConfig):
-        return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
-                                   ("reset_method", redo(**config.__dict__)))
+        return attach_reset_method(
+            ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
+            ("reset_method", redo(**rm_config)),
+        )
 
     elif isinstance(config, CBPConfig):
-        return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
-                                   ("reset_method", cbp(**config.__dict__)))
+        return attach_reset_method(
+            ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
+            ("reset_method", cbp(**rm_config)),
+        )
 
     elif isinstance(config, CCBPConfig):
-        return attach_reset_method(("tx", get_optimizer(config.__dict__.pop("tx"), is_inner=True)),
-                                   ("reset_method", ccbp(**config.__dict__)))
+        return attach_reset_method(
+            ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
+            ("reset_method", ccbp(**rm_config)),
+        )
     else:
         raise ValueError(f"Unsupported optimizer config type: {type(config)}")
-

@@ -36,6 +36,7 @@ class MNIST:
 
     def __init__(self, flatten: bool):
         self.flatten = flatten
+        self.data_label = "label"
 
     @property
     def operations(self):
