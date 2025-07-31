@@ -24,6 +24,7 @@ from continual_learning_2.models import get_model, get_model_cls
 from continual_learning_2.models.rl import Policy
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
+from continual_learning_2.trainers.continual_supervised_learning import optim_conf
 from continual_learning_2.types import (
     Activation,
     EnvState,
@@ -60,12 +61,13 @@ def adam_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    optim_conf = AdamConfig(learning_rate=3e-4),
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
-                optimizer=AdamConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=4,
                     hidden_size=32,
@@ -77,7 +79,7 @@ def adam_ant_experiment() -> None:
                 std_type=StdType.MLP_HEAD,
             ),
             vf_config=ValueFunctionConfig(
-                optimizer=AdamConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=5,
                     hidden_size=256,

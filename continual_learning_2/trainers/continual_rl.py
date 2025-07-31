@@ -102,8 +102,8 @@ class PPO:
 
             # VF
             vf_loss = cfg.vf_coefficient * 0.5 * jnp.power(value_targets - values, 2).mean()
-            # vf_loss = jnp.minimum(jnp.power(value_targets - values, 2),
-            #                       (value_targets - jnp.clip(values, data.values - 0.2, data.values + 0.2)**2)).mean()
+            # vf_loss = cfg.vf_coefficient * 0.5 * jnp.minimum(jnp.power(value_targets - values, 2),
+            #                       (value_targets - jnp.clip(values, data.values - 1, data.values + 1)**2)).mean()
 
             total_loss = policy_loss + vf_loss + entropy_loss
 

@@ -60,12 +60,13 @@ def muon_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    optim_conf = MuonConfig(learning_rate=3e-4),
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
-                optimizer=MuonConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=4,
                     hidden_size=32,
@@ -77,7 +78,7 @@ def muon_ant_experiment() -> None:
                 std_type=StdType.MLP_HEAD,
             ),
             vf_config=ValueFunctionConfig(
-                optimizer=MuonConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=5,
                     hidden_size=256,

@@ -60,12 +60,13 @@ def adamw_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    optim_conf = AdamwConfig(learning_rate=3e-4),
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
-                optimizer=AdamwConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=4,
                     hidden_size=32,
@@ -77,7 +78,7 @@ def adamw_ant_experiment() -> None:
                 std_type=StdType.MLP_HEAD,
             ),
             vf_config=ValueFunctionConfig(
-                optimizer=AdamwConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=5,
                     hidden_size=256,
@@ -103,7 +104,7 @@ def adamw_ant_experiment() -> None:
             steps_per_task=100_000_000,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adamwn_{args.seed}",
+            run_name=f"adamw_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             group="slippery_ant",

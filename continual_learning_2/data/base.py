@@ -204,7 +204,7 @@ class PermutedDataset(ContinualLearningDataset):
 
         rng = np.random.default_rng(self.seed)
         self.permutations = [rng.permutation(self.DATA_DIM) for _ in range(self.num_tasks)]
-        self.seeds = [rng.integers(0, sys.maxsize) for _ in range(self.num_tasks)]
+        self.seeds = [rng.integers(0, 99999) for _ in range(self.num_tasks)]
         self.current_task = 0
         self.resumed_loader = None
 
@@ -269,7 +269,7 @@ class PermutedDataset(ContinualLearningDataset):
                 num_records=len(ds),
                 shuffle=True,
                 num_epochs=self.num_epochs,
-                seed=seed,
+                seed=int(seed),
             ),
             operations=[
                 *self.operations,
@@ -292,7 +292,8 @@ class PermutedDataset(ContinualLearningDataset):
             sampler=grain.IndexSampler(
                 num_records=len(ds),
                 shuffle=True,
-                seed=seed,
+                seed=int(seed),
+                num_epochs=1,
             ),
             operations=[
                 *self.operations,

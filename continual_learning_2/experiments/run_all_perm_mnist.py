@@ -28,7 +28,7 @@ class Args:
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
 
-def run_all_mnist():
+def run_all_perm_mnist():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -91,7 +91,7 @@ def run_all_mnist():
                 run_name=f"{opt_name}_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="classinc_mnist",
+                group="perm_mnist",
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
@@ -105,4 +105,4 @@ def run_all_mnist():
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
 
 if __name__ == "__main__":
-    run_all_inc_mnist()
+    run_all_perm_mnist()

@@ -15,7 +15,7 @@ from jaxtyping import PRNGKeyArray
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, RedoConfig
+from continual_learning_2.configs.optim import MuonConfig, AdamConfig, RedoConfig
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
@@ -62,7 +62,10 @@ def redo_ant_experiment() -> None:
         assert args.wandb_entity is not None
 
     optim_conf = RedoConfig(
-        tx=AdamConfig(learning_rate=1e-3), update_frequency=100, score_threshold=0.1
+        # tx=AdamConfig(learning_rate=1e-3),
+        tx=MuonConfig(learning_rate=1e-3),
+        update_frequency=100,
+        score_threshold=0.1
     )
     start = time.time()
     trainer = JittedContinualPPOTrainer(
@@ -81,7 +84,7 @@ def redo_ant_experiment() -> None:
                 std_type=StdType.MLP_HEAD,
             ),
             vf_config=ValueFunctionConfig(
-                optimizer=AdamConfig(learning_rate=3e-4),
+                optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=5,
                     hidden_size=256,
@@ -101,24 +104,25 @@ def redo_ant_experiment() -> None:
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=1024, num_tasks=5, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
             steps_per_task=100_000_000,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"slippery_ant_{args.seed}",
+            run_name=f"redo_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="rl",
+            group="slippery_ant",
             save=False,  # Disable checkpoints cause it's so fast anyway
-            wandb_mode=args.wandb_mode
+            wandb_mode=args.wandb_mode,
         ),
     )
 
     trainer.train()
 
     print(f"Training time: {time.time() - start:.2f} seconds")
+
 
 if __name__ == "__main__":
     redo_ant_experiment()
