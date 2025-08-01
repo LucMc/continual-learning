@@ -1,4 +1,3 @@
-import os
 import time
 from chex import dataclass
 from typing import Literal
@@ -9,7 +8,7 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 )
 from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.configs import (
-    AdamConfig,
+    AdamwConfig,
     DatasetConfig,
     LoggingConfig,
     TrainingConfig,
@@ -26,16 +25,16 @@ class Args:
     resume: bool = False
 
 
-def adam_mnist_experiment():
+def adamw_mnist_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
-    start = time.time()
-    optim_conf = AdamConfig(learning_rate=1e-3)
 
-    # Add validation to say what the available options are for dataset etc
+    start = time.time()
+    optim_conf = AdamwConfig(learning_rate=3e-4)
+
     trainer = HeadResetClassificationCSLTrainer(
         seed=args.seed,
         model_config=MLPConfig(output_size=10),
@@ -52,7 +51,7 @@ def adam_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adam_{args.seed}",
+            run_name=f"adamw_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             group="split_mnist",
@@ -68,4 +67,4 @@ def adam_mnist_experiment():
 
 
 if __name__ == "__main__":
-    adam_mnist_experiment()
+    adamw_mnist_experiment()

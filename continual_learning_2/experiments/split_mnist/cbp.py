@@ -1,11 +1,20 @@
 import os
 import time
+from chex import dataclass
+from typing import Literal
+from pathlib import Path
+import tyro
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
+)
+from continual_learning_2.configs import (
+    CBPConfig,
+    AdamConfig,
+    MLPConfig,
+    TrainingConfig,
     DatasetConfig,
     LoggingConfig,
 )
-from continual_learning_2.configs import CBPConfig, AdamConfig, MLPConfig, TrainingConfig
 import jax
 
 
@@ -18,7 +27,14 @@ class Args:
     data_dir: Path = Path("./experiment_results")
     resume: bool = False
 
+
 def cbp_mnist_experiment():
+    args = tyro.cli(Args)
+
+    if args.wandb_mode != "disabled":
+        assert args.wandb_project is not None
+        assert args.wandb_entity is not None
+
     start = time.time()
     optim_conf = CBPConfig(
         tx=AdamConfig(learning_rate=1e-3),
@@ -46,7 +62,7 @@ def cbp_mnist_experiment():
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"cbp_{SEED}",
+            run_name=f"cbp_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             group="split_mnist",

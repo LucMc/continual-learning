@@ -1,4 +1,3 @@
-import os
 import time
 from chex import dataclass
 from typing import Literal
@@ -7,9 +6,9 @@ import tyro
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
 )
-from continual_learning_2.configs.models import MLPConfig
+from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.configs import (
-    AdamConfig,
+    AdamwConfig,
     DatasetConfig,
     LoggingConfig,
     TrainingConfig,
@@ -26,36 +25,38 @@ class Args:
     resume: bool = False
 
 
-def adam_mnist_experiment():
+def adamw_split_cifar10_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
-    start = time.time()
-    optim_conf = AdamConfig(learning_rate=1e-3)
 
-    # Add validation to say what the available options are for dataset etc
+    start = time.time()
+    optim_conf = AdamwConfig(learning_rate=3e-4)
+
     trainer = HeadResetClassificationCSLTrainer(
         seed=args.seed,
-        model_config=MLPConfig(output_size=10),
+        model_config=CNNConfig(output_size=10),
         optim_cfg=optim_conf,
         data_cfg=DatasetConfig(
-            name="split_mnist",
+            name="split_cifar10",
             seed=args.seed,
             batch_size=64,
             num_tasks=10,
-            num_epochs_per_task=20,
-            num_workers=0,  # (os.cpu_count() or 0) // 2,
+            num_epochs_per_task=2,
+            dataset_kwargs={
+                "flatten": False
+            }
         ),
         train_cfg=TrainingConfig(
             resume=False,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adam_{args.seed}",
+            run_name=f"adamw_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="split_mnist",
+            group="split_cifar10",
             wandb_mode=args.wandb_mode,
             interval=100,
             eval_during_training=True,
@@ -68,4 +69,4 @@ def adam_mnist_experiment():
 
 
 if __name__ == "__main__":
-    adam_mnist_experiment()
+    adamw_split_cifar10_experiment()
