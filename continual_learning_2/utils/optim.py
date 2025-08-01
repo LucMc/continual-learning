@@ -201,9 +201,7 @@ def continuous_reset_weights(
 
         target_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
-        stepped_weights = (1 - replacement_rate) * weights[layer_name] + (
-            replacement_rate
-        ) * target_weights
+        stepped_weights = (1 - replacement_rate) * weights[layer_name] + replacement_rate * target_weights
         # Softmax ensures these balance
         weights[layer_name] = jnp.where(
             in_weight_mask,

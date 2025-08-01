@@ -24,7 +24,6 @@ from continual_learning_2.models import get_model, get_model_cls
 from continual_learning_2.models.rl import Policy
 from continual_learning_2.optim import get_optimizer
 from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
-from continual_learning_2.trainers.continual_supervised_learning import optim_conf
 from continual_learning_2.types import (
     Activation,
     EnvState,
@@ -61,7 +60,7 @@ def adam_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamConfig(learning_rate=3e-4),
+    optim_conf = AdamConfig(learning_rate=3e-4)
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
@@ -90,12 +89,12 @@ def adam_ant_experiment() -> None:
                 ),
             ),
             num_rollout_steps=2048 * 32 * 5,
-            num_epochs=4,
+            num_epochs=5,
             num_gradient_steps=32,
             gamma=0.97,
             gae_lambda=0.95,
             entropy_coefficient=1e-2,
-            clip_eps=0.3,
+            clip_eps=0.2,
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),

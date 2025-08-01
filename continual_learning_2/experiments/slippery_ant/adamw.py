@@ -60,7 +60,7 @@ def adamw_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamwConfig(learning_rate=3e-4),
+    optim_conf = AdamwConfig(learning_rate=3e-4)
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
@@ -94,7 +94,7 @@ def adamw_ant_experiment() -> None:
             gamma=0.97,
             gae_lambda=0.95,
             entropy_coefficient=1e-2,
-            clip_eps=0.3,
+            clip_eps=0.2,
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),

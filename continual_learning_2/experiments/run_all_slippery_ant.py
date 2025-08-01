@@ -117,7 +117,7 @@ def run_all_mnist():
                 vf_coefficient=0.5,
                 normalize_advantages=True,
             ),
-            env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+            env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=3, episode_length=1000),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=50_000_000,

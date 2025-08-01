@@ -27,6 +27,7 @@ class Args:
     wandb_entity: str | None = None
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
+    exclude: str | None = None
 
 def run_all_perm_mnist():
     args = tyro.cli(Args)
@@ -68,6 +69,7 @@ def run_all_perm_mnist():
             every_n=1,
         ),
     }
+    if args.exclude: optimizers.pop(args.exclude) # Make list?
 
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
@@ -80,8 +82,8 @@ def run_all_perm_mnist():
                 name="permuted_mnist",
                 seed=args.seed,
                 batch_size=64,
-                num_tasks=10,
-                num_epochs_per_task=1,
+                num_tasks=40,
+                num_epochs_per_task=2,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(

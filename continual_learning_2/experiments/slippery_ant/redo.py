@@ -104,7 +104,7 @@ def redo_ant_experiment() -> None:
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=1024, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
             steps_per_task=100_000_000,
