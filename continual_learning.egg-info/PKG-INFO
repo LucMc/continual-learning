@@ -1,0 +1,47 @@
+Metadata-Version: 2.4
+Name: continual_learning
+Version: 0.1.0
+Summary: Codebase for continual learning
+Requires-Python: <3.13,>=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: distrax>=0.1.5
+Requires-Dist: sbx-rl==0.20
+Requires-Dist: flax>=0.9.0
+Requires-Dist: gymnasium[mujoco]>=1.0.0
+Requires-Dist: jax[cuda12]>=0.4.34
+Requires-Dist: gymnasium-robotics
+Requires-Dist: jaxtyping>=0.2.34
+Requires-Dist: metaworld
+Requires-Dist: tensorboard
+Requires-Dist: polars
+Requires-Dist: altair
+Requires-Dist: vl-convert-python
+Requires-Dist: numpy>=2.1.2
+Requires-Dist: orbax-checkpoint>=0.7.0
+Requires-Dist: tyro>=0.8.11
+Requires-Dist: wandb>=0.18.5
+Requires-Dist: optax@ git+https://github.com/google-deepmind/optax.git
+
+# Continual Learning
+This project aims to investigate how normalisation and continual backpropergation affect the plasticity of a neural network. 
+
+## Installation
+### Baselines
+ * Weight decay (sgd/adam) 
+ * Continual backpropergation
+ * Layer norm
+
+### Experiments
+ * Slippery Ant v5
+ * Sine regression
+ * Continual time-delays
+
+### Notes
+ * Clone repository: `git clone https://github.com/LucMc/continual-learning.git`
+ * Install with: `pip install -e .`
+ * The todo list is currently at the top of `optim/continual_backprop.py`
+
+### Example Usage
+```
+python sine_exp.py --no-debug --methods "adam" "cbp"`
+```

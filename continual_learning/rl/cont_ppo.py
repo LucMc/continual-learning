@@ -224,8 +224,12 @@ class ContPPO(PPO, ContConfig):
                         "cbp": dict(),
                         "redo": dict(),
                         "ccbp": dict(),
+<<<<<<< HEAD
                         "ccbp2": dict(),
                         "none": dict()
+=======
+                        "ccbp2": dict()
+>>>>>>> main
                         }
         np.random.seed(ppo_agent.seed)  # Seeding for np operations
 

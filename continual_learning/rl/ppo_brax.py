@@ -154,9 +154,13 @@ class BraxPPO(PPO, BraxConfig):
         states = env.reset(initial_reset_keys)
         current_global_step = 0
 
+<<<<<<< HEAD
         actor_ts, value_ts = setup_network_trainstates(
             states.obs, env.action_size, actor_key, value_key
         )
+=======
+        actor_ts, value_ts = setup_network_trainstates(states.obs, env.action_size, actor_key, value_key)
+>>>>>>> main
 
         while current_global_step < ppo_agent.training_steps:
             print("\ncurrent_global_step:", current_global_step)
