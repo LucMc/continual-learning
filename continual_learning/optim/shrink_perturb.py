@@ -9,12 +9,9 @@ from chex import dataclass
 import continual_learning.utils.optim as utils
 from .redo import process_params
 
-<<<<<<< HEAD
-=======
 # NOISE_FUNCTIONS = {"guassian": lambda k, leaves: random.normal(k, shape=len(leaves)),
 #                    "lecun": lambda}
 
->>>>>>> main
 @dataclass
 class ShrinkPerturbOptimState:
     count: chex.Array
