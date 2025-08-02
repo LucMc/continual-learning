@@ -8,6 +8,7 @@ from chex import dataclass
 
 from continual_learning_2.configs import (
     AdamConfig,
+    AdamwConfig,
     CBPConfig,
     CCBPConfig,
     LoggingConfig,
@@ -17,7 +18,7 @@ from continual_learning_2.configs import (
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, RedoConfig
+# from continual_learning_2.configs.optim import AdamConfig, Adamw, RedoConfig
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
@@ -74,7 +75,8 @@ def run_all_mnist():
             perturb=0.01,
             every_n=1,
         ),
-        "adam": AdamConfig(learning_rate=1e-3)
+        "adam": AdamConfig(learning_rate=1e-3),
+        "adamw": AdamwConfig(learning_rate=1e-3)
     }
 
     exp_start = time.time()
