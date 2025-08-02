@@ -1,47 +1,30 @@
-import time
-from functools import partial
-from pathlib import Path
-from typing import Literal, NamedTuple
-
 import jax
-import jax.experimental
-import jax.flatten_util
-import jax.numpy as jnp
-import tyro
+import time
+from continual_learning_2.trainers.continual_supervised_learning import (
+    LoggingConfig,
+)
+from continual_learning_2.configs import (
+    ShrinkAndPerterbConfig,
+    AdamConfig,
+    MLPConfig,
+)
 from chex import dataclass
-from flax.core.scope import DenyList
-from jaxtyping import PRNGKeyArray
-
-from continual_learning_2.configs.envs import EnvConfig
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, RedoConfig
+from typing import Literal
+from pathlib import Path
+import tyro
+import jax.numpy as jnp
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
-from continual_learning_2.configs.training import RLTrainingConfig
-from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
-from continual_learning_2.envs.base import JittableVectorEnv
-from continual_learning_2.models import get_model, get_model_cls
-from continual_learning_2.models.rl import Policy
-from continual_learning_2.optim import get_optimizer
 from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
 from continual_learning_2.types import (
     Activation,
-    EnvState,
-    LogDict,
-    Observation,
-    Rollout,
     StdType,
 )
-from continual_learning_2.utils.buffers import compute_gae_scan
-from continual_learning_2.utils.monitoring import (
-    Logger,
-    accumulate_concatenated_metrics,
-    explained_variance,
-    get_logs,
-    prefix_dict,
-    pytree_histogram,
-)
-from continual_learning_2.utils.training import TrainState
+from continual_learning_2.configs.envs import EnvConfig
+from continual_learning_2.configs.logging import LoggingConfig
+from continual_learning_2.configs.models import MLPConfig
+from continual_learning_2.configs.optim import AdamConfig
+from continual_learning_2.configs.training import RLTrainingConfig
+
 
 @dataclass(frozen=True)
 class Args:
@@ -53,14 +36,23 @@ class Args:
     resume: bool = False
 
 
-def adam_ant_experiment() -> None:
+def shrink_and_perturb_ant_experiment():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamConfig(learning_rate=3e-4)
+    optim_conf = ShrinkAndPerterbConfig(
+        tx=AdamConfig(learning_rate=1e-3),
+        param_noise_fn=jax.nn.initializers.he_uniform(),
+        seed=args.seed,
+        shrink=0.8,
+        perturb=0.01,
+        every_n=1,
+    )
+
+    # Add validation to say what the available options are for dataset etc
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
@@ -104,18 +96,18 @@ def adam_ant_experiment() -> None:
             steps_per_task=120_000_000,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adam_{args.seed}",
+            run_name=f"shrink_and_perturb_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             group="slippery_ant",
             save=False,  # Disable checkpoints cause it's so fast anyway
-            wandb_mode=args.wandb_mode
+            wandb_mode=args.wandb_mode,
         ),
     )
 
     trainer.train()
-
     print(f"Training time: {time.time() - start:.2f} seconds")
 
+
 if __name__ == "__main__":
-    adam_ant_experiment()
+    shrink_and_perturb_ant_experiment()

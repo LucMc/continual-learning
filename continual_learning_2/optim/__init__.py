@@ -26,7 +26,7 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
     # Inner optimizers
     if isinstance(config, AdamConfig):
         tx = optax.chain(
-            optax.clip_by_global_norm(1.0),
+            optax.clip_by_global_norm(0.5),
             optax.adam(
                 config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon
             ),
@@ -40,7 +40,7 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
 
     if isinstance(config, AdamwConfig):
         tx = optax.chain(
-            optax.clip_by_global_norm(1.0),
+            optax.clip_by_global_norm(0.5),
             optax.adamw(
                 config.learning_rate, b1=config.beta1, b2=config.beta2, eps=config.epsilon, weight_decay=config.decay
             ),
@@ -55,7 +55,7 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
 
     if isinstance(config, MuonConfig):
         tx = optax.chain(
-            optax.clip_by_global_norm(1.0),
+            optax.clip_by_global_norm(0.5),
             optax.contrib.muon(
                 config.learning_rate,
                 adam_b1=config.beta1,
