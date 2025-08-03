@@ -20,7 +20,6 @@ from beartype import beartype as typechecker
 from flax.training.train_state import TrainState
 from typing import Tuple, Callable
 from chex import dataclass
-from numpy import mean
 import optax
 import jax
 import jax.random as random
@@ -32,7 +31,6 @@ from dataclasses import field
 import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CBPOptimState
 
-
 # -------------- CCBP Weight reset ---------------
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
@@ -41,17 +39,10 @@ def get_updated_utility(  # Add batch dim
     decay_rate: Float[Array, ""] = 0.9,
 ):
     # Remove batch dim from some inputs just in case
-    reduce_axis = tuple(range(features.ndim - 1))
-    mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-    score = mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)
-    breakpoint()
     updated_utility = (
-        (decay_rate * utility)
-        + (1 - decay_rate)
-        * score # mean_act_per_neuron
-        * out_w_mag
+        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
     ).flatten()  # Arr[#neurons]
-    return updated_utility 
+    return nn.softmax(updated_utility)
 
 
 # -------------- mature only mask ---------------
@@ -72,13 +63,13 @@ def ccbp(
     decay_rate: float = 0.9,
     maturity_threshold: int = 10,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    out_layer_name: str = "output",
+    out_layer_name: str = "output"
 ) -> optax.GradientTransformationExtraArgs:
-    """Continuous Continual Backpropergation (CCBP)"""
+    """ Continuous Continual Backpropergation (CCBP) """
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])
-        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
         biases.pop(out_layer_name)
 
         del params
@@ -87,9 +78,7 @@ def ccbp(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
-            mean_feature_act=jax.tree.map(
-                lambda layer: jnp.zeros_like(layer), biases
-            ),  # TODO: Remove
+            mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases), # TODO: Remove
             rng=jax.random.PRNGKey(seed),
             **kwargs,
         )
@@ -100,7 +89,7 @@ def ccbp(
         state: CBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
-        tx_state: optax.OptState | None = None,
+        tx_state: optax.OptState | None = None
     ) -> tuple[optax.Updates, CBPOptimState]:
         def _ccbp(
             updates: optax.Updates,
@@ -146,7 +135,7 @@ def ccbp(
                 weights,  # Yes out_layer
                 _utility,
                 weight_init_fn,
-                replacement_rate,
+                replacement_rate
             )
 
             # reset bias given mask
@@ -156,7 +145,7 @@ def ccbp(
             # Update ages (CLIPPED HERE)
             _ages = jax.tree.map(
                 lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold + 1)
+                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold+1)
                 ),  # Clip to stop huge ages
                 state.ages,
                 reset_mask,
@@ -189,11 +178,7 @@ def ccbp(
             flat_new_params, _ = jax.tree.flatten(new_params)
             # TODO: Update bias and tx_state
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                tx_state,
-            )
+            return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, tx_state
 
         return _ccbp(updates)
 

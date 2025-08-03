@@ -43,7 +43,7 @@ def get_score(
     features: Float[Array, "#batch #neurons"],
 ) -> Float[Array, "#neurons"]:
     # Avg over other dims
-    reduce_axes = list(range(features.ndim - 1))
+    reduce_axes = tuple(range(features.ndim - 1))
     mean_act_per_neuron = jnp.mean(jnp.abs(features), axis=reduce_axes)  # Arr[#neurons]
     score = mean_act_per_neuron / (
         jnp.mean(mean_act_per_neuron) + 1e-8
