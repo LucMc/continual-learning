@@ -1,4 +1,5 @@
 import flax
+from chex import dataclass
 from flax import struct
 import flax.linen as nn
 from flax.core import FrozenDict
@@ -33,6 +34,14 @@ import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CBPOptimState
 
 
+@dataclass
+class CCBPOptimState(CBPOptimState):
+    time_step: int = 0
+    logs: FrozenDict = FrozenDict(
+        {"std_util": 0}
+    )
+
+
 # -------------- CCBP Weight reset ---------------
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
@@ -43,21 +52,23 @@ def get_updated_utility(  # Add batch dim
     # Remove batch dim from some inputs just in case
     reduce_axis = tuple(range(features.ndim - 1))
     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-    score = mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)
-    breakpoint()
+
+    # Running stats normalising both out and in utils
     updated_utility = (
         (decay_rate * utility)
         + (1 - decay_rate)
-        * score # mean_act_per_neuron
-        * out_w_mag
+        * (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
+        * (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat
     ).flatten()  # Arr[#neurons]
-    return updated_utility 
+    return updated_utility
 
 
 # -------------- mature only mask ---------------
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
-    ages: Float[Array, "#neurons"],
+    ages: Float[
+        Array, "#neurons"
+    ],  # TODO: Leaving ages for now as they arn't used but could be later
     maturity_threshold: Int[Array, ""] = 100,
     replacement_rate: Float[Array, ""] = 0.01,
 ) -> Bool[Array, "#neurons"]:
@@ -70,7 +81,7 @@ def ccbp(
     seed: int,
     replacement_rate: float = 0.5,
     decay_rate: float = 0.9,
-    maturity_threshold: int = 10,
+    maturity_threshold: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
 ) -> optax.GradientTransformationExtraArgs:
@@ -83,7 +94,7 @@ def ccbp(
 
         del params
 
-        return CBPOptimState(
+        return CCBPOptimState(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
@@ -91,20 +102,51 @@ def ccbp(
                 lambda layer: jnp.zeros_like(layer), biases
             ),  # TODO: Remove
             rng=jax.random.PRNGKey(seed),
+            time_step=0,
+            # update_frequency=maturity_threshold, # TODO: Change to update_frequency
             **kwargs,
         )
 
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: CBPOptimState,
+        state: CCBPOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
         tx_state: optax.OptState | None = None,
-    ) -> tuple[optax.Updates, CBPOptimState]:
+    ) -> tuple[optax.Updates, CCBPOptimState]:
+        def no_update(updates):
+            flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_feats, _ = jax.tree.flatten(features)
+
+            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            out_w_mag = utils.get_out_weights_mag(weights)
+
+            new_rng, util_key = random.split(state.rng)
+            key_tree = utils.gen_key_tree(util_key, weights)
+
+            # Features arrive as tuple so we have to restructure
+            w_mag_tdef = jax.tree.structure(out_w_mag)
+
+            # Don't need out_layer feats and normalises layer names
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
+
+            _utility = jax.tree.map(
+                partial(get_updated_utility, decay_rate=decay_rate),
+                out_w_mag,
+                state.utilities,
+                _features,
+            )
+            _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility))}
+
+            new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
+         
+            return params, new_state, tx_state
+
         def _ccbp(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CBPOptimState]:
+        ) -> Tuple[optax.Updates, CCBPOptimState]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
 
@@ -177,14 +219,20 @@ def ccbp(
                 }
 
             for layer_name in reset_mask.keys():
-                _logs["avg_age"] += avg_ages[layer_name]
-                _logs["avg_util"] += avg_util[layer_name]
+                # _logs["avg_age"] += avg_ages[layer_name]
+                # _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
 
                 # _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
+            # We reset running utilities once used for an update
+            # Reset to 1 as this should be the mean of the utility distribution given norm
             new_state = state.replace(
-                ages=_ages, logs=FrozenDict(_logs), rng=new_rng, utilities=_utility
+                ages=_ages,
+                logs=FrozenDict(_logs),
+                rng=new_rng,
+                utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
+                time_step=state.time_step + 1,
             )
             flat_new_params, _ = jax.tree.flatten(new_params)
             # TODO: Update bias and tx_state
@@ -195,6 +243,8 @@ def ccbp(
                 tx_state,
             )
 
-        return _ccbp(updates)
+        return jax.lax.cond(
+            state.time_step % maturity_threshold == 0, _ccbp, no_update, updates
+        )
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
