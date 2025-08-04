@@ -38,7 +38,9 @@ from continual_learning_2.optim.cbp import CBPOptimState
 class CCBPOptimState(CBPOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
-        {"std_util": 0}
+        {"std_util": 0.0,
+         "nodes_reset": 0.0,
+         "clipped_utils": 0}
     )
 
 
@@ -48,34 +50,89 @@ def get_updated_utility(  # Add batch dim
     utility: Float[Array, "#neurons"],
     features: Float[Array, "#batch #neurons"],
     decay_rate: Float[Array, ""] = 0.9,
-):
+) -> Float[Array, "#neurons"]:
     # Remove batch dim from some inputs just in case
     reduce_axis = tuple(range(features.ndim - 1))
     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
 
     # Running stats normalising both out and in utils
     updated_utility = (
-        (decay_rate * utility)
+        (decay_rate * utility) # Decay because old stats are for old params, so prioritise new)
         + (1 - decay_rate)
         * (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
         * (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat
     ).flatten()  # Arr[#neurons]
-    return updated_utility
+    # avg neuron is arround 1 utility, using relu means min act of 0
+    # squish = lambda x: jnp.ones_like(x)
+    # squish = lambda x: 1/(1+jnp.e**(-8*x+4))
+    steepness = 4 # Replacement rate here?
+    squish = lambda x: -jnp.e**(-steepness*x)+1 # +1 because updated_utility centers ~1
+    # return nn.sigmoid(updated_utility+10) # -1 to recenter around 0
+    return squish(updated_utility) # -1 to recenter around 0
+# Replacement rate is a linear factor, steepness is how linear/exponential do we want the tradeoff to be
+# Not a great name for it, as we still do the weight decay thing when replacement_rate is 0
+# It works more mathematically as like a threshold
 
+# -------------- weight reset ---------------
+def continuous_reset_weights(
+    key_tree: PRNGKeyArray,
+    weights: PyTree[Float[Array, "..."]],
+    utilities: PyTree[Float[Array, "..."]],
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    replacement_rate: Float[Array, ""] = 0.001,
+):
+    all_layer_names = list(weights.keys())
+    logs = {}
 
-# -------------- mature only mask ---------------
-def get_reset_mask(
-    updated_utility: Float[Array, "#neurons"],
-    ages: Float[
-        Array, "#neurons"
-    ],  # TODO: Leaving ages for now as they arn't used but could be later
-    maturity_threshold: Int[Array, ""] = 100,
-    replacement_rate: Float[Array, ""] = 0.01,
-) -> Bool[Array, "#neurons"]:
-    maturity_mask = ages > maturity_threshold  # get nodes over maturity threshold Arr[Bool]
-    return maturity_mask
+    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
 
+    for idx, layer_name in enumerate(all_layer_names[:-1]):
 
+        # Reset incoming weights
+        init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
+
+        # Clip so that we don't move beyond target weights
+        weights[layer_name] = jnp.clip( (1-replacement_rate) * utilities[layer_name], 0, 1) * weights[layer_name] + \
+            ( jnp.clip(replacement_rate * (1-utilities[layer_name] ), 0, 1 ) * init_weights )
+
+        
+        # Reset outgoing weights
+        if idx + 1 < len(all_layer_names):
+            next_layer = all_layer_names[idx + 1]
+            out_weight_shape = weights[next_layer].shape
+
+            # Handle shape transitions
+            if len(out_weight_shape) == 2:  # Dense layer
+                if len(weights[layer_name].shape) == 4:  # Previous layer was conv
+                    spatial_size = out_weight_shape[0] // in_mask_1d.size
+                    out_utilities_1d = jnp.repeat(utilities[layer_name], spatial_size)
+
+                else:  # Dense -> Dense
+                    out_utilities_1d = utilities[layer_name]
+
+            elif len(out_weight_shape) == 4:  # Conv layer
+                out_utilities_1d = utilities[layer_name]
+
+            expanded_utils = utils.expand_mask_for_weights(
+                out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
+            )
+            weights[next_layer] =  ( jnp.clip((1-replacement_rate) * expanded_utils, 0 , 1) * weights[next_layer]) + \
+                                   ( jnp.clip(replacement_rate * (1-expanded_utils), 0, 1) * jnp.zeros_like(weights[next_layer]) )
+
+        # Logging TODO: Plot these
+        effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
+
+        logs[layer_name] = {
+            "nodes_reset": effective_reset,
+            "clipped_utils": jnp.sum(utilities[layer_name] > 1)
+        }
+
+    logs[all_layer_names[-1]] = {
+        "nodes_reset": 0.0,
+        "clipped_utils": 0,
+    }
+
+    return weights, logs
 # -------------- Main CCBP Optimiser body ---------------
 def ccbp(
     seed: int,
@@ -138,7 +195,9 @@ def ccbp(
                 state.utilities,
                 _features,
             )
-            _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility))}
+            _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility)),
+                     'nodes_reset': state.logs['nodes_reset'],
+                     'clipped_utils': state.logs['clipped_utils']}
 
             new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
          
@@ -171,20 +230,20 @@ def ccbp(
                 _features,
             )
 
-            reset_mask = jax.tree.map(
-                partial(
-                    get_reset_mask,
-                    maturity_threshold=maturity_threshold,
-                    replacement_rate=replacement_rate,
-                ),
-                _utility,
-                state.ages,
-            )
-
+            # reset_mask = jax.tree.map(
+            #     partial(
+            #         get_reset_mask,
+            #         maturity_threshold=maturity_threshold,
+            #         replacement_rate=replacement_rate,
+            #     ),
+            #     _utility,
+            #     state.ages,
+            # )
+            #
             # reset weights given mask
-            _weights, reset_logs = utils.continuous_reset_weights(
+            _weights, reset_logs = continuous_reset_weights(
                 key_tree,
-                reset_mask,  # No out_layer
+                # reset_mask,  # No out_layer
                 weights,  # Yes out_layer
                 _utility,
                 weight_init_fn,
@@ -196,13 +255,13 @@ def ccbp(
             _biases = biases
 
             # Update ages (CLIPPED HERE)
-            _ages = jax.tree.map(
-                lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold + 1)
-                ),  # Clip to stop huge ages
-                state.ages,
-                reset_mask,
-            )
+            # _ages = jax.tree.map(
+            #     lambda a, m: jnp.where(
+            #         m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold + 1)
+            #     ),  # Clip to stop huge ages
+            #     state.ages,
+            #     reset_mask,
+            # )
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
@@ -218,17 +277,17 @@ def ccbp(
                     "bias": _biases[layer_name],
                 }
 
-            for layer_name in reset_mask.keys():
+            for layer_name in _utility.keys():
                 # _logs["avg_age"] += avg_ages[layer_name]
                 # _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
-
-                # _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+                _logs["clipped_utils"] += reset_logs[layer_name]["clipped_utils"]
 
             # We reset running utilities once used for an update
             # Reset to 1 as this should be the mean of the utility distribution given norm
             new_state = state.replace(
-                ages=_ages,
+                # ages=_ages,
                 logs=FrozenDict(_logs),
                 rng=new_rng,
                 utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
