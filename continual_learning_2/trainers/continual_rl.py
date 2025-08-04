@@ -6,6 +6,7 @@ import jax
 import jax.experimental
 import jax.flatten_util
 import jax.numpy as jnp
+import flax
 from flax.core.scope import DenyList
 from jaxtyping import PRNGKeyArray
 import gymnasium as gym
@@ -31,9 +32,13 @@ from continual_learning_2.types import (
     Rollout,
     StdType,
 )
+from continual_learning_2.utils.nn import flatten_last
 from continual_learning_2.utils.buffers import compute_gae_scan
 from continual_learning_2.utils.monitoring import (
     Logger,
+    compute_srank,
+    get_dormant_neuron_logs,
+    get_linearised_neuron_logs,
     accumulate_concatenated_metrics,
     explained_variance,
     get_logs,
@@ -105,9 +110,6 @@ class PPO:
 
             # VF
             vf_loss = cfg.vf_coefficient * 0.5 * jnp.power(value_targets - values, 2).mean()
-            # vf_loss = cfg.vf_coefficient * 0.5 * jnp.minimum(jnp.power(value_targets - values, 2),
-            #                       (value_targets - jnp.clip(values, data.values - 1, data.values + 1)**2)).mean()
-
             total_loss = policy_loss + vf_loss + entropy_loss
 
             # For logs
@@ -115,9 +117,41 @@ class PPO:
             clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > cfg.clip_eps).mean())
 
             # Intermediates
-            actor_feats = actor_intermediates["activations"]["main"]
+            actor_feats = actor_intermediates["activations"]#["main"]
             value_feats = value_intermediates["activations"]
 
+            actor_activations = jax.tree.map(flatten_last, actor_feats)
+            value_activations = jax.tree.map(flatten_last, value_feats)
+
+            actor_activations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(actor_activations, sep="/").items()
+            }
+            value_activations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(value_activations, sep="/").items()
+            }
+            actor_dormant_neuron_logs = get_dormant_neuron_logs(actor_activations_flat)  # pyright: ignore[reportArgumentType]
+            value_dormant_neuron_logs = get_dormant_neuron_logs(value_activations_flat)  # pyright: ignore[reportArgumentType]
+            actor_srank_logs = jax.tree.map(compute_srank, actor_activations_flat)
+            value_srank_logs = jax.tree.map(compute_srank, value_activations_flat)
+
+            actor_preactivations = actor_intermediates["preactivations"]
+            value_preactivations = value_intermediates["preactivations"]
+
+            actor_preactivations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(actor_preactivations, sep="/").items()
+            }
+            value_preactivations_flat = {
+                k: v[0]  # pyright: ignore[reportIndexIssue]
+                for k, v in flax.traverse_util.flatten_dict(value_preactivations, sep="/").items()
+            }
+            actor_linearised_neuron_logs = get_linearised_neuron_logs(actor_preactivations_flat)  # pyright: ignore[reportArgumentType]
+            value_linearised_neuron_logs = get_linearised_neuron_logs(value_preactivations_flat)  # pyright: ignore[reportArgumentType]
+
+            actor_activations_hist_dict = pytree_histogram(actor_activations)
+            value_activations_hist_dict = pytree_histogram(value_activations)
             return total_loss, ({
                 "metrics/total_loss": total_loss,
                 "metrics/policy_loss": policy_loss,
@@ -126,7 +160,24 @@ class PPO:
                 "metrics/approx_kl": approx_kl,
                 "metrics/clip_fracs": clip_fracs,
                 "metrics/values": values.mean(),
-            }, actor_feats, value_feats)
+
+                **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
+                **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
+                **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
+                **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
+                **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
+                **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
+                **prefix_dict("nn/value_activations", value_activations_hist_dict),
+                **prefix_dict("nn/value_activations", value_activations_hist_dict),
+                **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
+                **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
+                **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
+                **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
+
+                # **prefix_dict("nn/srank", srank_logs),
+
+                "metrics/values": values.mean(),
+            }, actor_feats["main"], value_feats)
 
         def update_minibatch(carry, xs):
             policy, vf, key = carry
@@ -427,7 +478,9 @@ class GymPPOTrainer(PPO):
                 lambda: gym.make(env_id) for _ in range(num_envs)
             ])
         
-        dummy_obs, _ = self.envs.reset(seed=[i for i in range(seed, seed+num_envs)])
+        # Reset environments ONCE and store the initial observation
+        self.current_obs, _ = self.envs.reset(seed=[i for i in range(seed, seed+num_envs)])
+        dummy_obs = self.current_obs
         
         self.key, policy_init_key, vf_init_key = jax.random.split(jax.random.PRNGKey(seed), 3)
         
@@ -465,7 +518,7 @@ class GymPPOTrainer(PPO):
         
         self.total_steps = 0
         
-    def collect_rollout(self) -> tuple[Rollout, dict]:
+    def collect_rollout(self) -> tuple[Rollout, dict, jnp.ndarray]:
         rollout_steps = self.cfg.num_rollout_steps // self.num_envs
         
         observations = []
@@ -481,7 +534,8 @@ class GymPPOTrainer(PPO):
         current_episode_returns = np.zeros(self.num_envs)
         current_episode_lengths = np.zeros(self.num_envs)
         
-        obs, _ = self.envs.reset()
+        # Use the current observation state (don't reset!)
+        obs = self.current_obs
         
         for step in range(rollout_steps):
             obs_jax = jnp.array(obs)
@@ -495,16 +549,29 @@ class GymPPOTrainer(PPO):
             
             actions_np = np.array(actions_jax)
             
+            # Store current observation before stepping
+            observations.append(obs.copy())
+            
+            # Step environment
             next_obs, rewards_np, terminated_np, truncated_np, infos = self.envs.step(actions_np)
             
-            observations.append(obs)
+            # For terminal states, we need to get the actual terminal observation from info
+            # Gymnasium vector envs store the terminal observation in infos["final_observation"]
+            actual_next_obs = next_obs.copy()
+            for i, (done, trunc) in enumerate(zip(terminated_np, truncated_np)):
+                if done or trunc:
+                    if "final_observation" in infos and infos["final_observation"][i] is not None:
+                        actual_next_obs[i] = infos["final_observation"][i]
+                    elif "_final_observation" in infos and infos["_final_observation"][i] is not None:
+                        actual_next_obs[i] = infos["_final_observation"][i]
+            
             actions.append(actions_np)
             rewards.append(rewards_np)
             terminated.append(terminated_np)
             truncated.append(truncated_np)
             log_probs.append(np.array(log_probs_jax))
             values.append(np.array(values_jax))
-            next_observations.append(next_obs)
+            next_observations.append(actual_next_obs)
             
             current_episode_returns += rewards_np
             current_episode_lengths += 1
@@ -521,6 +588,12 @@ class GymPPOTrainer(PPO):
             
             if self.total_steps % 10000 == 0:
                 print(f"Steps: {self.total_steps}")
+        
+        # Store current observation for next rollout
+        self.current_obs = obs
+        
+        # The last observation for GAE computation
+        last_obs_jax = jnp.array(obs)
         
         rollout = Rollout(
             observations=jnp.array(observations),
@@ -540,15 +613,15 @@ class GymPPOTrainer(PPO):
             "mean_episode_length": np.mean(episode_lengths) if episode_lengths else 0.0,
         }
         
-        return rollout, episode_info, jnp.array(obs)
+        return rollout, episode_info, last_obs_jax
     
     def train(self):
         start_time = time.time()
         
         for update in range(self.train_cfg.steps_per_task // self.cfg.num_rollout_steps):
-            rollout, episode_info, next_obs = self.collect_rollout() # Not jit
+            rollout, episode_info, next_obs = self.collect_rollout()
             
-            self.key, self.policy, self.vf, logs = self.update( # Is jit
+            self.key, self.policy, self.vf, logs = self.update(
                 self.key,
                 self.policy,
                 self.vf,
@@ -633,4 +706,5 @@ if __name__ == "__main__":
     )
 
     trainer.train()
+
 
