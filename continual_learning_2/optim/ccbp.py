@@ -51,26 +51,25 @@ def get_updated_utility(  # Add batch dim
     features: Float[Array, "#batch #neurons"],
     decay_rate: Float[Array, ""] = 0.9,
 ) -> Float[Array, "#neurons"]:
+    # TODO: Mean activations etc over the whole network instead of per layer
     # Remove batch dim from some inputs just in case
     reduce_axis = tuple(range(features.ndim - 1))
     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
 
     # Running stats normalising both out and in utils
     updated_utility = (
-        (decay_rate * utility) # Decay because old stats are for old params, so prioritise new)
-        + (1 - decay_rate)
-        * (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
-        * (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat
+        (decay_rate * utility) 
+        + (1 - decay_rate) * (
+                    (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
+                    + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat *to+
+            )
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
-    # squish = lambda x: jnp.ones_like(x)
-    # squish = lambda x: 1/(1+jnp.e**(-8*x+4))
-
-    steepness = 100 # Replacement rate here?
-    squish = lambda x: -jnp.e**(-steepness*x)+1 # +1 because updated_utility centers ~1
-    # return nn.sigmoid(updated_utility+10) # -1 to recenter around 0
+    steepness = 100
+    squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
     return squish(updated_utility) # -1 to recenter around 0
+
 # Replacement rate is a linear factor, steepness is how linear/exponential do we want the tradeoff to be
 # Not a great name for it, as we still do the weight decay thing when replacement_rate is 0
 # It works more mathematically as like a threshold
@@ -94,8 +93,13 @@ def continuous_reset_weights(
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
         # Clip so that we don't move beyond target weights, shouldn't be clipped anyway
-        weights[layer_name] = jnp.clip( (1-replacement_rate) * utilities[layer_name], 0, 1) * weights[layer_name] + \
-            ( jnp.clip(replacement_rate * (1-utilities[layer_name] ), 0, 1 ) * init_weights )
+        # weights[layer_name] = jnp.clip( (1-replacement_rate) * utilities[layer_name], 0, 1) * weights[layer_name] + \
+        #     ( jnp.clip(replacement_rate * (1-utilities[layer_name] ), 0, 1 ) * init_weights )
+
+        reset_prob = replacement_rate * (1 - utilities[layer_name])
+        keep_prob = 1 - reset_prob
+
+        weights[layer_name] = (keep_prob * weights[layer_name]) + (reset_prob * init_weights)
 
         
         # Reset outgoing weights
@@ -118,8 +122,13 @@ def continuous_reset_weights(
             expanded_utils = utils.expand_mask_for_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
-            weights[next_layer] =  ( jnp.clip((1-replacement_rate) * expanded_utils, 0 , 1) * weights[next_layer]) + \
-                                   ( jnp.clip(replacement_rate * (1-expanded_utils), 0, 1) * jnp.zeros_like(weights[next_layer]) )
+            # weights[next_layer] =  ( jnp.clip((1-replacement_rate) * expanded_utils, 0 , 1) * weights[next_layer]) + \
+            #                        ( jnp.clip(replacement_rate * (1-expanded_utils), 0, 1) * jnp.zeros_like(weights[next_layer]) )
+
+            # Hunch resetting to zero is aggressive, there is a reason we use random weights not zeros
+            out_reset_prob = replacement_rate * (1 - expanded_utils)
+            out_keep_prob = 1 - reset_prob
+            weights[layer_name] = (keep_prob * weights[next_layer]) + (reset_prob * init_weights)
 
         # Logging TODO: Plot these
         effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
