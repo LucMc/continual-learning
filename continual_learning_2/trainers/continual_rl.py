@@ -442,7 +442,6 @@ class JittedContinualPPOTrainer(PPO):
 
         self.logger.close()
 
-
 class GymPPOTrainer(PPO):
     def __init__(
         self,
@@ -534,6 +533,240 @@ class GymPPOTrainer(PPO):
         current_episode_returns = np.zeros(self.num_envs)
         current_episode_lengths = np.zeros(self.num_envs)
         
+        obs = self.current_obs
+       
+        for step in range(rollout_steps):
+            obs_jax = jnp.array(obs)
+            
+            self.key, action_key = jax.random.split(self.key)
+            dist = self.policy.apply_fn(self.policy.params, obs_jax)
+            actions_jax, log_probs_jax = dist.sample_and_log_prob(seed=action_key)
+            
+            values_jax = self.vf.apply_fn(self.vf.params, obs_jax).squeeze(-1)
+            actions_np = np.array(actions_jax)
+            observations.append(obs.copy())
+            
+            next_obs, rewards_np, terminated_np, truncated_np, infos = self.envs.step(actions_np)
+            
+            actual_next_obs = next_obs.copy()
+
+            for i, (done, trunc) in enumerate(zip(terminated_np, truncated_np)):
+                if done or trunc:
+                    if "final_observation" in infos and infos["final_observation"][i] is not None:
+                        actual_next_obs[i] = infos["final_observation"][i]
+                    elif "_final_observation" in infos and infos["_final_observation"][i] is not None:
+                        actual_next_obs[i] = infos["_final_observation"][i]
+            
+            actions.append(actions_np)
+            rewards.append(rewards_np)
+            terminated.append(terminated_np)
+            truncated.append(truncated_np)
+            log_probs.append(np.array(log_probs_jax))
+            values.append(np.array(values_jax))
+            next_observations.append(actual_next_obs)
+            
+            current_episode_returns += rewards_np
+            current_episode_lengths += 1
+            
+            done_mask = terminated_np | truncated_np
+            if done_mask.any():
+                episode_returns.extend(current_episode_returns[done_mask])
+                episode_lengths.extend(current_episode_lengths[done_mask])
+                current_episode_returns[done_mask] = 0
+                current_episode_lengths[done_mask] = 0
+            
+            obs = next_obs
+            self.total_steps += self.num_envs
+            
+            if self.total_steps % 10000 == 0:
+                print(f"Steps: {self.total_steps}")
+        
+        # Store current observation for next rollout
+        self.current_obs = obs
+        
+        # The last observation for GAE computation
+        last_obs_jax = jnp.array(obs)
+        
+        rollout = Rollout(
+            observations=jnp.array(observations),
+            actions=jnp.array(actions),
+            rewards=jnp.array(rewards),
+            terminated=jnp.array(terminated),
+            truncated=jnp.array(truncated),
+            log_probs=jnp.array(log_probs),
+            values=jnp.array(values),
+            next_observations=jnp.array(next_observations),
+            infos=None,
+        )
+        
+        episode_info = {
+            "num_episodes": len(episode_returns),
+            "mean_episode_return": np.mean(episode_returns) if episode_returns else 0.0,
+            "mean_episode_length": np.mean(episode_lengths) if episode_lengths else 0.0,
+        }
+        
+        return rollout, episode_info, last_obs_jax
+    
+    def train(self):
+        start_time = time.time()
+        
+        for update in range(self.train_cfg.steps_per_task // self.cfg.num_rollout_steps):
+            rollout, episode_info, next_obs = self.collect_rollout()
+            
+            self.key, self.policy, self.vf, logs = self.update(
+                self.key,
+                self.policy,
+                self.vf,
+                rollout,
+                next_obs=next_obs,
+                cfg=self.cfg,
+            )
+            
+            sps = self.total_steps / (time.time() - start_time)
+            
+            all_logs = {
+                **logs,
+                "charts/SPS": sps,
+                "charts/num_episodes": episode_info["num_episodes"],
+                "charts/mean_episodic_return": episode_info["mean_episode_return"],
+                "charts/mean_episodic_length": episode_info["mean_episode_length"],
+                "charts/update": update,
+            }
+            
+            self.logger.log(all_logs, step=self.total_steps)
+            
+            print(f"Step: {self.total_steps} "
+                  f"Return: {episode_info['mean_episode_return']:.2f} "
+                  f"SPS: {sps:.0f}")
+        
+        self.envs.close()
+        self.logger.close()
+
+
+class SingleTaskBench:
+    pass
+
+
+class ContinualPPOTrainer(PPO):
+    policy: TrainState
+    vf: TrainState
+    key: PRNGKeyArray
+    cfg: PPOConfig
+
+    benchmark: JittableContinualLearningEnv
+    logger: Logger
+    """ Non-jitted gymnasium like environment benchmarks """
+
+    def __init__(
+        self,
+        env_id: str,
+        seed: int,
+        ppo_config: PPOConfig,
+        train_cfg: RLTrainingConfig,
+        logs_cfg: LoggingConfig,
+        num_envs: int = 16,
+        async_envs: bool = False,
+    ):
+        self.key, policy_init_key, vf_init_key = jax.random.split(jax.random.PRNGKey(seed), 3)
+        self.cfg = ppo_config
+
+        self.logger = Logger(
+            logs_cfg,
+            run_config={
+                "algorithm": ppo_config,
+                "benchmark": env_cfg,
+                "training": train_cfg,
+            },
+        )
+        benchmark = get_benchmark(seed, env_cfg)
+        if not isinstance(benchmark, ContinualLearningEnv): # Check this
+            raise ValueError(
+                "Benchmark must be an end-to-end JAX environment. Use ContinualPPOTrainer otherwise."
+            )
+        self.benchmark = benchmark
+        self.train_cfg = train_cfg
+        
+        # Initialize policy
+        policy_network_module = get_model_cls(ppo_config.policy_config.network)
+        policy_module = Policy(policy_network_module, ppo_config.policy_config)
+        
+        self.policy = TrainState.create(
+            apply_fn=policy_module.apply,
+            params=policy_module.lazy_init(
+                policy_init_key,
+                dummy_obs,
+                training=False,
+                mutable=DenyList(["activations", "preactivations"]),
+            ),
+            tx=get_optimizer(ppo_config.policy_config.optimizer),
+            kernel_init=ppo_config.policy_config.network.kernel_init,
+            bias_init=ppo_config.policy_config.network.bias_init,
+        )
+        
+        # Initialize vf
+        vf_module = get_model(ppo_config.vf_config.network)
+        self.vf = TrainState.create(
+            apply_fn=vf_module.apply,
+            params=vf_module.lazy_init(
+                vf_init_key,
+                dummy_obs,
+                training=False,
+                mutable=DenyList(["activations", "preactivations"]),
+            ),
+            tx=get_optimizer(ppo_config.vf_config.optimizer),
+            kernel_init=ppo_config.vf_config.network.kernel_init,
+            bias_init=ppo_config.vf_config.network.bias_init,
+        )
+        self.env_id = env_id
+        self.num_envs = num_envs
+        self.seed = seed
+        self.cfg = ppo_config
+        self.train_cfg = train_cfg
+        
+        self.logger = Logger(
+            logs_cfg,
+            run_config={
+                "algorithm": ppo_config,
+                "env_id": env_id,
+                "training": train_cfg,
+            },
+        )
+        
+        if async_envs:
+            self.envs = AsyncVectorEnv([
+                lambda: gym.make(env_id) for _ in range(num_envs)
+            ])
+        else:
+            self.envs = SyncVectorEnv([
+                lambda: gym.make(env_id) for _ in range(num_envs)
+            ])
+        
+        if not isinstance(benchmark, ContinualLearningEnv):
+            raise ValueError(
+                "Benchmark must be an end-to-end JAX environment. Use ContinualPPOTrainer otherwise."
+            )
+
+        self.current_obs, _ = self.envs.reset(seed=[i for i in range(seed, seed+num_envs)])
+        dummy_obs = self.current_obs
+        
+        self.total_steps = 0
+        
+    def collect_rollout(self) -> tuple[Rollout, dict, jnp.ndarray]:
+        rollout_steps = self.cfg.num_rollout_steps // self.num_envs
+        
+        observations = []
+        actions = []
+        rewards = []
+        terminated = []
+        truncated = []
+        log_probs = []
+        values = []
+        next_observations = []
+        episode_returns = []
+        episode_lengths = []
+        current_episode_returns = np.zeros(self.num_envs)
+        current_episode_lengths = np.zeros(self.num_envs)
+        
         # Use the current observation state (don't reset!)
         obs = self.current_obs
         
@@ -555,8 +788,6 @@ class GymPPOTrainer(PPO):
             # Step environment
             next_obs, rewards_np, terminated_np, truncated_np, infos = self.envs.step(actions_np)
             
-            # For terminal states, we need to get the actual terminal observation from info
-            # Gymnasium vector envs store the terminal observation in infos["final_observation"]
             actual_next_obs = next_obs.copy()
             for i, (done, trunc) in enumerate(zip(terminated_np, truncated_np)):
                 if done or trunc:
@@ -649,6 +880,7 @@ class GymPPOTrainer(PPO):
         
         self.envs.close()
         self.logger.close()
+
 
 
 if __name__ == "__main__":
