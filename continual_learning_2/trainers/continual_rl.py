@@ -152,6 +152,11 @@ class PPO:
 
             actor_activations_hist_dict = pytree_histogram(actor_activations)
             value_activations_hist_dict = pytree_histogram(value_activations)
+
+            vf_optim_logs = vf.opt_state["reset_method"].logs
+            actor_optim_logs = policy.opt_state["reset_method"].logs
+
+
             return total_loss, ({
                 "metrics/total_loss": total_loss,
                 "metrics/policy_loss": policy_loss,
@@ -173,6 +178,9 @@ class PPO:
                 **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
                 **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
                 **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
+
+                **prefix_dict("actor/", actor_optim_logs),
+                **prefix_dict("value/", vf_optim_logs),
 
                 # **prefix_dict("nn/srank", srank_logs),
 
@@ -350,6 +358,8 @@ class JittedContinualPPOTrainer(PPO):
                     policy.params, observation
                 ).sample_and_log_prob(seed=action_key)
                 values = vf.apply_fn(vf.params, observation).squeeze(-1)
+
+                actions = jnp.clip(actions, -8, 8)
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
@@ -361,7 +371,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=data.reward,
+                    rewards=jnp.clip(data.reward, -8, 8),
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
@@ -447,6 +457,7 @@ class GymPPOTrainer(PPO):
     def __init__(
         self,
         env_id: str,
+        env_kwargs: dict | None,
         seed: int,
         ppo_config: PPOConfig,
         train_cfg: RLTrainingConfig,
@@ -455,6 +466,7 @@ class GymPPOTrainer(PPO):
         async_envs: bool = False,
     ):
         self.env_id = env_id
+        self.env_args = env_kwargs
         self.num_envs = num_envs
         self.seed = seed
         self.cfg = ppo_config
@@ -471,11 +483,11 @@ class GymPPOTrainer(PPO):
         
         if async_envs:
             self.envs = AsyncVectorEnv([
-                lambda: gym.make(env_id) for _ in range(num_envs)
+                lambda: gym.make(env_id, **env_kwargs) for _ in range(num_envs)
             ])
         else:
             self.envs = SyncVectorEnv([
-                lambda: gym.make(env_id) for _ in range(num_envs)
+                lambda: gym.make(env_id, **env_kwargs) for _ in range(num_envs)
             ])
         
         # Reset environments ONCE and store the initial observation
@@ -534,30 +546,23 @@ class GymPPOTrainer(PPO):
         current_episode_returns = np.zeros(self.num_envs)
         current_episode_lengths = np.zeros(self.num_envs)
         
-        # Use the current observation state (don't reset!)
         obs = self.current_obs
-        
+       
         for step in range(rollout_steps):
             obs_jax = jnp.array(obs)
             
-            # Sample actions
             self.key, action_key = jax.random.split(self.key)
             dist = self.policy.apply_fn(self.policy.params, obs_jax)
             actions_jax, log_probs_jax = dist.sample_and_log_prob(seed=action_key)
             
             values_jax = self.vf.apply_fn(self.vf.params, obs_jax).squeeze(-1)
-            
             actions_np = np.array(actions_jax)
-            
-            # Store current observation before stepping
             observations.append(obs.copy())
             
-            # Step environment
             next_obs, rewards_np, terminated_np, truncated_np, infos = self.envs.step(actions_np)
             
-            # For terminal states, we need to get the actual terminal observation from info
-            # Gymnasium vector envs store the terminal observation in infos["final_observation"]
             actual_next_obs = next_obs.copy()
+
             for i, (done, trunc) in enumerate(zip(terminated_np, truncated_np)):
                 if done or trunc:
                     if "final_observation" in infos and infos["final_observation"][i] is not None:
