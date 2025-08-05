@@ -125,10 +125,11 @@ def continuous_reset_weights(
             # weights[next_layer] =  ( jnp.clip((1-replacement_rate) * expanded_utils, 0 , 1) * weights[next_layer]) + \
             #                        ( jnp.clip(replacement_rate * (1-expanded_utils), 0, 1) * jnp.zeros_like(weights[next_layer]) )
 
-            # Hunch resetting to zero is aggressive, there is a reason we use random weights not zeros
+            # resetting to zero is aggressive, there is a reason we use random weights not zeros
+            out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
-            out_keep_prob = 1 - reset_prob
-            weights[layer_name] = (keep_prob * weights[next_layer]) + (reset_prob * init_weights)
+            out_keep_prob = 1 - out_reset_prob
+            weights[next_layer] = (out_keep_prob * weights[next_layer]) + (out_reset_prob * out_init_weights)
 
         # Logging TODO: Plot these
         effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
