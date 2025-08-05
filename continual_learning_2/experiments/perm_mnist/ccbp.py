@@ -38,8 +38,8 @@ def ccbp_mnist_experiment():
         tx=AdamConfig(learning_rate=1e-3),
         seed=args.seed,
         decay_rate=0.9,
-        replacement_rate=0.5,
-        maturity_threshold=20,
+        replacement_rate=0.2,
+        maturity_threshold=100,
     )
 
     # Add validation to say what the available options are for dataset etc

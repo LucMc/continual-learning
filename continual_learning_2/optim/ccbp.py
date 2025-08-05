@@ -63,9 +63,11 @@ def get_updated_utility(  # Add batch dim
         * (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
+
     # squish = lambda x: jnp.ones_like(x)
     # squish = lambda x: 1/(1+jnp.e**(-8*x+4))
-    steepness = 4 # Replacement rate here?
+
+    steepness = 100 # Replacement rate here?
     squish = lambda x: -jnp.e**(-steepness*x)+1 # +1 because updated_utility centers ~1
     # return nn.sigmoid(updated_utility+10) # -1 to recenter around 0
     return squish(updated_utility) # -1 to recenter around 0
@@ -91,7 +93,7 @@ def continuous_reset_weights(
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
-        # Clip so that we don't move beyond target weights
+        # Clip so that we don't move beyond target weights, shouldn't be clipped anyway
         weights[layer_name] = jnp.clip( (1-replacement_rate) * utilities[layer_name], 0, 1) * weights[layer_name] + \
             ( jnp.clip(replacement_rate * (1-utilities[layer_name] ), 0, 1 ) * init_weights )
 

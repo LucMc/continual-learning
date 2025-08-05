@@ -15,7 +15,7 @@ from jaxtyping import PRNGKeyArray
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, CCBPConfig 
+from continual_learning_2.configs.optim import AdamConfig, MuonConfig, CCBPConfig 
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
@@ -62,10 +62,10 @@ def ccbp_ant_experiment() -> None:
         assert args.wandb_entity is not None
 
     optim_conf = CCBPConfig(
-        tx=AdamConfig(learning_rate=1e-3),
+        tx=MuonConfig(learning_rate=1e-3),
         decay_rate=0.9,
-        replacement_rate=0,
-        maturity_threshold=20,
+        replacement_rate=0.01,
+        maturity_threshold=100,
     )
 
     start = time.time()
