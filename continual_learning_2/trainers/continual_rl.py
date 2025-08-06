@@ -359,7 +359,7 @@ class JittedContinualPPOTrainer(PPO):
                 ).sample_and_log_prob(seed=action_key)
                 values = vf.apply_fn(vf.params, observation).squeeze(-1)
 
-                actions = jnp.clip(actions, -8, 8)
+                actions = jnp.clip(actions, -5, 5)
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
@@ -371,7 +371,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=jnp.clip(data.reward, -8, 8),
+                    rewards=jnp.clip(data.reward, -5, 10),
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
@@ -452,15 +452,16 @@ class JittedContinualPPOTrainer(PPO):
 
         self.logger.close()
 
+
 class GymPPOTrainer(PPO):
     def __init__(
         self,
         env_id: str,
-        env_kwargs: dict | None,
         seed: int,
         ppo_config: PPOConfig,
         train_cfg: RLTrainingConfig,
         logs_cfg: LoggingConfig,
+        env_kwargs: dict= {},
         num_envs: int = 16,
         async_envs: bool = False,
     ):
