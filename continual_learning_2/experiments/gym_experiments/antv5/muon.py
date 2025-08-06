@@ -93,7 +93,7 @@ def muon_gym_ant_experiment() -> None:
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=4096,
+            num_rollout_steps=4096*8,
             num_epochs=8,
             num_gradient_steps=32,
             gamma=0.99,
@@ -105,7 +105,7 @@ def muon_gym_ant_experiment() -> None:
         ),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=10_000_000,
+            steps_per_task=20_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"muon_{args.seed}",

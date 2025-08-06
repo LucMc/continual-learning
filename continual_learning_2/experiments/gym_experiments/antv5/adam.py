@@ -67,14 +67,14 @@ def adam_gym_ant_experiment() -> None:
 
     start = time.time()
     trainer = GymPPOTrainer(
-        env_id="Ant-v5",
+        env_id="Meta-World/MT1",
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=3,
-                    hidden_size=256,
+                    num_layers=4,
+                    hidden_size=32,
                     output_size=8,  # Ant-v5 has 8 continuous actions
                     activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
@@ -85,7 +85,7 @@ def adam_gym_ant_experiment() -> None:
             vf_config=ValueFunctionConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=3,
+                    num_layers=5,
                     hidden_size=256,
                     output_size=1,
                     activation_fn=Activation.Swish,
@@ -93,7 +93,7 @@ def adam_gym_ant_experiment() -> None:
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=4096,
+            num_rollout_steps=4096 * 2,
             num_epochs=8,
             num_gradient_steps=32,
             gamma=0.99,
