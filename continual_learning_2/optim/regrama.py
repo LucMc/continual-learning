@@ -40,8 +40,7 @@ class ReGraMaOptimState:
 
 # -------------- GraMa Score calculation ---------------
 def get_score(
-    # features: Float[Array, "#batch #neurons"],
-    grads: Float[Array, "#batch #neurons"]
+    grads: Float[Array, "#batch #inweights #neurons"]
 ) -> Float[Array, "#neurons"]:
     # Avg over other dims
     reduce_axes = tuple(range(features.ndim - 1))
@@ -95,6 +94,7 @@ def regrama(
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
 
+            breakpoint()
             scores = {
                 key.split('_act')[0]: get_score(feature_tuple[0])
                 for key, feature_tuple in zip(features.keys(), features.values())
