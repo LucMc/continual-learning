@@ -106,7 +106,7 @@ class PPO:
                 jnp.clip(ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps) * advantages,
             ).mean()
 
-            entropy_loss = cfg.entropy_coefficient * dist.entropy().mean()
+            entropy_loss = -cfg.entropy_coefficient * dist.entropy().mean()
 
             # VF
             vf_loss = cfg.vf_coefficient * 0.5 * jnp.power(value_targets - values, 2).mean()
@@ -481,6 +481,7 @@ class GymPPOTrainer(PPO):
             },
         )
         
+        # env = gym.wrappers.TimeLimit(env, max_episode_steps or env.max_path_length)  # type: ignore
         if async_envs:
             self.envs = AsyncVectorEnv([
                 lambda: gym.make(env_id, **env_kwargs) for _ in range(num_envs)

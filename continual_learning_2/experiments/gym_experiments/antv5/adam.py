@@ -63,18 +63,18 @@ def adam_gym_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamConfig(learning_rate=3e-4)
+    optim_conf = AdamConfig(learning_rate=1e-4)
 
     start = time.time()
     trainer = GymPPOTrainer(
-        env_id="Meta-World/MT1",
+        env_id="Ant-v5",
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=4,
-                    hidden_size=32,
+                    num_layers=3,
+                    hidden_size=256,
                     output_size=8,  # Ant-v5 has 8 continuous actions
                     activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
@@ -85,7 +85,7 @@ def adam_gym_ant_experiment() -> None:
             vf_config=ValueFunctionConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=5,
+                    num_layers=3,
                     hidden_size=256,
                     output_size=1,
                     activation_fn=Activation.Swish,
@@ -93,7 +93,7 @@ def adam_gym_ant_experiment() -> None:
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=4096 * 2,
+            num_rollout_steps=4096*8,
             num_epochs=8,
             num_gradient_steps=32,
             gamma=0.99,
@@ -105,7 +105,7 @@ def adam_gym_ant_experiment() -> None:
         ),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=10_000_000,  # Longer training for complex locomotion
+            steps_per_task=20_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"adam_{args.seed}",

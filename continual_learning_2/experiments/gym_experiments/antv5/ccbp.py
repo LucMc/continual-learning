@@ -18,7 +18,7 @@ import numpy as np
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, RedoConfig
+from continual_learning_2.configs.optim import MuonConfig, CCBPConfig
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
@@ -56,27 +56,32 @@ class Args:
     resume: bool = False
 
 
-def adam_gym_invertedpendulum_experiment() -> None:
+def ccbp_gym_ant_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamConfig(learning_rate=3e-4)
+    optim_conf = CCBPConfig(
+        tx=MuonConfig(learning_rate=1e-4),
+        decay_rate=0.9,
+        replacement_rate=0.001,
+        maturity_threshold=100,
+    )
 
     start = time.time()
     trainer = GymPPOTrainer(
-        env_id="InvertedPendulum-v5",
+        env_id="Ant-v5",
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=2,
-                    hidden_size=64,
-                    output_size=1,  # InvertedPendulum-v5 has 1 continuous action
-                    activation_fn=Activation.Tanh,
+                    num_layers=3,
+                    hidden_size=256,
+                    output_size=8,  # Ant-v5 has 8 continuous actions
+                    activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
                 ),
@@ -86,32 +91,32 @@ def adam_gym_invertedpendulum_experiment() -> None:
                 optimizer=optim_conf,
                 network=MLPConfig(
                     num_layers=3,
-                    hidden_size=128,
+                    hidden_size=256,
                     output_size=1,
-                    activation_fn=Activation.Tanh,
+                    activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=2048*16,
-            num_epochs=6,
+            num_rollout_steps=4096*8,
+            num_epochs=8,
             num_gradient_steps=32,
             gamma=0.99,
             gae_lambda=0.95,
-            entropy_coefficient=0.0,
+            entropy_coefficient=0.001,
             clip_eps=0.2,
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=1_000_000,  # Shorter training for simpler task
+            steps_per_task=20_000_000,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adam_{args.seed}",
+            run_name=f"ccbp_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="gym_invertedpendulum",
+            group="gym_ant",
             save=False,  # Disable checkpoints cause it's so fast anyway
             wandb_mode=args.wandb_mode
         ),
@@ -124,4 +129,4 @@ def adam_gym_invertedpendulum_experiment() -> None:
     print(f"Training time: {time.time() - start:.2f} seconds")
 
 if __name__ == "__main__":
-    adam_gym_invertedpendulum_experiment()
+    ccbp_gym_ant_experiment()

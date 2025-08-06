@@ -62,7 +62,7 @@ def ccbp_ant_experiment() -> None:
         assert args.wandb_entity is not None
 
     optim_conf = CCBPConfig(
-        tx=MuonConfig(learning_rate=1e-3),
+        tx=MuonConfig(learning_rate=3e-4),
         decay_rate=0.9,
         replacement_rate=0.001,
         maturity_threshold=100,
@@ -95,7 +95,7 @@ def ccbp_ant_experiment() -> None:
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=2048 * 32 * 5,
+            num_rollout_steps=2048 * 32 * 6, # CHANGED 5->10
             num_epochs=4,
             num_gradient_steps=32,
             gamma=0.97,
