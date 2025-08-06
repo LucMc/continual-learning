@@ -31,7 +31,7 @@ import continual_learning_2.utils.optim as utils
 
 
 @dataclass
-class ReGraMaOptimState:
+class RegramaOptimState:
     # initial_weights: PyTree[Float[Array, "..."]]
     rng: PRNGKeyArray
     time_step: int = 0
@@ -43,7 +43,7 @@ def get_score(
     grads: Float[Array, "#batch #inweights #neurons"]
 ) -> Float[Array, "#neurons"]:
     # Avg over other dims
-    reduce_axes = tuple(range(features.ndim - 1))
+    reduce_axes = tuple(range(grads.ndim - 1))
     mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
     score = mean_grad_per_neuron / (
         jnp.mean(mean_grad_per_neuron) + 1e-8
@@ -90,15 +90,13 @@ def regrama(
 
         def _regrama(updates: optax.Updates,) -> Tuple[optax.Updates, RegramaOptimState]:  # fmt: skip
             flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
+            weight_grads = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
 
-            breakpoint()
-            scores = {
-                key.split('_act')[0]: get_score(feature_tuple[0])
-                for key, feature_tuple in zip(features.keys(), features.values())
-            }
+            scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
             key_tree = utils.gen_key_tree(state.rng, weights)
 
