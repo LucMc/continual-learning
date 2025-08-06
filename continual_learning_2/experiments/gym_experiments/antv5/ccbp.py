@@ -66,7 +66,7 @@ def ccbp_gym_ant_experiment() -> None:
     optim_conf = CCBPConfig(
         tx=MuonConfig(learning_rate=1e-4),
         decay_rate=0.9,
-        replacement_rate=0.001,
+        replacement_rate=0.0001,
         maturity_threshold=100,
     )
 

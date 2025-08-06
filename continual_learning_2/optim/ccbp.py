@@ -66,7 +66,7 @@ def get_updated_utility(  # Add batch dim
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
-    steepness = 100
+    steepness = 10
     squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
     return squish(updated_utility) # -1 to recenter around 0
 
@@ -93,9 +93,6 @@ def continuous_reset_weights(
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
         # Clip so that we don't move beyond target weights, shouldn't be clipped anyway
-        # weights[layer_name] = jnp.clip( (1-replacement_rate) * utilities[layer_name], 0, 1) * weights[layer_name] + \
-        #     ( jnp.clip(replacement_rate * (1-utilities[layer_name] ), 0, 1 ) * init_weights )
-
         reset_prob = replacement_rate * (1 - utilities[layer_name])
         keep_prob = 1 - reset_prob
 
@@ -122,16 +119,14 @@ def continuous_reset_weights(
             expanded_utils = utils.expand_mask_for_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
-            # weights[next_layer] =  ( jnp.clip((1-replacement_rate) * expanded_utils, 0 , 1) * weights[next_layer]) + \
-            #                        ( jnp.clip(replacement_rate * (1-expanded_utils), 0, 1) * jnp.zeros_like(weights[next_layer]) )
 
             # resetting to zero is aggressive, there is a reason we use random weights not zeros
+            # this needs to be verified if I want to add it to papers claims tho
             out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
             out_keep_prob = 1 - out_reset_prob
             weights[next_layer] = (out_keep_prob * weights[next_layer]) + (out_reset_prob * out_init_weights)
 
-        # Logging TODO: Plot these
         effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
 
         logs[layer_name] = {
