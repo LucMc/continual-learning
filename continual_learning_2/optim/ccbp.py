@@ -40,7 +40,8 @@ class CCBPOptimState(CBPOptimState):
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0,
          "nodes_reset": 0.0,
-         "clipped_utils": 0}
+         "clipped_utils": 0,
+         "mean_utils": 0.0}
     )
 
 
@@ -61,13 +62,13 @@ def get_updated_utility(  # Add batch dim
         (decay_rate * utility) 
         + (1 - decay_rate) * 0.5 * (
                     (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
-                    + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat *to+
+                    + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat 
             )
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
     steepness = 2 # was 10
-    return 1 - jnp.exp(-steepness * updated_utility)
+    return 1 - jnp.exp(-steepness * updated_utility) # Sigmoid
     # squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
     # return squish(updated_utility) # -1 to recenter around 0
 
@@ -133,11 +134,13 @@ def continuous_reset_weights(
         logs[layer_name] = {
             "nodes_reset": effective_reset,
             "clipped_utils": jnp.sum(utilities[layer_name] > 1)
+            "mean_utils": jnp.mean(utilities[layer_name])
         }
 
     logs[all_layer_names[-1]] = {
         "nodes_reset": 0.0,
         "clipped_utils": 0,
+        "mean_utils": 0.0
     }
 
     return weights, logs
@@ -205,7 +208,10 @@ def ccbp(
             )
             _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility)),
                      'nodes_reset': state.logs['nodes_reset'],
-                     'clipped_utils': state.logs['clipped_utils']}
+                     'clipped_utils': state.logs['clipped_utils']
+                     'mean_utils': state.logs['mean_utils']
+
+                     }
 
             new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
          
@@ -291,6 +297,7 @@ def ccbp(
                 _logs["std_util"] += std_util[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
                 _logs["clipped_utils"] += reset_logs[layer_name]["clipped_utils"]
+                _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
 
             # We reset running utilities once used for an update
             # Reset to 1 as this should be the mean of the utility distribution given norm
