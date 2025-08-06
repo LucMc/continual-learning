@@ -59,16 +59,17 @@ def get_updated_utility(  # Add batch dim
     # Running stats normalising both out and in utils
     updated_utility = (
         (decay_rate * utility) 
-        + (1 - decay_rate) * (
+        + (1 - decay_rate) * 0.5 * (
                     (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
                     + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat *to+
             )
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
-    steepness = 10
-    squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
-    return squish(updated_utility) # -1 to recenter around 0
+    steepness = 2 # was 10
+    return 1 - jnp.exp(-steepness * updated_utility)
+    # squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
+    # return squish(updated_utility) # -1 to recenter around 0
 
 # Replacement rate is a linear factor, steepness is how linear/exponential do we want the tradeoff to be
 # Not a great name for it, as we still do the weight decay thing when replacement_rate is 0
@@ -122,10 +123,10 @@ def continuous_reset_weights(
 
             # resetting to zero is aggressive, there is a reason we use random weights not zeros
             # this needs to be verified if I want to add it to papers claims tho
-            out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
+            # out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
             out_keep_prob = 1 - out_reset_prob
-            weights[next_layer] = (out_keep_prob * weights[next_layer]) + (out_reset_prob * out_init_weights)
+            weights[next_layer] = (out_keep_prob * weights[next_layer]) # + (out_reset_prob * out_init_weights) # Decay towards zero
 
         effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
 
@@ -297,7 +298,8 @@ def ccbp(
                 # ages=_ages,
                 logs=FrozenDict(_logs),
                 rng=new_rng,
-                utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
+                # utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
+                utilities=_utility, # Try with and without keeping the runing average
                 time_step=state.time_step + 1,
             )
             flat_new_params, _ = jax.tree.flatten(new_params)

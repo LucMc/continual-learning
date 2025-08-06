@@ -90,13 +90,13 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
             ("reset_method", redo(**rm_config)),
         )
 
-    elif isinstance(config, CBPConfig):
+    elif isinstance(config, CbpConfig):
         return attach_reset_method(
             ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
             ("reset_method", cbp(**rm_config)),
         )
 
-    elif isinstance(config, CCBPConfig):
+    elif isinstance(config, CcbpConfig):
         return attach_reset_method(
             ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
             ("reset_method", ccbp(**rm_config)),
