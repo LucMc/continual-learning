@@ -1,4 +1,5 @@
 import time
+import metaworld
 from functools import partial
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -56,18 +57,19 @@ class Args:
     resume: bool = False
 
 
-def muon_gym_ant_experiment() -> None:
+def muon_mw_reach_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = MuonConfig(learning_rate=1e-4)
+    optim_conf = MuonConfig(learning_rate=3e-4)
 
     start = time.time()
     trainer = GymPPOTrainer(
-        env_id="Ant-v5",
+        env_id="Meta-World/MT1",
+        env_kwargs={"env_name": "reach-v3"},
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
@@ -75,7 +77,7 @@ def muon_gym_ant_experiment() -> None:
                 network=MLPConfig(
                     num_layers=3,
                     hidden_size=256,
-                    output_size=8,  # Ant-v5 has 8 continuous actions
+                    output_size=4,  # Ant-v5 has 8 continuous actions
                     activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
@@ -105,17 +107,17 @@ def muon_gym_ant_experiment() -> None:
         ),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=10_000_000,
+            steps_per_task=10_000_000,  # Longer training for complex locomotion
         ),
         logs_cfg=LoggingConfig(
             run_name=f"muon_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="gym_ant",
+            group="metaworld-mt1",
             save=False,  # Disable checkpoints cause it's so fast anyway
             wandb_mode=args.wandb_mode
         ),
-        num_envs=64,
+        num_envs=32,
         async_envs=True,
     )
     
@@ -124,4 +126,4 @@ def muon_gym_ant_experiment() -> None:
     print(f"Training time: {time.time() - start:.2f} seconds")
 
 if __name__ == "__main__":
-    muon_gym_ant_experiment()
+    muon_mw_reach_experiment()
