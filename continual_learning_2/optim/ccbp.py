@@ -133,7 +133,7 @@ def continuous_reset_weights(
 
         logs[layer_name] = {
             "nodes_reset": effective_reset,
-            "clipped_utils": jnp.sum(utilities[layer_name] > 1)
+            "clipped_utils": jnp.sum(utilities[layer_name] > 1),
             "mean_utils": jnp.mean(utilities[layer_name])
         }
 
@@ -208,7 +208,7 @@ def ccbp(
             )
             _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility)),
                      'nodes_reset': state.logs['nodes_reset'],
-                     'clipped_utils': state.logs['clipped_utils']
+                     'clipped_utils': state.logs['clipped_utils'],
                      'mean_utils': state.logs['mean_utils']
 
                      }
@@ -298,6 +298,8 @@ def ccbp(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
                 _logs["clipped_utils"] += reset_logs[layer_name]["clipped_utils"]
                 _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
+
+            _logs["mean_utils"] /= len(reset_logs.keys())
 
             # We reset running utilities once used for an update
             # Reset to 1 as this should be the mean of the utility distribution given norm
