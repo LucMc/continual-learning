@@ -211,7 +211,7 @@ def ccbp(
                      'mean_utils': all_utils.mean()
                      }
 
-            new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
+            new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs), utilities=_utility)
          
             return params, new_state, tx_state
 
