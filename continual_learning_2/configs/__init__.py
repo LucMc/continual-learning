@@ -9,8 +9,9 @@ from .optim import (
     MuonConfig,
     ShrinkAndPerterbConfig,
     RedoConfig,
-    CBPConfig,
-    CCBPConfig,
+    RegramaConfig,
+    CbpConfig,
+    CcbpConfig,
     OptimizerConfig,
     ResetMethodConfig,
 )
@@ -27,8 +28,9 @@ __all__ = [
     "MuonConfig",
     "ShrinkAndPerterbConfig",
     "RedoConfig",
-    "CBPConfig",
-    "CCBPConfig",
+    "CbpConfig",
+    "CcbpConfig",
+    "RegramaConfig",
     "OptimizerConfig",
     "ResetMethodConfig",
 ]

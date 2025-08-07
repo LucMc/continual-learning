@@ -1,4 +1,5 @@
 import time
+import metaworld
 from functools import partial
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -18,7 +19,7 @@ import numpy as np
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, RedoConfig
+from continual_learning_2.configs.optim import MuonConfig, RedoConfig
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
@@ -56,18 +57,19 @@ class Args:
     resume: bool = False
 
 
-def adam_gym_ant_experiment() -> None:
+def muon_mw_push_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = AdamConfig(learning_rate=3e-4)
+    optim_conf = MuonConfig(learning_rate=3e-4)
 
     start = time.time()
     trainer = GymPPOTrainer(
-        env_id="Ant-v5",
+        env_id="Meta-World/MT1",
+        env_kwargs={"env_name": "push-v3"},
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
@@ -75,7 +77,7 @@ def adam_gym_ant_experiment() -> None:
                 network=MLPConfig(
                     num_layers=3,
                     hidden_size=256,
-                    output_size=8,  # Ant-v5 has 8 continuous actions
+                    output_size=4,  # Ant-v5 has 8 continuous actions
                     activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
@@ -108,14 +110,14 @@ def adam_gym_ant_experiment() -> None:
             steps_per_task=10_000_000,  # Longer training for complex locomotion
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"adam_{args.seed}",
+            run_name=f"muon_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="gym_ant",
+            group="metaworld-mt1",
             save=False,  # Disable checkpoints cause it's so fast anyway
             wandb_mode=args.wandb_mode
         ),
-        num_envs=64,
+        num_envs=32,
         async_envs=True,
     )
     
@@ -124,4 +126,4 @@ def adam_gym_ant_experiment() -> None:
     print(f"Training time: {time.time() - start:.2f} seconds")
 
 if __name__ == "__main__":
-    adam_gym_ant_experiment()
+    muon_mw_push_experiment()

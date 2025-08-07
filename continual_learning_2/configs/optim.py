@@ -50,8 +50,16 @@ class RedoConfig(ResetMethodConfig):
     update_frequency: int = 100
     score_threshold: float = 0.1
     
+
+@dataclass(frozen=True, unsafe_hash=True)
+class RegramaConfig(ResetMethodConfig):
+    weight_init_fn: Callable = jax.nn.initializers.he_uniform()
+    seed: int = 42
+    update_frequency: int = 100
+    score_threshold: float = 0.1
+
 @dataclass(frozen=True)
-class CBPConfig(ResetMethodConfig):
+class CbpConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     replacement_rate: float = 0.1
@@ -59,7 +67,7 @@ class CBPConfig(ResetMethodConfig):
     maturity_threshold: int = 20
     
 @dataclass(frozen=True)
-class CCBPConfig(ResetMethodConfig):
+class CcbpConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     replacement_rate: float = 0.1

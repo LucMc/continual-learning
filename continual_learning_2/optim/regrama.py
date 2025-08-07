@@ -31,41 +31,41 @@ import continual_learning_2.utils.optim as utils
 
 
 @dataclass
-class RedoOptimState:
+class RegramaOptimState:
     # initial_weights: PyTree[Float[Array, "..."]]
     rng: PRNGKeyArray
     time_step: int = 0
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
-# -------------- Redo Score calculation ---------------
+# -------------- GraMa Score calculation ---------------
 def get_score(
-    features: Float[Array, "#batch #neurons"],
+    grads: Float[Array, "#batch #inweights #neurons"]
 ) -> Float[Array, "#neurons"]:
     # Avg over other dims
-    reduce_axes = tuple(range(features.ndim - 1))
-    mean_act_per_neuron = jnp.mean(jnp.abs(features), axis=reduce_axes)  # Arr[#neurons]
-    score = mean_act_per_neuron / (
-        jnp.mean(mean_act_per_neuron) + 1e-8
+    reduce_axes = tuple(range(grads.ndim - 1))
+    mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
+    score = mean_grad_per_neuron / (
+        jnp.mean(mean_grad_per_neuron) + 1e-8
     )  # Arr[#neurons] / Scalar
     return score
 
 
-# -------------- Main Redo Optimiser body ---------------
-def redo(
+# -------------- Main ReGraMa Optimiser body ---------------
+def regrama(
     seed: int,
     replacement_rate: float = 0.5,  # Update to paper hyperparams
     update_frequency: int = 100,
     score_threshold: float = 0.1,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
 ) -> optax.GradientTransformationExtraArgs:
-    """ Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902) """
+    """ (Resetting nuerons guided by) Gradient Magnitude based Nueronal Activity Metric (ReGraMa): [Liu et al.](https://arxiv.org/pdf/2505.24061v1) """
 
     def init(params: optax.Params, **kwargs):
 
         del params
 
-        return RedoOptimState(
+        return RegramaOptimState(
             rng=jax.random.PRNGKey(seed),
             **kwargs,
         )
@@ -79,25 +79,24 @@ def redo(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: RedoOptimState,
+        state: RegramaOptimState,
         params: optax.Params,
         features: Array,
         tx_state: optax.OptState,
-    ) -> tuple[optax.Updates, RedoOptimState]:
+    ) -> tuple[optax.Updates, RegramaOptimState]:
         def no_update(updates):
             new_state = state.replace(time_step=state.time_step + 1)
             return params, new_state, tx_state
 
-        def _redo(updates: optax.Updates,) -> Tuple[optax.Updates, RedoOptimState]:  # fmt: skip
+        def _regrama(updates: optax.Updates,) -> Tuple[optax.Updates, RegramaOptimState]:  # fmt: skip
             flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
+            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'kernel'}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == 'bias'}
 
-            scores = {
-                key.split('_act')[0]: get_score(feature_tuple[0])
-                for key, feature_tuple in zip(features.keys(), features.values())
-            }
+            scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
             key_tree = utils.gen_key_tree(state.rng, weights)
 
@@ -130,6 +129,6 @@ def redo(
 
             return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
-        return jax.lax.cond(state.time_step % update_frequency == 0, _redo, no_update, updates)
+        return jax.lax.cond(state.time_step % update_frequency == 0, _regrama, no_update, updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)

@@ -5,9 +5,10 @@ from continual_learning_2.configs.optim import (
     AdamConfig,
     AdamwConfig,
     MuonConfig,
-    CBPConfig,
-    CCBPConfig,
+    CbpConfig,
+    CcbpConfig,
     RedoConfig,
+    RegramaConfig,
     ShrinkAndPerterbConfig,
     OptimizerConfig,
 )
@@ -83,13 +84,19 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
             ("reset_method", redo(**rm_config)),
         )
 
-    elif isinstance(config, CBPConfig):
+    elif isinstance(config, RegramaConfig):
+        return attach_reset_method(
+            ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
+            ("reset_method", redo(**rm_config)),
+        )
+
+    elif isinstance(config, CbpConfig):
         return attach_reset_method(
             ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
             ("reset_method", cbp(**rm_config)),
         )
 
-    elif isinstance(config, CCBPConfig):
+    elif isinstance(config, CcbpConfig):
         return attach_reset_method(
             ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
             ("reset_method", ccbp(**rm_config)),

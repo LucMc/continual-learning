@@ -15,7 +15,7 @@ from jaxtyping import PRNGKeyArray
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig, CCBPConfig 
+from continual_learning_2.configs.optim import AdamConfig, MuonConfig, CcbpConfig 
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.envs import JittableContinualLearningEnv, get_benchmark
@@ -61,11 +61,11 @@ def ccbp_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = CCBPConfig(
-        tx=AdamConfig(learning_rate=1e-3),
-        decay_rate=0.9,
-        replacement_rate=0,
-        maturity_threshold=20,
+    optim_conf = CcbpConfig(
+        tx=MuonConfig(learning_rate=3e-4),
+        decay_rate=0.95,
+        replacement_rate=0.001,
+        maturity_threshold=100,
     )
 
     start = time.time()
@@ -105,10 +105,10 @@ def ccbp_ant_experiment() -> None:
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=100_000_000,
+            steps_per_task=50_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"ccbp_{args.seed}",

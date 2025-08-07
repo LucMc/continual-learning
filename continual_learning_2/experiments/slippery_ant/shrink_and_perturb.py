@@ -80,7 +80,7 @@ def shrink_and_perturb_ant_experiment():
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=2048 * 32 * 8,
+            num_rollout_steps=2048 * 32 * 5,
             num_epochs=4,
             num_gradient_steps=32,
             gamma=0.97,
@@ -90,10 +90,10 @@ def shrink_and_perturb_ant_experiment():
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=120_000_000,
+            steps_per_task=50_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"shrink_and_perturb_{args.seed}",

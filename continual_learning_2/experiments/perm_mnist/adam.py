@@ -41,7 +41,7 @@ def adam_mnist_experiment():
         model_config=MLPConfig(output_size=10),
         optim_cfg=optim_conf,
         data_cfg=DatasetConfig(
-            name="perm_mnist",
+            name="permuted_mnist",
             seed=args.seed,
             batch_size=64,
             num_tasks=40,

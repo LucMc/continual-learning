@@ -232,7 +232,6 @@ class ClassificationCSLTrainer(CSLTrainerBase):
             k: v[0]  # pyright: ignore[reportIndexIssue]
             for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
         }
-        # REMOVED DORMANT NEURON LOGS FOR NOW
         dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
         srank_logs = jax.tree.map(compute_srank, activations_flat)
 

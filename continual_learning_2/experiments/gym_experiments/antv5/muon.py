@@ -11,6 +11,9 @@ import tyro
 from chex import dataclass
 from flax.core.scope import DenyList
 from jaxtyping import PRNGKeyArray
+import gymnasium as gym
+from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
+import numpy as np
 
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
@@ -23,7 +26,7 @@ from continual_learning_2.envs.base import JittableVectorEnv
 from continual_learning_2.models import get_model, get_model_cls
 from continual_learning_2.models.rl import Policy
 from continual_learning_2.optim import get_optimizer
-from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
+from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer, GymPPOTrainer
 from continual_learning_2.types import (
     Activation,
     EnvState,
@@ -53,69 +56,72 @@ class Args:
     resume: bool = False
 
 
-def muon_ant_experiment() -> None:
+def muon_gym_ant_experiment() -> None:
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = Muon=Config(learning_rate=3e-4)
+    optim_conf = MuonConfig(learning_rate=1e-4)
+
     start = time.time()
-    trainer = JittedContinualPPOTrainer(
+    trainer = GymPPOTrainer(
+        env_id="Ant-v5",
         seed=args.seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=4,
-                    hidden_size=32,
-                    output_size=8,
-                    activation_fn=Activation.ReLU,
+                    num_layers=3,
+                    hidden_size=256,
+                    output_size=8,  # Ant-v5 has 8 continuous actions
+                    activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
                 ),
-                std_type=StdType.MLP_HEAD,
+                std_type=StdType.MLP_HEAD,  # For continuous control
             ),
             vf_config=ValueFunctionConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=5,
+                    num_layers=3,
                     hidden_size=256,
                     output_size=1,
-                    activation_fn=Activation.ReLU,
+                    activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
                     dtype=jnp.float32,
                 ),
             ),
-            num_rollout_steps=2048 * 32 * 5,
-            num_epochs=4,
+            num_rollout_steps=4096*8,
+            num_epochs=8,
             num_gradient_steps=32,
-            gamma=0.97,
+            gamma=0.99,
             gae_lambda=0.95,
-            entropy_coefficient=1e-2,
-            clip_eps=0.3,
+            entropy_coefficient=0.001,
+            clip_eps=0.2,
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=50_000_000,
+            steps_per_task=20_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"muon_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group="slippery_ant",
+            group="gym_ant",
             save=False,  # Disable checkpoints cause it's so fast anyway
             wandb_mode=args.wandb_mode
         ),
+        num_envs=64,
+        async_envs=True,
     )
-
+    
     trainer.train()
 
     print(f"Training time: {time.time() - start:.2f} seconds")
 
 if __name__ == "__main__":
-    muon_ant_experiment()
+    muon_gym_ant_experiment()

@@ -50,7 +50,7 @@ def run_all_perm_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,
-            replacement_rate=0.5,
+            replacement_rate=0.01,
             maturity_threshold=20,
         ),
         "redo": RedoConfig(
@@ -64,9 +64,9 @@ def run_all_perm_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.8,
-            perturb=0.01,
-            every_n=1,
+            shrink=0.9,
+            perturb=0.005,
+            every_n=10,
         ),
     }
     if args.exclude: optimizers.pop(args.exclude) # Make list?
@@ -82,8 +82,8 @@ def run_all_perm_mnist():
                 name="permuted_mnist",
                 seed=args.seed,
                 batch_size=64,
-                num_tasks=40,
-                num_epochs_per_task=2,
+                num_tasks=120,
+                num_epochs_per_task=1,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(
