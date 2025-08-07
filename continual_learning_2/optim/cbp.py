@@ -30,7 +30,7 @@ import continual_learning_2.utils.optim as utils
 
 
 @dataclass
-class CBPOptimState:
+class CbpOptimState:
     utilities: Float[Array, "#n_layers"]
     ages: Float[Array, "#n_layers"]
     rng: PRNGKeyArray
@@ -140,7 +140,7 @@ def cbp(
 
         del params
 
-        return CBPOptimState(
+        return CbpOptimState(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
@@ -152,14 +152,14 @@ def cbp(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: CBPOptimState,
+        state: CbpOptimState,
         params: optax.Params,
         features: Array,
         tx_state: optax.OptState,
-    ) -> tuple[optax.Updates, CBPOptimState]:
+    ) -> tuple[optax.Updates, CbpOptimState]:
         def _cbp(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CBPOptimState]:
+        ) -> Tuple[optax.Updates, CbpOptimState]:
 
             # Separate weights and biases
             flat_params = flax.traverse_util.flatten_dict(params["params"])
