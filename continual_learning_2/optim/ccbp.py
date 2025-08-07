@@ -38,10 +38,7 @@ from continual_learning_2.optim.cbp import CBPOptimState
 class CCBPOptimState(CBPOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
-        {"std_util": 0.0,
-         "nodes_reset": 0.0,
-         "low_utility": 0,
-         "mean_utils": 0.0}
+        {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
     )
 
 
@@ -59,15 +56,18 @@ def get_updated_utility(  # Add batch dim
 
     # Running stats normalising both out and in utils
     updated_utility = (
-        (decay_rate * utility) 
-        + (1 - decay_rate) * 0.5 * (
-                    (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8)) # Inbound stat
-                    + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8)) # Outbound stat 
-            )
+        (decay_rate * utility)
+        + (1 - decay_rate)
+        * 0.5
+        * (
+            (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
+            + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
+        )
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
     return updated_utility
+
 
 # -------------- weight reset ---------------
 def continuous_reset_weights(
@@ -83,21 +83,22 @@ def continuous_reset_weights(
     assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
 
     for idx, layer_name in enumerate(all_layer_names[:-1]):
-
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
         threshold = 0.8
         steepness = 16
         # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
-        transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x + (steepness-1)), utilities) # Sigmoid
+        transformed_utilities = jax.tree.map(
+            lambda x: 1 - jnp.exp(-steepness * x + (steepness - 1)), utilities
+        )  # Sigmoid
         # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
+        transformed_utilities = jax.tree.map(lambda x: jnp.clip(x, 0, 1), transformed_utilities)
 
         reset_prob = replacement_rate * (1 - transformed_utilities[layer_name])
         keep_prob = 1 - reset_prob
 
         weights[layer_name] = (keep_prob * weights[layer_name]) + (reset_prob * init_weights)
 
-        
         # Reset outgoing weights
         if idx + 1 < len(all_layer_names):
             next_layer = all_layer_names[idx + 1]
@@ -107,7 +108,9 @@ def continuous_reset_weights(
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_utilities_1d = jnp.repeat(transformed_utilities[layer_name], spatial_size)
+                    out_utilities_1d = jnp.repeat(
+                        transformed_utilities[layer_name], spatial_size
+                    )
 
                 else:  # Dense -> Dense
                     out_utilities_1d = transformed_utilities[layer_name]
@@ -124,24 +127,24 @@ def continuous_reset_weights(
             # out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
             out_keep_prob = 1 - out_reset_prob
-            weights[next_layer] = (out_keep_prob * weights[next_layer]) # + (out_reset_prob * out_init_weights) # Decay towards zero
+            weights[next_layer] = (
+                out_keep_prob * weights[next_layer]
+            )  # + (out_reset_prob * out_init_weights) # Decay towards zero
 
         effective_reset = replacement_rate * (1 - transformed_utilities[layer_name]).mean()
 
         logs[layer_name] = {
             "nodes_reset": effective_reset,
             "low_utility": jnp.sum(utilities[layer_name] < 0.95),
-            "mean_utils": jnp.mean(utilities[layer_name])
+            "mean_utils": jnp.mean(utilities[layer_name]),
             # "mean_utils": jnp.mean(utilities[layer_name])
         }
 
-    logs[all_layer_names[-1]] = {
-        "nodes_reset": 0.0,
-        "low_utility": 0,
-        "mean_utils": 0.0
-    }
+    logs[all_layer_names[-1]] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
 
     return weights, logs
+
+
 # -------------- Main CCBP Optimiser body ---------------
 def ccbp(
     seed: int,
@@ -205,14 +208,18 @@ def ccbp(
                 _features,
             )
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
-            _logs = {'std_util': all_utils.std(),
-                     'nodes_reset': 0.0, #state.logs['nodes_reset'],
-                     'low_utility': jnp.sum(all_utils < 0.95),
-                     'mean_utils': all_utils.mean()
-                     }
 
-            new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
-         
+            _logs = {
+                "std_util": all_utils.std(),
+                "nodes_reset": 0.0,  # state.logs['nodes_reset'],
+                "low_utility": jnp.sum(all_utils < 0.95),
+                "mean_utils": all_utils.mean(),
+            }
+
+            new_state = state.replace(
+                time_step=state.time_step + 1, logs=FrozenDict(_logs), utilities=_utility
+            )
+
             return params, new_state, tx_state
 
         def _ccbp(
@@ -254,7 +261,6 @@ def ccbp(
 
             # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
             _biases = biases
-
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
