@@ -40,7 +40,7 @@ class CCBPOptimState(CBPOptimState):
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0,
          "nodes_reset": 0.0,
-         "clipped_utils": 0,
+         "low_utility": 0,
          "mean_utils": 0.0}
     )
 
@@ -86,13 +86,12 @@ def continuous_reset_weights(
 
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-        steepness = 4
         threshold = 0.8
+        steepness = 16
         # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
-        transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x + threshold), utilities) # Sigmoid
+        transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x + (steepness-1)), utilities) # Sigmoid
         # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
 
-        # Clip so that we don't move beyond target weights, shouldn't be clipped anyway
         reset_prob = replacement_rate * (1 - transformed_utilities[layer_name])
         keep_prob = 1 - reset_prob
 
@@ -131,14 +130,14 @@ def continuous_reset_weights(
 
         logs[layer_name] = {
             "nodes_reset": effective_reset,
-            "clipped_utils": jnp.sum(transformed_utilities[layer_name] > 0.8),
+            "low_utility": jnp.sum(utilities[layer_name] < 0.95),
             "mean_utils": jnp.mean(utilities[layer_name])
             # "mean_utils": jnp.mean(utilities[layer_name])
         }
 
     logs[all_layer_names[-1]] = {
         "nodes_reset": 0.0,
-        "clipped_utils": 0,
+        "low_utility": 0,
         "mean_utils": 0.0
     }
 
@@ -208,7 +207,7 @@ def ccbp(
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
             _logs = {'std_util': all_utils.std(),
                      'nodes_reset': 0.0, #state.logs['nodes_reset'],
-                     'clipped_utils': 0,# state.logs['clipped_utils'],
+                     'low_utility': jnp.sum(all_utils < 0.95),
                      'mean_utils': all_utils.mean()
                      }
 
@@ -276,7 +275,7 @@ def ccbp(
                 # _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
-                _logs["clipped_utils"] += reset_logs[layer_name]["clipped_utils"]
+                _logs["low_utility"] += reset_logs[layer_name]["low_utility"]
                 _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
 
             _logs["mean_utils"] /= len(reset_logs.keys())
