@@ -179,8 +179,8 @@ class PPO:
                 **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
                 **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
 
-                **prefix_dict("actor/", actor_optim_logs),
-                **prefix_dict("value/", vf_optim_logs),
+                **prefix_dict("actor", actor_optim_logs),
+                **prefix_dict("value", vf_optim_logs),
 
                 # **prefix_dict("nn/srank", srank_logs),
 

@@ -60,7 +60,7 @@ def muon_ant_experiment() -> None:
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    optim_conf = MuonConfig(learning_rate=3e-4)
+    optim_conf = Muon=Config(learning_rate=3e-4)
     start = time.time()
     trainer = JittedContinualPPOTrainer(
         seed=args.seed,
@@ -98,10 +98,10 @@ def muon_ant_experiment() -> None:
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=100_000_000,
+            steps_per_task=50_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"muon_{args.seed}",

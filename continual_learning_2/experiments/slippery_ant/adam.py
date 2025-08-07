@@ -80,8 +80,8 @@ def adam_ant_experiment() -> None:
             vf_config=ValueFunctionConfig(
                 optimizer=optim_conf,
                 network=MLPConfig(
-                    num_layers=3,
-                    hidden_size=64,
+                    num_layers=5,
+                    hidden_size=256,
                     output_size=1,
                     activation_fn=Activation.Swish,
                     kernel_init=jax.nn.initializers.lecun_normal(),
@@ -98,10 +98,10 @@ def adam_ant_experiment() -> None:
             vf_coefficient=0.5,
             normalize_advantages=True,
         ),
-        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=5, episode_length=1000),
+        env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=200_000_000,
+            steps_per_task=50_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"adam_{args.seed}",

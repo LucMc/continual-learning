@@ -67,14 +67,7 @@ def get_updated_utility(  # Add batch dim
     ).flatten()  # Arr[#neurons]
     # avg neuron is arround 1 utility, using relu means min act of 0
 
-    steepness = 2 # was 10
-    return 1 - jnp.exp(-steepness * updated_utility) # Sigmoid
-    # squish = lambda x: -jnp.e**(-steepness*x)+2 # +1 because updated_utility centers ~1 and out_w_mag
-    # return squish(updated_utility) # -1 to recenter around 0
-
-# Replacement rate is a linear factor, steepness is how linear/exponential do we want the tradeoff to be
-# Not a great name for it, as we still do the weight decay thing when replacement_rate is 0
-# It works more mathematically as like a threshold
+    return updated_utility
 
 # -------------- weight reset ---------------
 def continuous_reset_weights(
@@ -93,9 +86,14 @@ def continuous_reset_weights(
 
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
+        steepness = 4
+        threshold = 0.8
+        # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
+        transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x + threshold), utilities) # Sigmoid
+        # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
 
         # Clip so that we don't move beyond target weights, shouldn't be clipped anyway
-        reset_prob = replacement_rate * (1 - utilities[layer_name])
+        reset_prob = replacement_rate * (1 - transformed_utilities[layer_name])
         keep_prob = 1 - reset_prob
 
         weights[layer_name] = (keep_prob * weights[layer_name]) + (reset_prob * init_weights)
@@ -110,13 +108,13 @@ def continuous_reset_weights(
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_utilities_1d = jnp.repeat(utilities[layer_name], spatial_size)
+                    out_utilities_1d = jnp.repeat(transformed_utilities[layer_name], spatial_size)
 
                 else:  # Dense -> Dense
-                    out_utilities_1d = utilities[layer_name]
+                    out_utilities_1d = transformed_utilities[layer_name]
 
             elif len(out_weight_shape) == 4:  # Conv layer
-                out_utilities_1d = utilities[layer_name]
+                out_utilities_1d = transformed_utilities[layer_name]
 
             expanded_utils = utils.expand_mask_for_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
@@ -129,12 +127,13 @@ def continuous_reset_weights(
             out_keep_prob = 1 - out_reset_prob
             weights[next_layer] = (out_keep_prob * weights[next_layer]) # + (out_reset_prob * out_init_weights) # Decay towards zero
 
-        effective_reset = replacement_rate * (1 - utilities[layer_name]).mean()
+        effective_reset = replacement_rate * (1 - transformed_utilities[layer_name]).mean()
 
         logs[layer_name] = {
             "nodes_reset": effective_reset,
-            "clipped_utils": jnp.sum(utilities[layer_name] > 1),
+            "clipped_utils": jnp.sum(transformed_utilities[layer_name] > 0.8),
             "mean_utils": jnp.mean(utilities[layer_name])
+            # "mean_utils": jnp.mean(utilities[layer_name])
         }
 
     logs[all_layer_names[-1]] = {
@@ -206,11 +205,11 @@ def ccbp(
                 state.utilities,
                 _features,
             )
-            _logs = {'std_util': jax.tree.reduce(jnp.add, jax.tree.map(lambda v: v.std(), _utility)),
-                     'nodes_reset': state.logs['nodes_reset'],
-                     'clipped_utils': state.logs['clipped_utils'],
-                     'mean_utils': state.logs['mean_utils']
-
+            all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
+            _logs = {'std_util': all_utils.std(),
+                     'nodes_reset': 0.0, #state.logs['nodes_reset'],
+                     'clipped_utils': 0,# state.logs['clipped_utils'],
+                     'mean_utils': all_utils.mean()
                      }
 
             new_state = state.replace(time_step=state.time_step + 1, logs=FrozenDict(_logs))
@@ -244,16 +243,6 @@ def ccbp(
                 _features,
             )
 
-            # reset_mask = jax.tree.map(
-            #     partial(
-            #         get_reset_mask,
-            #         maturity_threshold=maturity_threshold,
-            #         replacement_rate=replacement_rate,
-            #     ),
-            #     _utility,
-            #     state.ages,
-            # )
-            #
             # reset weights given mask
             _weights, reset_logs = continuous_reset_weights(
                 key_tree,
@@ -264,18 +253,9 @@ def ccbp(
                 replacement_rate,
             )
 
-            # reset bias given mask
             # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
             _biases = biases
 
-            # Update ages (CLIPPED HERE)
-            # _ages = jax.tree.map(
-            #     lambda a, m: jnp.where(
-            #         m, jnp.zeros_like(a), jnp.clip(a + 1, max=maturity_threshold + 1)
-            #     ),  # Clip to stop huge ages
-            #     state.ages,
-            #     reset_mask,
-            # )
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
@@ -307,8 +287,8 @@ def ccbp(
                 # ages=_ages,
                 logs=FrozenDict(_logs),
                 rng=new_rng,
-                # utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
-                utilities=_utility, # Try with and without keeping the runing average
+                utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
+                # utilities=_utility, # Try with and without keeping the runing average
                 time_step=state.time_step + 1,
             )
             flat_new_params, _ = jax.tree.flatten(new_params)

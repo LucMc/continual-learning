@@ -45,7 +45,7 @@ def run_all_mnist():
         assert args.wandb_entity is not None
 
     optimizers = {
-        "cbp": CBPConfig(
+        "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.9,
             replacement_rate=0.5,
@@ -53,7 +53,7 @@ def run_all_mnist():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CCBPConfig(
+        "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,
@@ -114,12 +114,12 @@ def run_all_mnist():
                 num_gradient_steps=32,
                 gamma=0.97,
                 gae_lambda=0.95,
-                entropy_coefficient=1e-3, # 1e-2
-                clip_eps=0.2, # 0.3
+                entropy_coefficient=1e-2,
+                clip_eps=0.3,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
             ),
-            env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=3, episode_length=1000),
+            env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=50_000_000,
