@@ -31,11 +31,11 @@ from functools import partial
 from dataclasses import field
 
 import continual_learning_2.utils.optim as utils
-from continual_learning_2.optim.cbp import CBPOptimState
+from continual_learning_2.optim.cbp import CbpOptimState
 
 
 @dataclass
-class CCBPOptimState(CBPOptimState):
+class CCBPOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -163,7 +163,7 @@ def ccbp(
 
         del params
 
-        return CCBPOptimState(
+        return CcbpOptimState(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
@@ -179,11 +179,11 @@ def ccbp(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: CCBPOptimState,
+        state: CcbpOptimState,
         params: optax.Params | None = None,
         features: Array | None = None,
         tx_state: optax.OptState | None = None,
-    ) -> tuple[optax.Updates, CCBPOptimState]:
+    ) -> tuple[optax.Updates, CcbpOptimState]:
         def no_update(updates):
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
@@ -224,7 +224,7 @@ def ccbp(
 
         def _ccbp(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CCBPOptimState]:
+        ) -> Tuple[optax.Updates, CcbpOptimState]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])
             flat_feats, _ = jax.tree.flatten(features)
 

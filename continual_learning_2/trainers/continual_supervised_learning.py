@@ -17,10 +17,6 @@ from jaxtyping import PRNGKeyArray
 
 from continual_learning_2.configs import (
     AdamConfig,
-    ShrinkAndPerterbConfig,
-    RedoConfig,
-    CBPConfig,
-    CCBPConfig,
     DatasetConfig,
     LoggingConfig,
     OptimizerConfig,
