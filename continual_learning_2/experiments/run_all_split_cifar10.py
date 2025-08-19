@@ -10,9 +10,9 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.configs import (
     AdamConfig,
-    CBPConfig,
+    CbpConfig,
     RedoConfig,
-    CCBPConfig,
+    CcbpConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
@@ -37,7 +37,7 @@ def run_all_mnist():
 
     optimizers = {
         "adam": AdamConfig(learning_rate=1e-3),
-        "cbp": CBPConfig(
+        "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.9,
             replacement_rate=0.5,
@@ -45,7 +45,7 @@ def run_all_mnist():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CCBPConfig(
+        "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,

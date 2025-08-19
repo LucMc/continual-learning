@@ -366,6 +366,7 @@ class ClassIncrementalDataset(SplitDataset):
                 num_records=len(ds),
                 shuffle=False,
                 num_epochs=1,
+                seed=self.seed
             ),
             operations=[
                 *self.operations,

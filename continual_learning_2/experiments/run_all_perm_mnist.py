@@ -10,9 +10,9 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.configs import (
     AdamConfig,
-    CBPConfig,
+    CbpConfig,
     RedoConfig,
-    CCBPConfig,
+    CcbpConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
@@ -38,7 +38,7 @@ def run_all_perm_mnist():
 
     optimizers = {
         "adam": AdamConfig(learning_rate=1e-3),
-        "cbp": CBPConfig(
+        "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.9,
             replacement_rate=0.5,
@@ -46,7 +46,7 @@ def run_all_perm_mnist():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CCBPConfig(
+        "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,
@@ -76,14 +76,14 @@ def run_all_perm_mnist():
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
-            model_config=MLPConfig(output_size=10),
+            model_config=MLPConfig(output_size=10, hidden_size=128),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="permuted_mnist",
                 seed=args.seed,
                 batch_size=64,
-                num_tasks=120,
-                num_epochs_per_task=1,
+                num_tasks=200,
+                num_epochs_per_task=100,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(

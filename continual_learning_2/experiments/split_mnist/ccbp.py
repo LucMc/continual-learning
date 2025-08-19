@@ -8,7 +8,7 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
 )
 from continual_learning_2.configs import (
-    CCBPConfig,
+    CcbpConfig,
     AdamConfig,
     MLPConfig,
     TrainingConfig,
@@ -34,7 +34,7 @@ def ccbp_mnist_experiment():
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
     start = time.time()
-    optim_conf = CCBPConfig(
+    optim_conf = CcbpConfig(
         tx=AdamConfig(learning_rate=1e-3),
         seed=args.seed,
         decay_rate=0.9,

@@ -9,8 +9,8 @@ from chex import dataclass
 from continual_learning_2.configs import (
     AdamConfig,
     AdamwConfig,
-    CBPConfig,
-    CCBPConfig,
+    CbpConfig,
+    CcbpConfig,
     LoggingConfig,
     RedoConfig,
     ShrinkAndPerterbConfig,

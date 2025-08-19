@@ -6,14 +6,14 @@ from continual_learning_2.trainers.continual_supervised_learning import (
     LoggingConfig,
     TrainingConfig,
 )
-from continual_learning_2.configs import CCBPConfig, AdamConfig
+from continual_learning_2.configs import CcbpConfig, AdamConfig
 from continual_learning_2.configs.models import CNNConfig
 
 
 def ccbp_split_cifar100_experiment():
     SEED = 42
     start = time.time()
-    optim_conf = CCBPConfig(
+    optim_conf = CcbpConfig(
         tx=AdamConfig(learning_rate=1e-3),
         decay_rate=0.9,
         replacement_rate=0,
