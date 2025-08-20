@@ -40,18 +40,11 @@ def run_all_perm_mnist():
         "adam": AdamConfig(learning_rate=1e-3),
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            decay_rate=0.99,
+            replacement_rate=1e-5,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
-        ),
-        "ccbp": CcbpConfig(
-            tx=AdamConfig(learning_rate=1e-3),
-            seed=args.seed,
-            decay_rate=0.9,
-            replacement_rate=0.01,
-            maturity_threshold=20,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -64,9 +57,16 @@ def run_all_perm_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.9,
+            shrink=0.99,
             perturb=0.005,
             every_n=10,
+        ),
+        "ccbp": CcbpConfig(
+            tx=AdamConfig(learning_rate=1e-3),
+            seed=args.seed,
+            decay_rate=0.99,
+            replacement_rate=0.01,
+            maturity_threshold=100,
         ),
     }
     if args.exclude: optimizers.pop(args.exclude) # Make list?
@@ -81,9 +81,9 @@ def run_all_perm_mnist():
             data_cfg=DatasetConfig(
                 name="permuted_mnist",
                 seed=args.seed,
-                batch_size=64,
+                batch_size=1,
                 num_tasks=200,
-                num_epochs_per_task=100,
+                num_epochs_per_task=1,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(

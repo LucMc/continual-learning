@@ -35,7 +35,7 @@ from continual_learning_2.optim.cbp import CbpOptimState
 
 
 @dataclass
-class CcbpOptimState(CbpOptimState):
+class CCBPOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -43,46 +43,31 @@ class CcbpOptimState(CbpOptimState):
 
 
 # -------------- CCBP Weight reset ---------------
-# def get_updated_utility(  # Add batch dim
-#     out_w_mag: Float[Array, "#weights"],
-#     utility: Float[Array, "#neurons"],
-#     features: Float[Array, "#batch #neurons"],
-#     decay_rate: Float[Array, ""] = 0.9,
-# ) -> Float[Array, "#neurons"]:
-#     # TODO: Mean activations etc over the whole network instead of per layer
-#     # Remove batch dim from some inputs just in case
-#     reduce_axis = tuple(range(features.ndim - 1))
-#     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-#
-#     # Running stats normalising both out and in utils
-#     updated_utility = (
-#         (decay_rate * utility)
-#         + (1 - decay_rate)
-#         * 0.5
-#         * (
-#             (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
-#             + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
-#         )
-#     ).flatten()  # Arr[#neurons]
-#     # avg neuron is arround 1 utility, using relu means min act of 0
-#
-#     return updated_utility
-
-def get_updated_utility(
-    grads: Float[Array, "#batch #inweights #neurons"],
+def get_updated_utility(  # Add batch dim
+    out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
-    decay_rate: Float[Array, ""] = 0.9 # 0 means no running stats
+    features: Float[Array, "#batch #neurons"],
+    decay_rate: Float[Array, ""] = 0.9,
 ) -> Float[Array, "#neurons"]:
-    # Avg over other dims
+    # TODO: Mean activations etc over the whole network instead of per layer
+    # Remove batch dim from some inputs just in case
+    reduce_axis = tuple(range(features.ndim - 1))
+    mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
 
-    reduce_axes = tuple(range(grads.ndim - 1))
-    mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
-    score = mean_grad_per_neuron / (
-        jnp.mean(mean_grad_per_neuron) + 1e-8
-    )  # Arr[#neurons] / Scalar
+    # Running stats normalising both out and in utils
+    updated_utility = (
+        (decay_rate * utility)
+        + (1 - decay_rate)
+        * 0.5
+        * (
+            (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
+            + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
+        )
+    ).flatten()  # Arr[#neurons]
+    # avg neuron is arround 1 utility, using relu means min act of 0
 
-    updated_utility = (decay_rate * utility) + (1-decay_rate) * score
     return updated_utility
+
 
 # -------------- weight reset ---------------
 def continuous_reset_weights(
@@ -205,30 +190,22 @@ def ccbp(
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            # out_w_mag = utils.get_out_weights_mag(weights)
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
+            out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
             # Features arrive as tuple so we have to restructure
-            # w_mag_tdef = jax.tree.structure(out_w_mag)
+            w_mag_tdef = jax.tree.structure(out_w_mag)
 
             # Don't need out_layer feats and normalises layer names
-            # _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
 
-            # _utility = jax.tree.map(
-            #     partial(get_updated_utility, decay_rate=decay_rate),
-            #     out_w_mag,
-            #     state.utilities,
-            #     _features,
-            # )
-            breakpoint()
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
+                out_w_mag,
                 state.utilities,
+                _features,
             )
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
 
@@ -259,24 +236,17 @@ def ccbp(
             key_tree = utils.gen_key_tree(util_key, weights)
 
             # Features arrive as tuple so we have to restructure
-            # w_mag_tdef = jax.tree.structure(out_w_mag)
+            w_mag_tdef = jax.tree.structure(out_w_mag)
 
             # Don't need out_layer feats and normalises layer names
-            # _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
 
-            # _utility = jax.tree.map(
-            #     partial(get_updated_utility, decay_rate=decay_rate),
-            #     out_w_mag,
-            #     state.utilities,
-            #     # _mean_feature_act,
-            #     _features,
-            # )
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
+                out_w_mag,
                 state.utilities,
+                # _mean_feature_act,
+                _features,
             )
 
             # reset weights given mask

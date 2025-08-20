@@ -39,18 +39,18 @@ def run_all_inc_cifar100():
         "adam": AdamConfig(learning_rate=1e-3),
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            decay_rate=0.99,
+            replacement_rate=1e-5,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CbpConfig(
+        "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.9,
-            replacement_rate=0.01,
-            maturity_threshold=5,
+            decay_rate=0.99,
+            replacement_rate=0.001,
+            maturity_threshold=100,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -63,9 +63,9 @@ def run_all_inc_cifar100():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.7, # 0.8
+            shrink=0.9, # 0.8
             perturb=0.01,
-            every_n=1,
+            every_n=100,
         ),
     }
 
