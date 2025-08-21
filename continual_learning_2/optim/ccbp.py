@@ -137,9 +137,6 @@ def continuous_reset_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
 
-            # resetting to zero is aggressive, there is a reason we use random weights not zeros
-            # this needs to be verified if I want to add it to papers claims tho
-            # out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
             out_keep_prob = 1 - out_reset_prob
             weights[next_layer] = (
@@ -152,7 +149,6 @@ def continuous_reset_weights(
             "nodes_reset": effective_reset,
             "low_utility": jnp.sum(utilities[layer_name] < 0.95),
             "mean_utils": jnp.mean(utilities[layer_name]),
-            # "mean_utils": jnp.mean(utilities[layer_name])
         }
 
     logs[all_layer_names[-1]] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -165,7 +161,7 @@ def ccbp(
     seed: int,
     replacement_rate: float = 0.5,
     decay_rate: float = 0.9,
-    maturity_threshold: int = 100,
+    update_frequency: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
 ) -> optax.GradientTransformationExtraArgs:
@@ -187,7 +183,7 @@ def ccbp(
             ),  # TODO: Remove
             rng=jax.random.PRNGKey(seed),
             time_step=0,
-            # update_frequency=maturity_threshold, # TODO: Change to update_frequency
+            # update_frequency=update_frequency, # TODO: Change to update_frequency
             **kwargs,
         )
 
@@ -205,26 +201,13 @@ def ccbp(
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            # out_w_mag = utils.get_out_weights_mag(weights)
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])
             weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            # Features arrive as tuple so we have to restructure
-            # w_mag_tdef = jax.tree.structure(out_w_mag)
-
-            # Don't need out_layer feats and normalises layer names
-            # _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
-
-            # _utility = jax.tree.map(
-            #     partial(get_updated_utility, decay_rate=decay_rate),
-            #     out_w_mag,
-            #     state.utilities,
-            #     _features,
-            # )
-            breakpoint()
+            weight_grads.pop(out_layer_name)
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
@@ -253,26 +236,15 @@ def ccbp(
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            out_w_mag = utils.get_out_weights_mag(weights)
+            # out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            # Features arrive as tuple so we have to restructure
-            # w_mag_tdef = jax.tree.structure(out_w_mag)
-
-            # Don't need out_layer feats and normalises layer names
-            # _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])
             weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
 
-            # _utility = jax.tree.map(
-            #     partial(get_updated_utility, decay_rate=decay_rate),
-            #     out_w_mag,
-            #     state.utilities,
-            #     # _mean_feature_act,
-            #     _features,
-            # )
+            weight_grads.pop(out_layer_name)
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
@@ -336,7 +308,7 @@ def ccbp(
             )
 
         return jax.lax.cond(
-            state.time_step % maturity_threshold == 0, _ccbp, no_update, updates
+            state.time_step % update_frequency == 0, _ccbp, no_update, updates
         )
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
