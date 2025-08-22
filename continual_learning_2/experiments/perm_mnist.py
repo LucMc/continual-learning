@@ -45,8 +45,8 @@ def run_all_perm_mnist():
         "adam": AdamConfig(learning_rate=1e-3),
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),

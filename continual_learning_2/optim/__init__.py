@@ -15,6 +15,7 @@ from continual_learning_2.configs.optim import (
 from continual_learning_2.utils.optim import attach_reset_method
 
 from .redo import redo
+from .regrama import regrama
 from .ccbp import ccbp
 from .shrink_perturb import shrink_perturb
 from .cbp import cbp
@@ -87,7 +88,7 @@ def get_optimizer(config: OptimizerConfig, is_inner=False):
     elif isinstance(config, RegramaConfig):
         return attach_reset_method(
             ("tx", get_optimizer(rm_config.pop("tx"), is_inner=True)),
-            ("reset_method", redo(**rm_config)),
+            ("reset_method", regrama(**rm_config)),
         )
 
     elif isinstance(config, CbpConfig):
