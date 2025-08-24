@@ -122,7 +122,7 @@ def continuous_reset_weights(
             # Handle shape transitions
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Previous layer was conv
-                    spatial_size = out_weight_shape[0] // in_mask_1d.size
+                    spatial_size = out_weight_shape[0] // transformed_utilities[layer_name].size
                     out_utilities_1d = jnp.repeat(
                         transformed_utilities[layer_name], spatial_size
                     )

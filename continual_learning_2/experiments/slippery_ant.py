@@ -132,12 +132,28 @@ def run_all_slippery_ant():
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 5,
-                num_epochs=4,
+
+            #     num_rollout_steps=2048 * 32 * 5,
+            #     num_epochs=4,
+            #     num_gradient_steps=32,
+            #     gamma=0.97,
+            #     gae_lambda=0.95,
+            #     entropy_coefficient=1e-2,
+            #     clip_eps=0.3,
+            #     vf_coefficient=0.5,
+            #     normalize_advantages=True,
+            # ),
+            # env_cfg=EnvConfig(
+            #     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
+            # ),
+
+
+                num_rollout_steps=2048 * 60,
+                num_epochs=6,
                 num_gradient_steps=32,
                 gamma=0.97,
                 gae_lambda=0.95,
-                entropy_coefficient=1e-2,
+                entropy_coefficient=1e-3,
                 clip_eps=0.3,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
