@@ -59,8 +59,8 @@ def run_all_perm_mnist():
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            score_threshold=0.025,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -76,9 +76,9 @@ def run_all_perm_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.99,
-            perturb=0.005,
-            every_n=10,
+            shrink=1-1e-5,
+            perturb=1e-5,
+            every_n=1,
         ),
     }
 
