@@ -32,6 +32,7 @@ class Args:
     resume: bool = False
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
+    name: str | None = None # Postfix name tag
 
 
 def run_all_perm_mnist():
@@ -60,7 +61,8 @@ def run_all_perm_mnist():
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
             update_frequency=1000,
-            score_threshold=0.025,
+            # score_threshold=0.025,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -94,6 +96,10 @@ def run_all_perm_mnist():
 
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
+        print(f"Config: {opt_conf}")
+        run_name = f"{opt_name}_{args.seed}"
+        if args.name: run_name+=f"_{args.name}"
+
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
@@ -111,7 +117,7 @@ def run_all_perm_mnist():
                 resume=args.resume,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_{args.seed}",
+                run_name=run_name,
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
                 group="perm_mnist",
