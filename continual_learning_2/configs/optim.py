@@ -72,4 +72,4 @@ class CcbpConfig(ResetMethodConfig):
     seed: int = 42
     replacement_rate: float = 0.1
     decay_rate: float = 0.99
-    maturity_threshold: float = 20
+    update_frequency: float = 100

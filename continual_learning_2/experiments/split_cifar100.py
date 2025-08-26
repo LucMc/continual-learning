@@ -12,12 +12,16 @@ from continual_learning_2.configs import (
     AdamConfig,
     CbpConfig,
     RedoConfig,
-    CbpConfig,
+    RegramaConfig,
+    CcbpConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
     TrainingConfig,
 )
+
+from dataclasses import field
+
 
 @dataclass(frozen=True)
 class Args:
@@ -27,35 +31,46 @@ class Args:
     wandb_entity: str | None = None
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
+    exclude: list[str] = field(default_factory=list)
+    include: list[str] = field(default_factory=list)
 
-def run_all_inc_cifar100():
+def run_all_cifar100():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+
     optimizers = {
         "adam": AdamConfig(learning_rate=1e-3),
-        "cbp": CbpConfig(
+        "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            update_frequency=1000,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CbpConfig(
+        "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.9,
+            decay_rate=0.99,
             replacement_rate=0.01,
-            maturity_threshold=5,
+            update_frequency=100,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            # score_threshold=0.025,
+            score_threshold=0.0095,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
+        "cbp": CbpConfig(
+            tx=AdamConfig(learning_rate=1e-3),
+            decay_rate=0.99,
+            replacement_rate=1e-5,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -63,11 +78,21 @@ def run_all_inc_cifar100():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.7, # 0.8
-            perturb=0.01,
+            shrink=1-1e-5,
+            perturb=1e-5,
             every_n=1,
         ),
     }
+
+    if args.include:
+        optimizers = {
+            name: config for name, config in optimizers.items() if name in args.include
+        }
+
+    for algorithm in args.exclude:
+        optimizers.pop(algorithm)
+
+    print(f"Running algorithms: {list(optimizers.keys())}")
 
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
@@ -77,21 +102,24 @@ def run_all_inc_cifar100():
             model_config=CNNConfig(output_size=100),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
-                name="classinc_cifar100",
+                name="split_cifar100",
                 seed=args.seed,
                 batch_size=64,
                 num_tasks=100,
-                num_epochs_per_task=1,
-                num_workers=0,  # (os.cpu_count() or 0) // 2,
+                num_epochs_per_task=8,
+                # num_workers=0,  # (os.cpu_count() or 0) // 2,
+                dataset_kwargs = {
+                    "flatten" : False
+                }
             ),
             train_cfg=TrainingConfig(
-                resume=args.resume,
+                resume=False,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="classinc_cifar100",
+                group="split_cifar100",
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
@@ -105,4 +133,4 @@ def run_all_inc_cifar100():
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
 
 if __name__ == "__main__":
-    run_all_inc_cifar100()
+    run_all_cifar100()

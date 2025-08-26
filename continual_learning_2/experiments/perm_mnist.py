@@ -1,4 +1,3 @@
-import os
 import jax
 import tyro
 import time
@@ -12,12 +11,16 @@ from continual_learning_2.configs import (
     AdamConfig,
     CbpConfig,
     RedoConfig,
+    RegramaConfig,
     CcbpConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
     TrainingConfig,
 )
+
+from dataclasses import field
+
 
 @dataclass(frozen=True)
 class Args:
@@ -27,7 +30,10 @@ class Args:
     wandb_entity: str | None = None
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
-    exclude: str | None = None
+    exclude: list[str] = field(default_factory=list)
+    include: list[str] = field(default_factory=list)
+    name: str | None = None # Postfix name tag
+
 
 def run_all_perm_mnist():
     args = tyro.cli(Args)
@@ -38,25 +44,33 @@ def run_all_perm_mnist():
 
     optimizers = {
         "adam": AdamConfig(learning_rate=1e-3),
-        "cbp": CbpConfig(
+        "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            update_frequency=1000,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.9,
+            decay_rate=0.99,
             replacement_rate=0.01,
-            maturity_threshold=20,
+            update_frequency=100,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            # score_threshold=0.025,
+            score_threshold=0.0095,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
+        "cbp": CbpConfig(
+            tx=AdamConfig(learning_rate=1e-3),
+            decay_rate=0.99,
+            replacement_rate=1e-5,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -64,15 +78,28 @@ def run_all_perm_mnist():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.9,
-            perturb=0.005,
-            every_n=10,
+            shrink=1-1e-5,
+            perturb=1e-5,
+            every_n=1,
         ),
     }
-    if args.exclude: optimizers.pop(args.exclude) # Make list?
+
+    if args.include:
+        optimizers = {
+            name: config for name, config in optimizers.items() if name in args.include
+        }
+
+    for algorithm in args.exclude:
+        optimizers.pop(algorithm)
+
+    print(f"Running algorithms: {list(optimizers.keys())}")
 
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
+        print(f"Config: {opt_conf}")
+        run_name = f"{opt_name}_{args.seed}"
+        if args.name: run_name+=f"_{args.name}"
+
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
@@ -81,16 +108,16 @@ def run_all_perm_mnist():
             data_cfg=DatasetConfig(
                 name="permuted_mnist",
                 seed=args.seed,
-                batch_size=64,
-                num_tasks=200,
-                num_epochs_per_task=100,
+                batch_size=1,
+                num_tasks=250,
+                num_epochs_per_task=1,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(
                 resume=args.resume,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_{args.seed}",
+                run_name=run_name,
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
                 group="perm_mnist",
@@ -99,12 +126,11 @@ def run_all_perm_mnist():
                 eval_during_training=True,
             ),
         )
-
         trainer.train()
         print(f"Training time: {time.time() - start:.2f} seconds")
         del trainer
-
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
+
 
 if __name__ == "__main__":
     run_all_perm_mnist()

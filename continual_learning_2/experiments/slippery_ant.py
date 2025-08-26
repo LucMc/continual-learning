@@ -11,6 +11,7 @@ from continual_learning_2.configs import (
     AdamwConfig,
     CbpConfig,
     CcbpConfig,
+    RegramaConfig,
     LoggingConfig,
     RedoConfig,
     ShrinkAndPerterbConfig,
@@ -18,7 +19,6 @@ from continual_learning_2.configs import (
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
-# from continual_learning_2.configs.optim import AdamConfig, Adamw, RedoConfig
 from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning_2.configs.training import RLTrainingConfig
 from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
@@ -26,6 +26,9 @@ from continual_learning_2.types import (
     Activation,
     StdType,
 )
+
+
+from dataclasses import field
 
 
 @dataclass(frozen=True)
@@ -36,29 +39,33 @@ class Args:
     wandb_entity: str | None = None
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
+    exclude: list[str] = field(default_factory=list)
+    include: list[str] = field(default_factory=list)
 
-def run_all_mnist():
+
+def run_all_slippery_ant():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    # Change to Muon once stable!
     optimizers = {
-        "cbp": CbpConfig(
+        "adam": AdamConfig(learning_rate=1e-3),
+        "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            decay_rate=0.9,
-            replacement_rate=0.5,
-            maturity_threshold=20,
+            update_frequency=100,
+            score_threshold=0.1,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.9,
-            replacement_rate=0.05,
-            maturity_threshold=20,
+            decay_rate=0.99,
+            replacement_rate=0.01,
+            update_frequency=100,
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -67,17 +74,33 @@ def run_all_mnist():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
+        "cbp": CbpConfig(
+            tx=AdamConfig(learning_rate=1e-3),
+            decay_rate=0.99,
+            replacement_rate=1e-5,
+            maturity_threshold=100,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.8,
-            perturb=0.01,
-            every_n=1,
+            shrink=0.99,
+            perturb=0.005,
+            every_n=10,
         ),
-        "adam": AdamConfig(learning_rate=1e-3),
-        "adamw": AdamwConfig(learning_rate=1e-3)
     }
+
+    if args.include:
+        optimizers = {
+            name: config for name, config in optimizers.items() if name in args.include
+        }
+
+    for algorithm in args.exclude:
+        optimizers.pop(algorithm)
+
+    print(f"Running algorithms: {list(optimizers.keys())}")
 
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
@@ -109,17 +132,35 @@ def run_all_mnist():
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 5,
-                num_epochs=4,
+
+            #     num_rollout_steps=2048 * 32 * 5,
+            #     num_epochs=4,
+            #     num_gradient_steps=32,
+            #     gamma=0.97,
+            #     gae_lambda=0.95,
+            #     entropy_coefficient=1e-2,
+            #     clip_eps=0.3,
+            #     vf_coefficient=0.5,
+            #     normalize_advantages=True,
+            # ),
+            # env_cfg=EnvConfig(
+            #     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
+            # ),
+
+
+                num_rollout_steps=2048 * 60,
+                num_epochs=6,
                 num_gradient_steps=32,
                 gamma=0.97,
                 gae_lambda=0.95,
-                entropy_coefficient=1e-2,
+                entropy_coefficient=1e-3,
                 clip_eps=0.3,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
             ),
-            env_cfg=EnvConfig("slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000),
+            env_cfg=EnvConfig(
+                "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
+            ),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=50_000_000,
@@ -130,7 +171,7 @@ def run_all_mnist():
                 wandb_project=args.wandb_project,
                 group="slippery_ant",
                 save=False,  # Disable checkpoints cause it's so fast anyway
-                wandb_mode=args.wandb_mode
+                wandb_mode=args.wandb_mode,
             ),
         )
         trainer.train()
@@ -139,5 +180,6 @@ def run_all_mnist():
 
     print(f"Total training time: {time.time() - exp_start:.2f} seconds")
 
+
 if __name__ == "__main__":
-    run_all_mnist()
+    run_all_slippery_ant()

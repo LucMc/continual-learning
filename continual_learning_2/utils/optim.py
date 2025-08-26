@@ -265,52 +265,6 @@ def continuous_reset_weights(
     return weights, logs
 
 
-def old_continuous_weight_reset(
-    reset_mask: PyTree[Float[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    initial_weights: PyTree[Float[Array, "..."]],
-    utilities: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = 0.001,
-):
-    layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(layer_names) - 1):
-        in_layer = layer_names[i]
-        out_layer = layer_names[i + 1]
-
-        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
-
-        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-
-        stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
-            (1 - replacement_rate) * layer_w[in_layer]
-        )
-        stepped_util_in_weights = (
-            utilities[in_layer] * layer_w[in_layer]
-            + (1 - utilities[in_layer]) * stepped_in_weights
-        )
-        _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
-
-        stepped_out_weights = (replacement_rate * zero_out_weights) + (
-            (1 - replacement_rate) * layer_w[out_layer]
-        )
-
-        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        stepped_util_out_weights = (
-            utilities[out_layer] * layer_w[out_layer]
-            + (1 - utilities[out_layer]) * stepped_out_weights
-        )
-
-        _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
-
-        layer_w[in_layer] = _in_layer_w
-        layer_w[out_layer] = _out_layer_w
-
-        logs[in_layer] = {"nodes_reset": 0}  # n_reset no longer applicable
-    logs[out_layer] = {"nodes_reset": 0}
-    return layer_w, logs
-
 
 def reset_optim_params(tx_state, reset_mask):
     """Reset optimizer params using reset_mask"""
@@ -476,5 +430,114 @@ def old_reset_weights(
     return layer_w, logs
 
 
-    """
+def old_continuous_weight_reset(
+    reset_mask: PyTree[Float[Array, "#neurons"]],
+    layer_w: PyTree[Float[Array, "..."]],
+    initial_weights: PyTree[Float[Array, "..."]],
+    utilities: PyTree[Float[Array, "..."]],
+    replacement_rate: Float[Array, ""] = 0.001,
+):
+    layer_names = list(reset_mask.keys())
+    logs = {}
 
+    for i in range(len(layer_names) - 1):
+        in_layer = layer_names[i]
+        out_layer = layer_names[i + 1]
+
+        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
+
+        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
+
+        stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
+            (1 - replacement_rate) * layer_w[in_layer]
+        )
+        stepped_util_in_weights = (
+            utilities[in_layer] * layer_w[in_layer]
+            + (1 - utilities[in_layer]) * stepped_in_weights
+        )
+        _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
+
+        stepped_out_weights = (replacement_rate * zero_out_weights) + (
+            (1 - replacement_rate) * layer_w[out_layer]
+        )
+
+        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
+        stepped_util_out_weights = (
+            utilities[out_layer] * layer_w[out_layer]
+            + (1 - utilities[out_layer]) * stepped_out_weights
+        )
+
+        _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
+
+        layer_w[in_layer] = _in_layer_w
+        layer_w[out_layer] = _out_layer_w
+
+        logs[in_layer] = {"nodes_reset": 0}  # n_reset no longer applicable
+    logs[out_layer] = {"nodes_reset": 0}
+    return layer_w, logs
+
+# CBP
+def get_updated_utility(  # Add batch dim
+    utility: Float[Array, "#neurons"],
+    features: Float[Array, "#batch #neurons"],  # Vmap over batches
+    decay_rate: Float[Array, ""] = 0.9,
+    out_w_mag: Float[Array, "#weights"] | None = None
+):
+    if out_w_mag
+    updated_utility = (
+        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
+    ).flatten()  # Arr[#neurons]
+
+    return updated_utility
+
+# CCBP
+def get_updated_utility(  # Add batch dim
+    out_w_mag: Float[Array, "#weights"],
+    utility: Float[Array, "#neurons"],
+    features: Float[Array, "#batch #neurons"],
+    decay_rate: Float[Array, ""] = 0.9,
+) -> Float[Array, "#neurons"]:
+    # TODO: Mean activations etc over the whole network instead of per layer
+    # Remove batch dim from some inputs just in case
+    reduce_axis = tuple(range(features.ndim - 1))
+    mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
+
+    # Running stats normalising both out and in utils
+    updated_utility = (
+        (decay_rate * utility)
+        + (1 - decay_rate)
+        * 0.5
+        * (
+            (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
+            + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
+        )
+    ).flatten()  # Arr[#neurons]
+    # avg neuron is arround 1 utility, using relu means min act of 0
+
+    return updated_utility
+
+# ReDo
+# These methods could for sure be the same and just pass in different criteria
+def get_score(
+    features: Float[Array, "#batch #neurons"],
+) -> Float[Array, "#neurons"]:
+    # Avg over other dims
+    reduce_axes = tuple(range(features.ndim - 1))
+    mean_act_per_neuron = jnp.mean(jnp.abs(features), axis=reduce_axes)  # Arr[#neurons]
+    score = mean_act_per_neuron / (
+        jnp.mean(mean_act_per_neuron) + 1e-8
+    )  # Arr[#neurons] / Scalar
+    return score
+
+# Regrama
+def get_score(
+    grads: Float[Array, "#batch #inweights #neurons"]
+) -> Float[Array, "#neurons"]:
+    # Avg over other dims
+    reduce_axes = tuple(range(grads.ndim - 1))
+    mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
+    score = mean_grad_per_neuron / (
+        jnp.mean(mean_grad_per_neuron) + 1e-8
+    )  # Arr[#neurons] / Scalar
+    return score
+    """

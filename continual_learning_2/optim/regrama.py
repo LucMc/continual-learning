@@ -54,9 +54,8 @@ def get_score(
 # -------------- Main ReGraMa Optimiser body ---------------
 def regrama(
     seed: int,
-    replacement_rate: float = 0.5,  # Update to paper hyperparams
-    update_frequency: int = 100,
-    score_threshold: float = 0.1,
+    update_frequency: int = 1000,
+    score_threshold: float = 0.01,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
 ) -> optax.GradientTransformationExtraArgs:
     """ (Resetting nuerons guided by) Gradient Magnitude based Nueronal Activity Metric (ReGraMa): [Liu et al.](https://arxiv.org/pdf/2505.24061v1) """

@@ -35,7 +35,7 @@ from continual_learning_2.optim.cbp import CbpOptimState
 
 
 @dataclass
-class CcbpOptimState(CbpOptimState):
+class CCBPOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -43,46 +43,31 @@ class CcbpOptimState(CbpOptimState):
 
 
 # -------------- CCBP Weight reset ---------------
-# def get_updated_utility(  # Add batch dim
-#     out_w_mag: Float[Array, "#weights"],
-#     utility: Float[Array, "#neurons"],
-#     features: Float[Array, "#batch #neurons"],
-#     decay_rate: Float[Array, ""] = 0.9,
-# ) -> Float[Array, "#neurons"]:
-#     # TODO: Mean activations etc over the whole network instead of per layer
-#     # Remove batch dim from some inputs just in case
-#     reduce_axis = tuple(range(features.ndim - 1))
-#     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-#
-#     # Running stats normalising both out and in utils
-#     updated_utility = (
-#         (decay_rate * utility)
-#         + (1 - decay_rate)
-#         * 0.5
-#         * (
-#             (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
-#             + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
-#         )
-#     ).flatten()  # Arr[#neurons]
-#     # avg neuron is arround 1 utility, using relu means min act of 0
-#
-#     return updated_utility
-
-def get_updated_utility(
-    grads: Float[Array, "#batch #inweights #neurons"],
+def get_updated_utility(  # Add batch dim
+    out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
-    decay_rate: Float[Array, ""] = 0.9 # 0 means no running stats
+    features: Float[Array, "#batch #neurons"],
+    decay_rate: Float[Array, ""] = 0.9,
 ) -> Float[Array, "#neurons"]:
-    # Avg over other dims
+    # TODO: Mean activations etc over the whole network instead of per layer
+    # Remove batch dim from some inputs just in case
+    reduce_axis = tuple(range(features.ndim - 1))
+    mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
 
-    reduce_axes = tuple(range(grads.ndim - 1))
-    mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
-    score = mean_grad_per_neuron / (
-        jnp.mean(mean_grad_per_neuron) + 1e-8
-    )  # Arr[#neurons] / Scalar
+    # Running stats normalising both out and in utils
+    updated_utility = (
+        (decay_rate * utility)
+        + (1 - decay_rate)
+        * 0.5
+        * (
+            (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
+            + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
+        )
+    ).flatten()  # Arr[#neurons]
+    # avg neuron is arround 1 utility, using relu means min act of 0
 
-    updated_utility = (decay_rate * utility) + (1-decay_rate) * score
     return updated_utility
+
 
 # -------------- weight reset ---------------
 def continuous_reset_weights(
@@ -122,7 +107,7 @@ def continuous_reset_weights(
             # Handle shape transitions
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Previous layer was conv
-                    spatial_size = out_weight_shape[0] // transformed_utilities[layer_name].size
+                    spatial_size = out_weight_shape[0] // in_mask_1d.size
                     out_utilities_1d = jnp.repeat(
                         transformed_utilities[layer_name], spatial_size
                     )
@@ -137,6 +122,9 @@ def continuous_reset_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
 
+            # resetting to zero is aggressive, there is a reason we use random weights not zeros
+            # this needs to be verified if I want to add it to papers claims tho
+            # out_init_weights = weight_init_fn(key_tree[next_layer], weights[next_layer].shape)
             out_reset_prob = replacement_rate * (1 - expanded_utils)
             out_keep_prob = 1 - out_reset_prob
             weights[next_layer] = (
@@ -149,6 +137,7 @@ def continuous_reset_weights(
             "nodes_reset": effective_reset,
             "low_utility": jnp.sum(utilities[layer_name] < 0.95),
             "mean_utils": jnp.mean(utilities[layer_name]),
+            # "mean_utils": jnp.mean(utilities[layer_name])
         }
 
     logs[all_layer_names[-1]] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -161,7 +150,7 @@ def ccbp(
     seed: int,
     replacement_rate: float = 0.5,
     decay_rate: float = 0.9,
-    update_frequency: int = 100,
+    maturity_threshold: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
 ) -> optax.GradientTransformationExtraArgs:
@@ -183,7 +172,7 @@ def ccbp(
             ),  # TODO: Remove
             rng=jax.random.PRNGKey(seed),
             time_step=0,
-            # update_frequency=update_frequency, # TODO: Change to update_frequency
+            # update_frequency=maturity_threshold, # TODO: Change to update_frequency
             **kwargs,
         )
 
@@ -201,17 +190,22 @@ def ccbp(
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
+            out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            weight_grads.pop(out_layer_name)
+            # Features arrive as tuple so we have to restructure
+            w_mag_tdef = jax.tree.structure(out_w_mag)
+
+            # Don't need out_layer feats and normalises layer names
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
+
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
+                out_w_mag,
                 state.utilities,
+                _features,
             )
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
 
@@ -236,19 +230,23 @@ def ccbp(
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            # out_w_mag = utils.get_out_weights_mag(weights)
+            out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == 'kernel'}
+            # Features arrive as tuple so we have to restructure
+            w_mag_tdef = jax.tree.structure(out_w_mag)
 
-            weight_grads.pop(out_layer_name)
+            # Don't need out_layer feats and normalises layer names
+            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
+
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
+                out_w_mag,
                 state.utilities,
+                # _mean_feature_act,
+                _features,
             )
 
             # reset weights given mask
@@ -308,7 +306,7 @@ def ccbp(
             )
 
         return jax.lax.cond(
-            state.time_step % update_frequency == 0, _ccbp, no_update, updates
+            state.time_step % maturity_threshold == 0, _ccbp, no_update, updates
         )
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
