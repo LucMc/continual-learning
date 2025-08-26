@@ -150,8 +150,8 @@ class PPO:
             actor_linearised_neuron_logs = get_linearised_neuron_logs(actor_preactivations_flat)  # pyright: ignore[reportArgumentType]
             value_linearised_neuron_logs = get_linearised_neuron_logs(value_preactivations_flat)  # pyright: ignore[reportArgumentType]
 
-            actor_activations_hist_dict = pytree_histogram(actor_activations)
-            value_activations_hist_dict = pytree_histogram(value_activations)
+            # actor_activations_hist_dict = pytree_histogram(actor_activations)
+            # value_activations_hist_dict = pytree_histogram(value_activations)
 
             vf_optim_logs = vf.opt_state["reset_method"].logs
             actor_optim_logs = policy.opt_state["reset_method"].logs
@@ -199,19 +199,19 @@ class PPO:
 
             # Update policy
             policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
-            policy_grads_hist_dict = pytree_histogram(policy_grads["params"])
+            # policy_grads_hist_dict = pytree_histogram(policy_grads["params"])
             policy = policy.apply_gradients(grads=policy_grads, features=actor_feats)
 
             policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
-            policy_param_hist_dict = pytree_histogram(policy.params["params"])
+            # policy_param_hist_dict = pytree_histogram(policy.params["params"])
 
             # Updave vf
             vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
-            vf_grads_hist_dict = pytree_histogram(vf_grads["params"])
+            # vf_grads_hist_dict = pytree_histogram(vf_grads["params"])
             vf = vf.apply_gradients(grads=vf_grads, features=value_feats)
 
             vf_params_flat, _ = jax.flatten_util.ravel_pytree(vf.params)
-            vf_param_hist_dict = pytree_histogram(vf.params["params"])
+            # vf_param_hist_dict = pytree_histogram(vf.params["params"])
 
             metrics = metrics | {
                 "nn/policy_gradient_norm": jnp.linalg.norm(policy_grads_flat),
@@ -220,8 +220,8 @@ class PPO:
                 **prefix_dict("nn/policy_parameters", policy_param_hist_dict),
                 "nn/vf_gradient_norm": jnp.linalg.norm(vf_grads_flat),
                 "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
-                **prefix_dict("nn/vf_gradients", vf_grads_hist_dict),
-                **prefix_dict("nn/vf_parameters", vf_param_hist_dict),
+                # **prefix_dict("nn/vf_gradients", vf_grads_hist_dict),
+                # **prefix_dict("nn/vf_parameters", vf_param_hist_dict),
             }
 
             return (policy, vf, key), metrics

@@ -41,12 +41,13 @@ def run_all_cifar100():
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+
     optimizers = {
         "adam": AdamConfig(learning_rate=1e-3),
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -59,8 +60,9 @@ def run_all_cifar100():
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=100,
-            score_threshold=0.1,
+            update_frequency=1000,
+            # score_threshold=0.025,
+            score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -76,9 +78,9 @@ def run_all_cifar100():
             tx=AdamConfig(learning_rate=1e-3),
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
-            shrink=0.99,
-            perturb=0.005,
-            every_n=10,
+            shrink=1-1e-5,
+            perturb=1e-5,
+            every_n=1,
         ),
     }
 
@@ -104,7 +106,7 @@ def run_all_cifar100():
                 seed=args.seed,
                 batch_size=64,
                 num_tasks=100,
-                num_epochs_per_task=5,
+                num_epochs_per_task=8,
                 # num_workers=0,  # (os.cpu_count() or 0) // 2,
                 dataset_kwargs = {
                     "flatten" : False
