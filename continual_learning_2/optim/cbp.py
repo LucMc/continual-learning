@@ -38,13 +38,13 @@ class CbpOptimState:
     logs: FrozenDict = FrozenDict(
         {"avg_age": 0, "nodes_reset": 0, "avg_util": 0, "std_util": 0}
     )
+    continuous: bool = False
 
 
 # -------------- CBP Weight reset ---------------
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
-    # mean_feature_act: Float[Array, "#neurons"],
     features: Float[Array, "#batch #neurons"],  # Vmap over batches
     decay_rate: Float[Array, ""] = 0.9,
 ):
@@ -58,7 +58,6 @@ def get_updated_utility(  # Add batch dim
 def get_updated_mfa(mean_feature_act, layer_feats, decay_rate):
     return mean_feature_act * decay_rate + (1 - decay_rate) * layer_feats.mean(axis=0)
 
-
 def bias_correction(
     weights,
     biases,
@@ -67,9 +66,6 @@ def bias_correction(
     reset_mask,
     decay_rate
 ):
-    """
-    Gradient explodes for some reason, needs debugging
-    """
     all_layers = list(weights.keys())
     corrected_biases = {}
     corrected_biases[all_layers[0]] = biases[all_layers[0]] # No outbound correction for 1st layer
@@ -101,7 +97,6 @@ def bias_correction(
     
     return corrected_biases
 
-
 # -------------- lowest utility mask ---------------
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
@@ -125,9 +120,9 @@ def get_reset_mask(
 # -------------- Main CBP Optimiser body ---------------
 def cbp(
     seed: int,
-    replacement_rate: float = 1e-4,  # Update to paper hyperparams
+    replacement_rate: float = 1e-4,
     decay_rate: float = 0.99,
-    maturity_threshold: int = 20,
+    maturity_threshold: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str | None = "output",
 ) -> optax.GradientTransformationExtraArgs:
@@ -185,6 +180,8 @@ def cbp(
                 # _mean_feature_act,
                 _features,
             )
+            bias_corrected_utility = jax.tree.map(lambda u, a: u/((1-decay_rate)**(a+1)), _utility, state.ages)
+
 
             reset_mask = jax.tree.map(
                 partial(
@@ -192,8 +189,16 @@ def cbp(
                     maturity_threshold=maturity_threshold,
                     replacement_rate=replacement_rate,
                 ),
-                _utility,
+                bias_corrected_utility,
                 state.ages,
+            )
+
+            _ages = jax.tree.map(
+                lambda a, m: jnp.where(
+                    m, jnp.zeros_like(a), a+1
+                ),
+                state.ages,
+                reset_mask,
             )
 
             # reset weights given mask
@@ -208,16 +213,7 @@ def cbp(
                 partial(get_updated_mfa, decay_rate=decay_rate), state.mean_feature_act, _features
             )
 
-            # Update ages (clip to prevent huge values)
-            _ages = jax.tree.map(
-                lambda a, m: jnp.where(
-                    m, jnp.zeros_like(a), a+1
-                ),
-                state.ages,
-                reset_mask,
-            )
-
-            # zero
+            # zero biases of reset nodes
             zeroed_biases = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
                 reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name])},
@@ -225,21 +221,20 @@ def cbp(
             )
 
             # Bias correction
-            # corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
-            #     weights,  # Uses original weights
-            #     zeroed_biases,
-            #     _mean_feature_act,
-            #     _ages,  # 2
-            #     reset_mask
-            # )
-            corrected_biases = biases # TODO: DISABLED FOR NOW
+            corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
+                weights,  # Uses original weights
+                zeroed_biases,
+                _mean_feature_act,
+                _ages,  # 2
+                reset_mask
+            )
 
             new_params = {}
             _logs = {k: 0 for k in state.logs}
 
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
-            avg_util = jax.tree.map(lambda v: v.mean(), _utility)
-            std_util = jax.tree.map(lambda v: v.std(), _utility)
+            avg_util = jax.tree.map(lambda v: v.mean(), bias_corrected_utility)
+            std_util = jax.tree.map(lambda v: v.std(), bias_corrected_utility)
 
             # Logging
             for layer_name in weights.keys():  # Exclude output layer

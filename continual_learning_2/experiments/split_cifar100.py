@@ -10,6 +10,8 @@ from continual_learning_2.trainers.continual_supervised_learning import (
 from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.configs import (
     AdamConfig,
+    AdamwConfig,
+    MuonConfig,
     CbpConfig,
     RedoConfig,
     RegramaConfig,
@@ -33,6 +35,8 @@ class Args:
     resume: bool = False
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
+    postfix: str | None = None # Postfix name tag
+    base_optim: Literal["adam", "adamw", "muon"] = "adam"
 
 def run_all_cifar100():
     args = tyro.cli(Args)
@@ -41,25 +45,30 @@ def run_all_cifar100():
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    base_optimizers = {"adam": AdamConfig(learning_rate=1e-3), 
+                       "muon": MuonConfig(learning_rate=1e-3),
+                       "adamw": AdamwConfig(learning_rate=1e-3)}
+    
+    base_optim = base_optimizers[args.base_optim]
 
     optimizers = {
-        "adam": AdamConfig(learning_rate=1e-3),
+        "standard": base_optim,
         "regrama": RegramaConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             update_frequency=1000,
             score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
         "ccbp": CcbpConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             seed=args.seed,
             decay_rate=0.99,
             replacement_rate=0.01,
             update_frequency=100,
         ),
         "redo": RedoConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             update_frequency=1000,
             # score_threshold=0.025,
             score_threshold=0.0095,
@@ -67,7 +76,7 @@ def run_all_cifar100():
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
         "cbp": CbpConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             decay_rate=0.99,
             replacement_rate=1e-5,
             maturity_threshold=100,
@@ -75,7 +84,7 @@ def run_all_cifar100():
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             param_noise_fn=jax.nn.initializers.he_uniform(),
             seed=args.seed,
             shrink=1-1e-5,
@@ -116,7 +125,7 @@ def run_all_cifar100():
                 resume=False,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_{args.seed}",
+                run_name=f"{opt_name}_{args.seed}" + (f"_{args.postfix}" if args.postfix else ""),
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
                 group="split_cifar100",

@@ -100,19 +100,34 @@ def continuous_reset_weights(
     for idx, layer_name in enumerate(all_layer_names[:-1]):
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-        threshold = 0.8
-        steepness = 16
+        threshold = 0.95 # Where is the hard threshold
+        steepness = 16 # How soft before that?
+
         # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
+        # transformed_utilities = jax.tree.map(
+        #     lambda x: 1 - jnp.exp(-steepness * x + (steepness - 1)), utilities
+        # )  # Sigmoid
+
         transformed_utilities = jax.tree.map(
-            lambda x: 1 - jnp.exp(-steepness * x + (steepness - 1)), utilities
+            lambda x: 1 - jnp.exp(-steepness * x + steepness*threshold), utilities
         )  # Sigmoid
+
+        # Softer reset to consider experimenting with!
+        # threshold = 0.8 # Where is the hard threshold
+        # steepness = 3.3 # How soft before that?
+        # replacement_rate /=3 (at least)
+        # transformed_utilities = jax.tree.map(
+        #     lambda x: 2 - 2jnp.exp(-steepness * (x-threshold)), utilities
+        # )  # Sigmoid
+
         # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
         transformed_utilities = jax.tree.map(lambda x: jnp.clip(x, 0, 1), transformed_utilities)
 
-        reset_prob = replacement_rate * (1 - transformed_utilities[layer_name])
-        keep_prob = 1 - reset_prob
+        # Proportion reset
+        reset_prop = replacement_rate * (1 - transformed_utilities[layer_name])
+        keep_prop = 1 - reset_prob
 
-        weights[layer_name] = (keep_prob * weights[layer_name]) + (reset_prob * init_weights)
+        weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prob * init_weights)
 
         # Reset outgoing weights
         if idx + 1 < len(all_layer_names):
@@ -137,11 +152,11 @@ def continuous_reset_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
 
-            out_reset_prob = replacement_rate * (1 - expanded_utils)
-            out_keep_prob = 1 - out_reset_prob
+            out_reset_prop = replacement_rate * (1 - expanded_utils)
+            out_keep_prop = 1 - out_reset_prob
             weights[next_layer] = (
-                out_keep_prob * weights[next_layer]
-            )  # + (out_reset_prob * out_init_weights) # Decay towards zero
+                out_keep_prop * weights[next_layer]
+            )  # + (out_reset_prop * out_init_weights) # Decay towards zero
 
         effective_reset = replacement_rate * (1 - transformed_utilities[layer_name]).mean()
 
