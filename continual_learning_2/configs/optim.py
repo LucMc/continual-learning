@@ -10,7 +10,7 @@ import optax
 class OptimizerConfig:
     learning_rate: float | optax.Schedule
 
-@dataclass(frozen=True, unsafe_hash=True)
+@dataclass(frozen=True)
 class ResetMethodConfig:
     tx: OptimizerConfig
 
@@ -43,20 +43,20 @@ class ShrinkAndPerterbConfig(ResetMethodConfig):
     perturb: float = 0.01
     every_n: int = 1
 
-@dataclass(frozen=True, unsafe_hash=True)
+@dataclass(frozen=True)
 class RedoConfig(ResetMethodConfig):
+    update_frequency: int
+    score_threshold: float
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
-    update_frequency: int = 100
-    score_threshold: float = 0.1
     
 
-@dataclass(frozen=True, unsafe_hash=True)
+@dataclass(frozen=True)
 class RegramaConfig(ResetMethodConfig):
+    update_frequency: int
+    score_threshold: float
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
-    update_frequency: int = 100
-    score_threshold: float = 0.1
 
 @dataclass(frozen=True)
 class CbpConfig(ResetMethodConfig):

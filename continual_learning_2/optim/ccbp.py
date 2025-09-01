@@ -125,9 +125,9 @@ def continuous_reset_weights(
 
         # Proportion reset
         reset_prop = replacement_rate * (1 - transformed_utilities[layer_name])
-        keep_prop = 1 - reset_prob
+        keep_prop = 1 - reset_prop
 
-        weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prob * init_weights)
+        weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prop * init_weights)
 
         # Reset outgoing weights
         if idx + 1 < len(all_layer_names):
@@ -153,7 +153,7 @@ def continuous_reset_weights(
             )
 
             out_reset_prop = replacement_rate * (1 - expanded_utils)
-            out_keep_prop = 1 - out_reset_prob
+            out_keep_prop = 1 - out_reset_prop
             weights[next_layer] = (
                 out_keep_prop * weights[next_layer]
             )  # + (out_reset_prop * out_init_weights) # Decay towards zero

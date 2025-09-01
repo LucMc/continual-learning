@@ -11,7 +11,7 @@ num_gpus=$(nvidia-smi --list-gpus | wc -l)
 max_jobs_per_gpu="${2:-1}"
 
 algos=("redo" "regrama" "adam" "cbp" "ccbp" "shrink_and_perturb")
-seeds=(0 1 2 3 4)
+seeds=(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
 
 echo "Running $script_name with up to $max_jobs_per_gpu jobs per GPU across $num_gpus GPUs"
 
