@@ -91,7 +91,7 @@ def continuous_reset_weights(
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     replacement_rate: Float[Array, ""] = 0.001,
-    sharpness: Float[Array, ""] = 1000, # How linear/exponential? inf=hard resets
+    sharpness: Float[Array, ""] = 1000, # How linear/expone)ntial? inf=hard resets
     threshold: Float[Array, ""] = 0.01, # Where is the cut off to hard reset
 ):
     all_layer_names = list(weights.keys())
@@ -103,7 +103,8 @@ def continuous_reset_weights(
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
-        transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
+        # transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
+        transform = lambda x: jnp.clip(jnp.exp(-sharpness * (x - threshold)), 0, 1) # Naturally 0-1
         transformed_utilities = jax.tree.map(transform, utilities)
 
         reset_prop = transformed_utilities[layer_name]
@@ -161,7 +162,7 @@ def ccbp(
     replacement_rate: float = 0.5,
     sharpness: float = 1000,
     threshold: float = 0.008,
-    decay_rate: float = 0.9,
+    decay_rate: float = 0.99,
     update_frequency: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",

@@ -64,22 +64,21 @@ def fetch_and_process_data(entity: str, project: str, group: str, metric: str) -
         
         runs_per_algo[algo_name].add(seed_id)
         
-        try:
-            # Try to get history with the metric
-            history = run.history(keys=[metric, "_step"])
-            assert not history.empty, f"Warning: Run {run.name} has no data for metric '{metric}'"
-            
-            data_points = 0
-            for _, row in history.iterrows():
-                step = row.get("_step")
-                value = row.get(metric)
-                if pd.notna(step) and pd.notna(value):
-                    binned_step = int(round(step / 10_000) * 10_000)
-                    algo_data[algo_name][binned_step][seed_id].append(value)
-                    data_points += 1
-            
-            assert data_points > 0, f"Warning: Run {run.name} has metric but no valid data points")
-            print(f"  Run {run.name}: {data_points} data points")
+        # Try to get history with the metric
+        history = run.history(keys=[metric, "_step"])
+        assert not history.empty, f"Warning: Run {run.name} has no data for metric '{metric}'"
+        
+        data_points = 0
+        for _, row in history.iterrows():
+            step = row.get("_step")
+            value = row.get(metric)
+            if pd.notna(step) and pd.notna(value):
+                binned_step = int(round(step / 10_000) * 10_000)
+                algo_data[algo_name][binned_step][seed_id].append(value)
+                data_points += 1
+        
+        assert data_points > 0, f"Warning: Run {run.name} has metric but no valid data points"
+        print(f"  Run {run.name}: {data_points} data points")
     
     print("\nUnique seeds per algorithm:")
     for algo, seeds in runs_per_algo.items():

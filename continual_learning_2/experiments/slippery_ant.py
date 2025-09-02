@@ -63,10 +63,10 @@ def run_all_slippery_ant():
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.99,
-            replacement_rate=0.01,
-            sharpness=1000,
-            threshold=0.08,
+            decay_rate=0.9,
+            # replacement_rate=0.01,
+            sharpness=20,
+            threshold=0.01,
             update_frequency=1000
         ),
         "redo": RedoConfig(

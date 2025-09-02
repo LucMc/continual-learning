@@ -9,7 +9,7 @@
 #SBATCH --time=02-23:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
-#SBATCH --array=0-3   # adjust based on num_algos * num_seeds - 1
+#SBATCH --array=0-4   # adjust based on num_algos * num_seeds - 1
 
 # --- Configuration ---
 VENV_DIR="../../../.venv"
