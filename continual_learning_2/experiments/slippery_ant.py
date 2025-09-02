@@ -65,7 +65,9 @@ def run_all_slippery_ant():
             seed=args.seed,
             decay_rate=0.99,
             replacement_rate=0.01,
-            update_frequency=1000,
+            sharpness=1000,
+            threshold=0.08,
+            update_frequency=1000
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -150,7 +152,7 @@ def run_all_slippery_ant():
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_{args.seed}",
+                run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
                 group="slippery_ant_full",

@@ -91,6 +91,8 @@ def continuous_reset_weights(
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     replacement_rate: Float[Array, ""] = 0.001,
+    sharpness: Float[Array, ""] = 1000, # How linear/exponential? inf=hard resets
+    threshold: Float[Array, ""] = 0.01, # Where is the cut off to hard reset
 ):
     all_layer_names = list(weights.keys())
     logs = {}
@@ -100,31 +102,12 @@ def continuous_reset_weights(
     for idx, layer_name in enumerate(all_layer_names[:-1]):
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-        threshold = 0.95 # Where is the hard threshold
-        steepness = 16 # How soft before that?
 
-        # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
-        # transformed_utilities = jax.tree.map(
-        #     lambda x: 1 - jnp.exp(-steepness * x + (steepness - 1)), utilities
-        # )  # Sigmoid
+        transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
+        transformed_utilities = jax.tree.map(transform, utilities)
 
-        transformed_utilities = jax.tree.map(
-            lambda x: 1 - jnp.exp(-steepness * x + steepness*threshold), utilities
-        )  # Sigmoid
+        reset_prop = transformed_utilities[layer_name]
 
-        # Softer reset to consider experimenting with!
-        # threshold = 0.8 # Where is the hard threshold
-        # steepness = 3.3 # How soft before that?
-        # replacement_rate /=3 (at least)
-        # transformed_utilities = jax.tree.map(
-        #     lambda x: 2 - 2jnp.exp(-steepness * (x-threshold)), utilities
-        # )  # Sigmoid
-
-        # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
-        transformed_utilities = jax.tree.map(lambda x: jnp.clip(x, 0, 1), transformed_utilities)
-
-        # Proportion reset
-        reset_prop = replacement_rate * (1 - transformed_utilities[layer_name])
         keep_prop = 1 - reset_prop
 
         weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prop * init_weights)
@@ -152,13 +135,14 @@ def continuous_reset_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
 
-            out_reset_prop = replacement_rate * (1 - expanded_utils)
+            out_reset_prop = expanded_utils
             out_keep_prop = 1 - out_reset_prop
+
             weights[next_layer] = (
                 out_keep_prop * weights[next_layer]
             )  # + (out_reset_prop * out_init_weights) # Decay towards zero
 
-        effective_reset = replacement_rate * (1 - transformed_utilities[layer_name]).mean()
+        effective_reset = transformed_utilities[layer_name].mean()
 
         logs[layer_name] = {
             "nodes_reset": effective_reset,
@@ -175,6 +159,8 @@ def continuous_reset_weights(
 def ccbp(
     seed: int,
     replacement_rate: float = 0.5,
+    sharpness: float = 1000,
+    threshold: float = 0.008,
     decay_rate: float = 0.9,
     update_frequency: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
@@ -274,6 +260,8 @@ def ccbp(
                 _utility,
                 weight_init_fn,
                 replacement_rate,
+                sharpness,
+                threshold
             )
 
             # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction

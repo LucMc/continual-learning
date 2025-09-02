@@ -71,5 +71,7 @@ class CcbpConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     replacement_rate: float = 0.1
+    sharpness: float = 1000
+    threshold: float = 0.008
     decay_rate: float = 0.99
     update_frequency: float = 100

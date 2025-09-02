@@ -64,7 +64,7 @@ def run_all_cifar100():
             tx=base_optim,
             seed=args.seed,
             decay_rate=0.99,
-            replacement_rate=0.01,
+            replacement_rate=0.03,
             update_frequency=100,
         ),
         "redo": RedoConfig(
