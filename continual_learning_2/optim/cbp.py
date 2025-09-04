@@ -215,7 +215,7 @@ def cbp(
 
             # zero biases of reset nodes
             zeroed_biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b),
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
                 reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name])},
                 biases,
             )

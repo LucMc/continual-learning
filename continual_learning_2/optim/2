@@ -214,10 +214,8 @@ def reset_optim_params(tx_state, reset_mask):
                     momentum[next_layer]["kernel"] = jnp.where(
                         out_momentum_mask, jnp.zeros_like(momentum[next_layer]["kernel"]), momentum[next_layer]["kernel"]
                     )
-                    # Reset bias too
-                    momentum[layer_name]["bias"] = jnp.where(reset_mask[layer_name][None:], jnp.zeros_like(momentum[layer_name]["bias"]), momentum[layer_name]["bias"])
-
-            return momentum 
+                    momentum[layer_name]["bias"] = jnp.where(in_momentum_mask, jnp.zeros_like(momentum[layer_name]["bias"]), momentum[layer_name]["bias"])
+                return momentum 
 
         new_state_dict = {}
 

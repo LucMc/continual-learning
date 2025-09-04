@@ -106,7 +106,7 @@ def regrama(
 
             # Update bias
             _biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b), reset_mask, biases
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b), reset_mask, biases
             )
 
             new_params = {}
@@ -128,6 +128,7 @@ def regrama(
 
             return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
-        return jax.lax.cond(state.time_step % update_frequency == 0, _regrama, no_update, updates)
+        condition = jnp.logical_and(state.time_step > 0, (state.time_step % update_frequency == 0))
+        return jax.lax.cond(condition, _regrama, no_update, updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)

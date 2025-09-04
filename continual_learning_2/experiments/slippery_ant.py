@@ -65,13 +65,13 @@ def run_all_slippery_ant():
             seed=args.seed,
             decay_rate=0.9,
             # replacement_rate=0.01,
-            sharpness=20,
-            threshold=0.01,
+            sharpness=10,
+            threshold=0.5,
             update_frequency=1000
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=1000,
+            update_frequency=200_000,
             score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),

@@ -54,9 +54,8 @@ def get_score(
 # -------------- Main Redo Optimiser body ---------------
 def redo(
     seed: int,
-    replacement_rate: float = 0.5,  # Update to paper hyperparams
-    update_frequency: int = 100,
-    score_threshold: float = 0.1,
+    update_frequency: int = 1000,
+    score_threshold: float = 0.0095,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
 ) -> optax.GradientTransformationExtraArgs:
     """ Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902) """
@@ -99,6 +98,7 @@ def redo(
                 for key, feature_tuple in zip(features.keys(), features.values())
             }
             reset_mask = jax.tree.map(get_reset_mask, scores)
+            _rng, key = random.split(state.rng)
             key_tree = utils.gen_key_tree(state.rng, weights)
 
             # reset weights given mask
@@ -108,7 +108,7 @@ def redo(
 
             # Update bias
             _biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b), reset_mask, biases
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b), reset_mask, biases
             )
 
             new_params = {}
@@ -121,7 +121,7 @@ def redo(
                 }
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1)
+            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng)
             # new_params.update(excluded)  # TODO
 
             # Reset optim, i.e. Adamw params
@@ -130,6 +130,7 @@ def redo(
 
             return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
-        return jax.lax.cond(state.time_step % update_frequency == 0, _redo, no_update, updates)
+        condition = jnp.logical_and(state.time_step > 0, (state.time_step % update_frequency == 0))
+        return jax.lax.cond(condition , _redo, no_update, updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
