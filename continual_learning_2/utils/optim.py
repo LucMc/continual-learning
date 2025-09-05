@@ -75,13 +75,14 @@ def attach_reset_method(
         tx = transforms[0][1]
         reset_method = transforms[1][1]
 
+        raw_grads = updates
         updates, new_state["tx"] = tx.update(updates, state["tx"], params, **extra_args)
         new_params_with_opt = optax.apply_updates(params, updates)
 
         # Reset method
         new_params_with_reset, new_state["reset_method"], new_state["tx"] = (
             reset_method.update(
-                updates,
+                raw_grads, # Use original grads before optim transform
                 state["reset_method"],
                 new_params_with_opt,
                 features=features,

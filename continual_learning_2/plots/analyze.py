@@ -190,7 +190,7 @@ def create_chart(df: pd.DataFrame, metric: str, title: str = "") -> alt.Chart:
 def main(
     wandb_entity: str,
     wandb_project: str = "crl_experiments",
-    group: str = "default_group",
+    group: str | None ="default_group",
     metric: str = "eval_loss",
     output_dir: str = "./plots",
     save_html: bool = False,

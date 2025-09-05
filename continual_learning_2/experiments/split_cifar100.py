@@ -55,7 +55,7 @@ def run_all_cifar100():
         "standard": base_optim,
         "regrama": RegramaConfig(
             tx=base_optim,
-            update_frequency=1000,
+            update_frequency=100,
             score_threshold=0.0095,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
@@ -69,7 +69,7 @@ def run_all_cifar100():
         ),
         "redo": RedoConfig(
             tx=base_optim,
-            update_frequency=1000,
+            update_frequency=100,
             # score_threshold=0.025,
             score_threshold=0.0095,
             seed=args.seed,

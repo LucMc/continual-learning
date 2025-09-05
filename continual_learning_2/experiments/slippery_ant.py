@@ -71,8 +71,8 @@ def run_all_slippery_ant():
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=200_000,
-            score_threshold=0.0095,
+            update_frequency=1000,
+            score_threshold=0.055,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -80,7 +80,7 @@ def run_all_slippery_ant():
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.99,
             replacement_rate=1e-5,
-            maturity_threshold=100,
+            maturity_threshold=1000,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -90,7 +90,7 @@ def run_all_slippery_ant():
             seed=args.seed,
             shrink=1-0.001,
             perturb=0.005,
-            every_n=100,
+            every_n=1000,
         ),
     }
 
@@ -155,7 +155,7 @@ def run_all_slippery_ant():
                 run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_ant_full",
+                group="slippery_ant_full2",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),

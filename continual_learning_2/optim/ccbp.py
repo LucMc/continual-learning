@@ -42,32 +42,6 @@ class CcbpOptimState(CbpOptimState):
     )
 
 
-# -------------- CCBP Weight reset ---------------
-# def get_updated_utility(  # Add batch dim
-#     out_w_mag: Float[Array, "#weights"],
-#     utility: Float[Array, "#neurons"],
-#     features: Float[Array, "#batch #neurons"],
-#     decay_rate: Float[Array, ""] = 0.9,
-# ) -> Float[Array, "#neurons"]:
-#     # TODO: Mean activations etc over the whole network instead of per layer
-#     # Remove batch dim from some inputs just in case
-#     reduce_axis = tuple(range(features.ndim - 1))
-#     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-#
-#     # Running stats normalising both out and in utils
-#     updated_utility = (
-#         (decay_rate * utility)
-#         + (1 - decay_rate)
-#         * 0.5
-#         * (
-#             (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
-#             + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
-#         )
-#     ).flatten()  # Arr[#neurons]
-#     # avg neuron is arround 1 utility, using relu means min act of 0
-#
-#     return updated_utility
-
 def get_updated_utility(
     grads: Float[Array, "#batch #inweights #neurons"],
     utility: Float[Array, "#neurons"],

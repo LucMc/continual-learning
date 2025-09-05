@@ -40,7 +40,7 @@ class ProcessCIFAR(grain.RandomMapTransform):
         # Standardisation
         mean, std = (0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)
         mean, std = np.broadcast_to(mean, x.shape), np.broadcast_to(std, x.shape)
-        x = x - mean / std
+        x = (x - mean) / std
 
         # Misc transforms
         x = self.process_image(rng.integers(0, np.iinfo(np.int64).max), x)
