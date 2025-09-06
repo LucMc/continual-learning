@@ -1,11 +1,13 @@
 import os
 import jax
+import jax.numpy as jnp
 import tyro
 import time
 from chex import dataclass
 from typing import Literal
 from continual_learning_2.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
+    MaskedClassificationCSLTrainer,
 )
 from continual_learning_2.configs.models import CNNConfig
 from continual_learning_2.configs import (
@@ -37,6 +39,12 @@ class Args:
     include: list[str] = field(default_factory=list)
     postfix: str | None = None # Postfix name tag
     base_optim: Literal["adam", "adamw", "muon"] = "adam"
+    # Experiment controls
+    num_tasks: int = 10  # 10 tasks x 10 classes each is standard
+    num_epochs_per_task: int = 2
+    batch_size: int = 64
+    use_masked_loss: bool = True  # Mask loss to current task's classes
+    model_dtype: Literal["f32", "bf16"] = "f32"  # f32 tends to be stabler for CIFAR-100
 
 def run_all_cifar100():
     args = tyro.cli(Args)
@@ -106,16 +114,22 @@ def run_all_cifar100():
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
         start = time.time()
-        trainer = HeadResetClassificationCSLTrainer(
+        # Choose trainer: masked loss is recommended for split-class tasks
+        TrainerCls = MaskedClassificationCSLTrainer if args.use_masked_loss else HeadResetClassificationCSLTrainer
+
+        trainer = TrainerCls(
             seed=args.seed,
-            model_config=CNNConfig(output_size=100),
+            model_config=CNNConfig(
+                output_size=100,
+                dtype=jnp.float32 if args.model_dtype == "f32" else jnp.bfloat16,
+            ),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="split_cifar100",
                 seed=args.seed,
-                batch_size=64,
-                num_tasks=100,
-                num_epochs_per_task=8,
+                batch_size=args.batch_size,
+                num_tasks=args.num_tasks,
+                num_epochs_per_task=args.num_epochs_per_task,
                 # num_workers=0,  # (os.cpu_count() or 0) // 2,
                 dataset_kwargs = {
                     "flatten" : False

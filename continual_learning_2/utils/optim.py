@@ -8,7 +8,6 @@ import flax
 from flax.training.train_state import TrainState
 import optax
 
-import continual_learning.optim as optim
 from typing import Callable
 from copy import deepcopy
 

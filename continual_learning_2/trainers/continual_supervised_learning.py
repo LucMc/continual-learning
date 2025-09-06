@@ -93,23 +93,19 @@ class CSLTrainerBase(abc.ABC):
         self.ckpt_mgr = ocp.CheckpointManager(
             logs_cfg.checkpoint_dir / f"{logs_cfg.run_name}_{seed}",
             options=ocp.CheckpointManagerOptions(
-                save_decision_policy=ocp_mgrs.AnySavePolicy(
-                    [
-                        ocp_mgrs.FixedIntervalPolicy(logs_cfg.save_interval),
-                        ocp_mgrs.save_decision_policy.PreemptionCheckpointingPolicy(),
-                    ]
-                ),
-                preservation_policy=ocp_mgrs.AnyPreservationPolicy(
-                    [
-                        ocp_mgrs.LatestN(n=1),
-                        ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
-                        ocp_mgrs.BestN(  # Top 3
-                            n=3,
-                            get_metric_fn=lambda x: x["metrics/test_accuracy"],
-                            reverse=True,
-                        ),
-                    ]
-                ),
+                save_decision_policy=ocp_mgrs.AnySavePolicy([
+                    ocp_mgrs.FixedIntervalPolicy(logs_cfg.save_interval),
+                    ocp_mgrs.save_decision_policy.PreemptionCheckpointingPolicy(),
+                ]),
+                preservation_policy=ocp_mgrs.AnyPreservationPolicy([
+                    ocp_mgrs.LatestN(n=1),
+                    ocp_mgrs.EveryNSeconds(60 * 60),  # Hourly checkpoints
+                    ocp_mgrs.BestN(  # Top 3
+                        n=3,
+                        get_metric_fn=lambda x: x["metrics/test_accuracy"],
+                        reverse=True,
+                    ),
+                ]),
             ),
         )
 
@@ -121,7 +117,7 @@ class CSLTrainerBase(abc.ABC):
         raise NotImplementedError
 
     def save(self, dataloader: grain.DataLoader, metrics: dict[str, float] | None):
-        return # TODO: Fix checkpointing
+        return  # TODO: Fix checkpointing
         self.ckpt_mgr.save(
             self.total_steps,
             args=ocp.args.Composite(
@@ -261,7 +257,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
-                **prefix_dict("optimizer", optim_logs)
+                **prefix_dict("optimizer", optim_logs),
             },
         )
 
@@ -277,9 +273,10 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         key, dropout_key = jax.random.split(key)
 
-        # NOTE: this is what's different to the normal ClassificationCSLTrainer
-        active_labels = jnp.any(y.astype(bool), axis=0)
-        loss_mask = jnp.broadcast_to(active_labels, y.shape)
+        # Batch-level task mask (union of labels in the batch).
+        # If you mix tasks within a batch, provide a per-example mask instead.
+        active_labels = jnp.any(y.astype(bool), axis=0)             # [K]
+        loss_mask = jnp.broadcast_to(active_labels, y.shape)         # [B, K]
 
         def loss_fn(params):
             logits, intermediates = network_state.apply_fn(
@@ -289,38 +286,53 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
                 rngs={"dropout": dropout_key},
                 mutable=("activations", "preactivations"),
             )
-            # NOTE:                         we use the mask here vvvvv
-            return optax.softmax_cross_entropy(logits, y, where=loss_mask).mean(), (
-                logits,
-                intermediates,
-            )
+            # Mask the denominator by setting inactive logits to -inf.
+            masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
+            loss = optax.safe_softmax_cross_entropy(masked_logits, y).mean()
+            # Return aux so value_and_grad(has_aux=True) works and we can log.
+            return loss, (logits, intermediates)
 
-        (loss, (logits, intermediates)), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            network_state.params
+        (loss, (logits, intermediates)), grads = jax.value_and_grad(
+            loss_fn, has_aux=True
+        )(network_state.params)
+
+        # Compute accuracy with the same mask used in the loss.
+        masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
+        accuracy = jnp.mean(
+            jnp.argmax(masked_logits, axis=-1) == jnp.argmax(y, axis=-1)
         )
-        accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
-        activations = intermediates["activations"]
+        # ----- logging -----
+        activations_full = intermediates["activations"]
+        activations = jax.tree_util.tree_map(flatten_last, activations_full)
+
         activations_hist_dict = pytree_histogram(activations)
         activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
+            k: v[0]  # first sample's flattened features
             for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
         }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
-        srank_logs = jax.tree.map(compute_srank, activations_flat)
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)
+        srank_logs = jax.tree_util.tree_map(compute_srank, activations_flat)
 
         preactivations = intermediates["preactivations"]
         preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
+            k: v[0]
             for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
         }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)
 
-        grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
-        grads_hist_dict = pytree_histogram(grads["params"])
+        # Flatten only the parameter grads for norms/histograms.
+        grads_params = grads["params"]
+        grads_flat, _ = jax.flatten_util.ravel_pytree(grads_params)
+        grads_hist_dict = pytree_histogram(grads_params)
 
-        network_state = network_state.apply_gradients(grads=grads, features=activations)
-        network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
+        # Keep features=activations_full for your optimizer’s feature use.
+        network_state = network_state.apply_gradients(
+            grads=grads, features=activations_full
+        )
+        network_params_flat, _ = jax.flatten_util.ravel_pytree(
+            network_state.params["params"]
+        )
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
         return (
@@ -394,7 +406,7 @@ if __name__ == "__main__":
     # optim_conf = RedoConfig(
     #         tx=AdamConfig(learning_rate=1e-3)
     #     )
-    optim_conf = tx=AdamConfig(learning_rate=1e-3)
+    optim_conf = AdamConfig(learning_rate=1e-3)
     trainer = HeadResetClassificationCSLTrainer(
         seed=SEED,
         model_config=CNNConfig(output_size=10),

@@ -154,25 +154,33 @@ def build_events_df(
     return df
 
 
-def create_collapse_chart(df: pd.DataFrame, title: str, stack_by_algorithm: bool = True) -> alt.Chart:
+def create_collapse_chart(
+    df: pd.DataFrame,
+    title: str,
+    bin_size: int,
+    stack_by_algorithm: bool = True
+) -> alt.Chart:
+    bin_m = bin_size / 1_000_000.0
+    df = df.copy()
+    # Your df["step"] is a bin *center* (rounded to a multiple). Build edges around it.
+    df['bin_start'] = df['step'] - bin_m / 2.0
+    df['bin_end']   = df['step'] + bin_m / 2.0
+
     base = alt.Chart(df).encode(
-        x=alt.X(
-            "step:Q",
-            title="Training Steps (Millions)",
-            scale=alt.Scale(nice=True),
-        )
+        x=alt.X('bin_start:Q', title='Training Steps (Millions)', scale=alt.Scale(nice=False)),
+        x2='bin_end:Q',
     )
 
     if stack_by_algorithm:
         base = base.encode(
             color=alt.Color(
-                "algorithm:N",
-                title="Algorithm",
+                'algorithm:N',
+                title='Algorithm',
                 legend=alt.Legend(
                     title=None,
-                    orient="bottom-left",
-                    fillColor="rgba(255,255,255,1)",
-                    strokeColor="gray",
+                    orient='bottom-left',
+                    fillColor='rgba(255,255,255,1)',
+                    strokeColor='gray',
                     padding=5,
                     cornerRadius=3,
                 ),
@@ -180,19 +188,23 @@ def create_collapse_chart(df: pd.DataFrame, title: str, stack_by_algorithm: bool
         )
 
     tooltip_fields = [
-        alt.Tooltip("step:Q", title="Step (M)", format=".2f"),
-        alt.Tooltip("count():Q", title="# Collapses"),
+        alt.Tooltip('bin_start:Q', title='Bin start (M)', format='.2f'),
+        alt.Tooltip('bin_end:Q', title='Bin end (M)', format='.2f'),
+        alt.Tooltip('count():Q', title='# Collapses'),
     ]
     if stack_by_algorithm:
-        tooltip_fields.append(alt.Tooltip("algorithm:N", title="Algorithm"))
+        tooltip_fields.append(alt.Tooltip('algorithm:N', title='Algorithm'))
 
-    bars = base.mark_bar().encode(
-        y=alt.Y("count():Q", title="Policy Collapses"),
-        tooltip=tooltip_fields,
+    chart = (
+        base.mark_bar()
+            .encode(y=alt.Y('count():Q', title='Policy Collapses'),
+                    tooltip=tooltip_fields)
+            .properties(width=1000, height=400, title=title)
+            .configure_axis(grid=True, gridOpacity=0.3)
+            .configure_bar(binSpacing=0)
+            .interactive()
     )
-
-    chart = bars.properties(width=1000, height=400, title=title).configure_axis(grid=True, gridOpacity=0.3)
-    return chart.interactive()
+    return chart
 
 
 def main(
@@ -201,7 +213,7 @@ def main(
     group: str | None = "default_group",
     metric: str = "charts/mean_episodic_return",
     collapse_threshold: float = 3000.0,
-    bin_size: int = 10_000,
+    bin_size: int = 10_000_000,
     allow_multiple: bool = True,
     stack_by_algorithm: bool = True,
     output_dir: str = "./plots",
@@ -233,7 +245,7 @@ def main(
         return
 
     title = f"{group.replace('_', ' ').title()}: Policy Collapses Over Time"
-    chart = create_collapse_chart(df_events, title=title, stack_by_algorithm=stack_by_algorithm)
+    chart = create_collapse_chart(df_events, title=title, bin_size=bin_size, stack_by_algorithm=stack_by_algorithm)
 
     ext = "html" if save_html else "svg"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
