@@ -1,19 +1,34 @@
-from functools import partial
-from typing import Callable, Tuple
-
 import flax
-import jax
-import jax.numpy as jnp
-import jax.random as random
-import optax
 from chex import dataclass
+from flax import struct
+import flax.linen as nn
 from flax.core import FrozenDict
+from flax.typing import FrozenVariableDict
+from jax.random import PRNGKey
+from jaxlib.mlir.dialects.sparse_tensor import out
 from jaxtyping import (
     Array,
     Float,
+    Bool,
     PRNGKeyArray,
     PyTree,
+    jaxtyped,
+    TypeCheckError,
+    Scalar,
+    Int,
 )
+from beartype import beartype as typechecker
+from flax.training.train_state import TrainState
+from typing import Tuple, Callable
+from chex import dataclass
+from numpy import mean
+import optax
+import jax
+import jax.random as random
+import jax.numpy as jnp
+from copy import deepcopy
+from functools import partial
+from dataclasses import field
 
 import continual_learning_2.utils.optim as utils
 from continual_learning_2.optim.cbp import CbpOptimState
@@ -26,6 +41,32 @@ class CcbpOptimState(CbpOptimState):
         {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
     )
 
+
+# -------------- CCBP Weight reset ---------------
+# def get_updated_utility(  # Add batch dim
+#     out_w_mag: Float[Array, "#weights"],
+#     utility: Float[Array, "#neurons"],
+#     features: Float[Array, "#batch #neurons"],
+#     decay_rate: Float[Array, ""] = 0.9,
+# ) -> Float[Array, "#neurons"]:
+#     # TODO: Mean activations etc over the whole network instead of per layer
+#     # Remove batch dim from some inputs just in case
+#     reduce_axis = tuple(range(features.ndim - 1))
+#     mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
+#
+#     # Running stats normalising both out and in utils
+#     updated_utility = (
+#         (decay_rate * utility)
+#         + (1 - decay_rate)
+#         * 0.5
+#         * (
+#             (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
+#             + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
+#         )
+#     ).flatten()  # Arr[#neurons]
+#     # avg neuron is arround 1 utility, using relu means min act of 0
+#
+#     return updated_utility
 
 def get_updated_utility(
     grads: Float[Array, "#batch #inweights #neurons"],
@@ -49,9 +90,7 @@ def continuous_reset_weights(
     weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = 0.012,
-    sharpness: Float[Array, ""] = 16, # How linear/expone)ntial? inf=hard resets
-    threshold: Float[Array, ""] = 0.95, # Where is the cut off to hard reset
+    replacement_rate: Float[Array, ""] = 0.001,
 ):
     all_layer_names = list(weights.keys())
     logs = {}
@@ -61,13 +100,29 @@ def continuous_reset_weights(
     for idx, layer_name in enumerate(all_layer_names[:-1]):
         # Reset incoming weights
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
+        threshold = 0.95 # Where is the hard threshold
+        steepness = 16 # How soft before that?
 
-        # transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
-        transform = lambda x: jnp.clip(jnp.exp(-sharpness * (x - threshold)), 0, 1)
-        transformed_utilities = jax.tree.map(transform, utilities)
+        # transformed_utilities = jax.tree.map(lambda x: 1 - jnp.exp(-steepness * x), utilities) # Sigmoid
+        # transformed_utilities = jax.tree.map(
+        #     lambda x: 1 - jnp.exp(-steepness * x + (steepness - 1)), utilities
+        # )  # Sigmoid
 
-        reset_prop = replacement_rate * transformed_utilities[layer_name]
+        transformed_utilities = jax.tree.map( lambda x: 1 - jnp.exp(-steepness * x + steepness*threshold), utilities)
 
+        # Softer reset to consider experimenting with!
+        # threshold = 0.8 # Where is the hard threshold
+        # steepness = 3.3 # How soft before that?
+        # replacement_rate /=3 (at least)
+        # transformed_utilities = jax.tree.map(
+        #     lambda x: 2 - 2jnp.exp(-steepness * (x-threshold)), utilities
+        # )  # Sigmoid
+
+        # transformed_utilities = jax.tree.map(lambda x: x, utilities) # Linear
+        transformed_utilities = jax.tree.map(lambda x: jnp.clip(x, 0, 1), transformed_utilities)
+
+        # Proportion reset
+        reset_prop = replacement_rate * (1 - transformed_utilities[layer_name])
         keep_prop = 1 - reset_prop
 
         weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prop * init_weights)
@@ -95,16 +150,16 @@ def continuous_reset_weights(
                 out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
             )
 
-            out_reset_prop = replacement_rate * expanded_utils
+            out_reset_prop = replacement_rate * (1 - expanded_utils)
             out_keep_prop = 1 - out_reset_prop
-
             weights[next_layer] = (
                 out_keep_prop * weights[next_layer]
             )  # + (out_reset_prop * out_init_weights) # Decay towards zero
 
+        effective_reset = replacement_rate * (1 - transformed_utilities[layer_name]).mean()
 
         logs[layer_name] = {
-            "nodes_reset": reset_prop.mean(),
+            "nodes_reset": effective_reset,
             "low_utility": jnp.sum(utilities[layer_name] < 0.95),
             "mean_utils": jnp.mean(utilities[layer_name]),
         }
@@ -117,13 +172,13 @@ def continuous_reset_weights(
 # -------------- Main CCBP Optimiser body ---------------
 def ccbp(
     seed: int,
-    replacement_rate: float = 0.012,
-    sharpness: float = 16,
-    threshold: float = 0.95,
-    decay_rate: float = 0.99,
-    update_frequency: int = 1000,
+    replacement_rate: float = 0.5,
+    decay_rate: float = 0.9,
+    update_frequency: int = 100,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
+    sharpness: float = 0.0,
+    threshold: float = 0.0
 ) -> optax.GradientTransformationExtraArgs:
     """Continuous Continual Backpropergation (CCBP)"""
 
@@ -219,8 +274,6 @@ def ccbp(
                 _utility,
                 weight_init_fn,
                 replacement_rate,
-                sharpness,
-                threshold
             )
 
             # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
@@ -269,7 +322,9 @@ def ccbp(
                 tx_state,
             )
 
-        condition = jnp.logical_and(state.time_step > 0, (state.time_step % update_frequency == 0))
-        return jax.lax.cond(condition, _ccbp, no_update, updates)
+        return jax.lax.cond(
+            state.time_step % update_frequency == 0, _ccbp, no_update, updates
+        )
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)
+

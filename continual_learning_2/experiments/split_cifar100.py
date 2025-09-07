@@ -39,12 +39,10 @@ class Args:
     include: list[str] = field(default_factory=list)
     postfix: str | None = None # Postfix name tag
     base_optim: Literal["adam", "adamw", "muon"] = "adam"
-    # Experiment controls
-    num_tasks: int = 10  # 10 tasks x 10 classes each is standard
-    num_epochs_per_task: int = 2
+    num_tasks: int = 10 
+    num_epochs_per_task: int = 8
     batch_size: int = 64
     use_masked_loss: bool = True  # Mask loss to current task's classes
-    model_dtype: Literal["f32", "bf16"] = "f32"  # f32 tends to be stabler for CIFAR-100
 
 def run_all_cifar100():
     args = tyro.cli(Args)
@@ -119,10 +117,7 @@ def run_all_cifar100():
 
         trainer = TrainerCls(
             seed=args.seed,
-            model_config=CNNConfig(
-                output_size=100,
-                dtype=jnp.float32 if args.model_dtype == "f32" else jnp.bfloat16,
-            ),
+            model_config=CNNConfig(output_size=100),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="split_cifar100",

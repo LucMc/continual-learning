@@ -5,7 +5,7 @@
 # If you haven't set the WANDB_CFG env variable do it below
 # WANDB_CFG="--wandb_entity=... --wandb_project=..."
 
-script_name="${1:-slippery_ant_low.py}"
+script_name="${1:-slippery_ant.py}"
 max_jobs_per_gpu="${2:-1}"
 vram_threshold="${3:-50}"  # VRAM usage threshold in percentage
 
