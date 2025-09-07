@@ -147,7 +147,7 @@ def reset_weights(
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Check if previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
+                    out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
                 else:  # Dense -> Dense
                     out_mask_1d = in_mask_1d
 
@@ -199,7 +199,7 @@ def reset_optim_params(tx_state, reset_mask):
                     if len(out_momentum_shape) == 2:  # Dense layer
                         if len(momentum[layer_name]["kernel"].shape) == 4:  # Check if previous layer was conv
                             spatial_size = out_momentum_shape[0] // in_mask_1d.size
-                            out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
+                            out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
                         else:  # Dense -> Dense
                             out_mask_1d = in_mask_1d
 

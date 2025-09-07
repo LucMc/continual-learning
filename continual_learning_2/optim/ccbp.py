@@ -64,7 +64,7 @@ def continuous_reset_weights(
 
         # transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
         # transform = lambda x: jnp.clip(jnp.exp(-sharpness * (x - threshold)), 0, 1)
-        transform = lambda x: jnp.min(jnp.exp(-sharpness * (x - threshold)), 1)
+        transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1)
         transformed_utilities = jax.tree.map(transform, utilities)
 
         reset_prop = replacement_rate * transformed_utilities[layer_name]
