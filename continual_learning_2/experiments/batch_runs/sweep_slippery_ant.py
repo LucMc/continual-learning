@@ -1,9 +1,10 @@
 import itertools
-import sys
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 
 import jax
 import jax.numpy as jnp
+import tyro
+from chex import dataclass
 
 from continual_learning_2.configs import *
 from continual_learning_2.configs.envs import EnvConfig
@@ -81,19 +82,25 @@ def list_configs(algo: str):
         print(f"{i}: {tag}")
     print(f"Total configs: {len(configs)}")
 
-if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python sweep_slippery_ant.py <algo> <config_id> [seed] [wandb_entity] [wandb_project]")
-        print("       python sweep_slippery_ant.py <algo> --list")
-        print(f"Available algos: {list(SWEEP_RANGES.keys())}")
-        sys.exit(1)
+
+@dataclass
+class Args:
+    algo: Literal["adam", "regrama", "redo", "cbp", "ccbp", "shrink_and_perturb"]
+    config_id: Optional[int] = None
+    seed: int = 42
+    wandb_entity: Optional[str] = None
+    wandb_project: Optional[str] = None
+    list_configs: bool = False
     
-    algo = sys.argv[1]
-    if sys.argv[2] == "--list":
-        list_configs(algo)
+
+if __name__ == "__main__":
+    args = tyro.cli(Args)
+    
+    if args.list_configs:
+        list_configs(args.algo)
     else:
-        config_id = int(sys.argv[2])
-        seed = int(sys.argv[3]) if len(sys.argv) > 3 else 42
-        wandb_entity = sys.argv[4] if len(sys.argv) > 4 else None
-        wandb_project = sys.argv[5] if len(sys.argv) > 5 else None
-        run_config(algo, config_id, seed, wandb_entity, wandb_project)
+        if args.config_id is None:
+            print("Error: config_id is required when not listing configs")
+            print("Use --list-configs to see available configurations")
+            exit(1)
+        run_config(args.algo, args.config_id, args.seed, args.wandb_entity, args.wandb_project)
