@@ -1,6 +1,9 @@
 #!/bin/bash
-gpus=(0 1 2 3)
-algo="redo"
+gpus=(0)
+algo="regrama"
+
+# JAX memory management
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 # Get total number of configs for this algo
 total_configs=$(python sweep_slippery_ant.py --algo $algo --list-configs | tail -n 1 | grep -o '[0-9]*$')
