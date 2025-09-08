@@ -99,7 +99,7 @@ def redo(
             }
             reset_mask = jax.tree.map(get_reset_mask, scores)
             _rng, key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(state.rng, weights)
+            key_tree = utils.gen_key_tree(key, weights)
 
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(

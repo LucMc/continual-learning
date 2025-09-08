@@ -62,16 +62,16 @@ class RegramaConfig(ResetMethodConfig):
 class CbpConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
-    replacement_rate: float = 0.1
+    replacement_rate: float = 1e-4
     decay_rate: float = 0.99
-    maturity_threshold: int = 20
+    maturity_threshold: int = 100
     
 @dataclass(frozen=True)
 class CcbpConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
-    replacement_rate: float = 0.1
-    sharpness: float = -1
-    threshold: float = -1
+    replacement_rate: float = 0.01
+    sharpness: float = 16
+    threshold: float = 0.95
     decay_rate: float = 0.99
-    update_frequency: int = 100
+    update_frequency: int = 1000

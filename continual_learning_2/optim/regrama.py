@@ -97,7 +97,9 @@ def regrama(
 
             scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
-            key_tree = utils.gen_key_tree(state.rng, weights)
+
+            _rng, key = random.split(state.rng)
+            key_tree = utils.gen_key_tree(key, weights)
 
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
@@ -119,7 +121,7 @@ def regrama(
                 }
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1)
+            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng)
             # new_params.update(excluded)  # TODO
 
             # Reset optim, i.e. Adamw params

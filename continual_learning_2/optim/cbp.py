@@ -111,7 +111,7 @@ def get_reset_mask(
     n_to_replace = jnp.round(jnp.sum(maturity_mask) * replacement_rate)  # int
 
     # Just mask*updated_utility?
-    masked_utility = jnp.where(maturity_mask, updated_utility, jnp.zeros_like(updated_utility))
+    masked_utility = jnp.where(maturity_mask, updated_utility, jnp.inf) # Immature nodes are inf to avoid replacing
     k_masked_utility = utils.get_bottom_k_mask(masked_utility, n_to_replace)  # bool
 
     return k_masked_utility
@@ -180,7 +180,10 @@ def cbp(
                 # _mean_feature_act,
                 _features,
             )
-            bias_corrected_utility = jax.tree.map(lambda u, a: u/((1-decay_rate)**(a+1)), _utility, state.ages)
+            bias_corrected_utility = jax.tree.map(
+                lambda u, a: u / jnp.maximum(1.0 - (decay_rate ** (a + 1)), 1e-8),
+                _utility, state.ages
+            )
 
 
             reset_mask = jax.tree.map(
