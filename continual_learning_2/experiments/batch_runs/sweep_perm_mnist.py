@@ -68,7 +68,7 @@ def run_config(algo: str, config_id: int, seed: int = 42, wandb_entity: str = No
         data_cfg=DatasetConfig(
             name="permuted_mnist",
             seed=seed,
-            batch_size=1,
+            batch_size=32,
             num_tasks=250,
             num_epochs_per_task=1,
             num_workers=0,
