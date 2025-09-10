@@ -59,7 +59,7 @@ def run_all_slippery_ant():
             score_threshold=0.0095,
             max_reset_frac=0.05,
             seed=args.seed,
-            weight_init_fn=jax.nn.initializers.lecum_normal(),
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
