@@ -133,7 +133,7 @@ def redo(
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng)
-            # new_params.update(excluded)  # TODO
+            # new_params.update(excluded)
 
             # Reset optim, i.e. Adamw params
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
