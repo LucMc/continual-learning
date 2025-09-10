@@ -20,16 +20,20 @@ SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "regrama": {
         "tx_lr": [1e-3],
-        "update_frequency": [10, 100, 1000, 10_000],
-        "max_reset_frac": [None, 0.05, 0.1],
-        "score_threshold": [0.0001, 0.001, 0.01, 0.05, 0.009, 0.0095, 0.1, 0.105, 0.11, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, ], # fmt: skip
+        # "update_frequency": [100, 1000, 5000, 10_000],
+        "update_frequency": [100, 1000, 5000],
+        "max_reset_frac": [None, 0.1],
+        # "score_threshold": [0.001, 0.002, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.09, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
+        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
     },
     # "regrama": {"tx_lr": [1e-3], "update_frequency": [100, 1000, 10_000, 100_000], "score_threshold": [0.003, 0.003]} # Added ones
     "redo": {
         "tx_lr": [1e-3],
-        "update_frequency": [10, 1000, 10_000],
-        "max_reset_frac": [None, 0.05, 0.1],
-        "score_threshold": [ 0.0001, 0.001, 0.01, 0.05, 0.009, 0.0095, 0.1, 0.105, 0.11, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, ], # fmt: skip
+        # "update_frequency": [100, 1000, 5000, 10_000],
+        "update_frequency": [100, 1000, 5000],
+        "max_reset_frac": [None, 0.1],
+        # "score_threshold": [0.001, 0.002, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.09, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
+        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
     },
     # "redo": {"tx_lr": [1e-3], "update_frequency": [100], "score_threshold": [0.000001, 0.00001, 0.0001, 0.002, 0.003, 0.004, 0.005, 0.02, 0.3]}, # Added regrama ones plus a few inbetweens
     "cbp": {
@@ -81,7 +85,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             score_threshold=params["score_threshold"],
             max_reset_frac=params.get("max_reset_frac"), 
             seed=seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "redo": lambda: RedoConfig(
             tx=tx,
@@ -89,7 +93,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             score_threshold=params["score_threshold"],
             max_reset_frac=params.get("max_reset_frac"), 
             seed=seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "cbp": lambda: CbpConfig(
             tx=tx,
@@ -97,7 +101,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             replacement_rate=params["replacement_rate"],
             maturity_threshold=params["maturity_threshold"],
             seed=seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "ccbp": lambda: CcbpConfig(
             tx=tx,
@@ -106,11 +110,11 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             threshold=params["threshold"],
             update_frequency=params["update_frequency"],
             seed=seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "shrink_and_perturb": lambda: ShrinkAndPerterbConfig(
             tx=tx,
-            param_noise_fn=jax.nn.initializers.he_uniform(),
+            param_noise_fn=jax.nn.initializers.lecun_normal(),
             seed=seed,
             shrink=params["shrink"],
             perturb=params["perturb"],

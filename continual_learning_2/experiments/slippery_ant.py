@@ -59,7 +59,7 @@ def run_all_slippery_ant():
             score_threshold=0.0095,
             max_reset_frac=0.05,
             seed=args.seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecum_normal(),
         ),
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -76,7 +76,7 @@ def run_all_slippery_ant():
             score_threshold=0.055,
             max_reset_frac=0.05,
             seed=args.seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecum_normal(),
         ),
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -84,11 +84,11 @@ def run_all_slippery_ant():
             replacement_rate=1e-4,
             maturity_threshold=1000,
             seed=args.seed,
-            weight_init_fn=jax.nn.initializers.he_uniform(),
+            weight_init_fn=jax.nn.initializers.lecum_normal(),
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            param_noise_fn=jax.nn.initializers.he_uniform(),
+            param_noise_fn=jax.nn.initializers.lecum_normal(),
             seed=args.seed,
             shrink=1-0.001,
             perturb=0.005,
