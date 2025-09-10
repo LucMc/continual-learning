@@ -16,7 +16,7 @@
 
 VENV_DIR="../../../.venv"
 algo="${1:-ccbp}"
-script="${2:-sweep_perm_mnist}"
+script="${2:-perm_mnist}"
 wandb_entity="${3:-lucmc}"
 wandb_project="${4:-crl_experiments}"
 seed="${5:-42}"
@@ -32,4 +32,4 @@ source "$VENV_DIR/bin/activate"
 
 # Run hyperparameter configuration
 echo "Running $algo config $SLURM_ARRAY_TASK_ID seed $seed"
-python $script.py --algo "$algo" --config-id "$SLURM_ARRAY_TASK_ID" --seed "$seed" --wandb-entity "$wandb_entity" --wandb-project "$wandb_project"
+python sweep_$script.py --algo "$algo" --config-id "$SLURM_ARRAY_TASK_ID" --seed "$seed" --wandb-entity "$wandb_entity" --wandb-project "$wandb_project"
