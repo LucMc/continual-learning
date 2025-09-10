@@ -6,7 +6,7 @@
 #SBATCH --mem=24G
 #SBATCH --partition=3090
 #SBATCH --gpus=1
-#SBATCH --time=02-23:00:00
+#SBATCH --time=00-23:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
 
