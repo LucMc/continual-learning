@@ -47,6 +47,7 @@ class ShrinkAndPerterbConfig(ResetMethodConfig):
 class RedoConfig(ResetMethodConfig):
     update_frequency: int
     score_threshold: float
+    max_reset_frac: float | None = None
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     
@@ -55,6 +56,7 @@ class RedoConfig(ResetMethodConfig):
 class RegramaConfig(ResetMethodConfig):
     update_frequency: int
     score_threshold: float
+    max_reset_frac: float | None = None
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
 

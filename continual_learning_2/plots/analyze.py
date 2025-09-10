@@ -134,7 +134,8 @@ def create_chart(df: pd.DataFrame, metric: str, title: str = "") -> alt.Chart:
     base = alt.Chart(df).encode(
         x=alt.X('step:Q', 
                 title='Training Steps (Millions)',
-                scale=alt.Scale(domain=[0, 400], nice=True)),
+                scale=alt.Scale(domain=[0, 400], nice=True),
+                axis=alt.Axis(labelFontSize=14, titleFontSize=16)),
         color=alt.Color('algorithm:N', 
                         title='Algorithm',
                         legend=alt.Legend(
@@ -144,7 +145,9 @@ def create_chart(df: pd.DataFrame, metric: str, title: str = "") -> alt.Chart:
                             fillColor='rgba(255,255,255,1)',
                             strokeColor='gray',
                             padding=5,
-                            cornerRadius=3
+                            cornerRadius=3,
+                            labelFontSize=14,
+                            symbolSize=200
                         ))
     )
 
@@ -159,7 +162,8 @@ def create_chart(df: pd.DataFrame, metric: str, title: str = "") -> alt.Chart:
 
     # Create the shaded area using the SMOOTHED q25 and q75 values
     bands = smoothed_base.mark_area(opacity=0.25).encode(
-        y=alt.Y('smooth_q25:Q', title=metric.replace('_', ' ').title()),
+        y=alt.Y('smooth_q25:Q', title=metric.replace('_', ' ').title(),
+                axis=alt.Axis(labelFontSize=14, titleFontSize=16)),
         y2=alt.Y2('smooth_q75:Q', title=""),
     )
 
@@ -180,10 +184,16 @@ def create_chart(df: pd.DataFrame, metric: str, title: str = "") -> alt.Chart:
     return chart.properties(
         width=1000,
         height=400,
-        title=title if title else f"{metric.replace('_', ' ').title()} (IQM over Seeds)"
+        title=alt.TitleParams(
+            text=title if title else f"{metric.replace('_', ' ').title()} (IQM over Seeds)",
+            fontSize=18,
+            fontWeight='bold'
+        )
     ).configure_axis(
         grid=True,
-        gridOpacity=0.3
+        gridOpacity=0.3,
+        labelFontSize=14,
+        titleFontSize=16
     ).interactive()
 
 
@@ -193,7 +203,7 @@ def main(
     group: str | None ="default_group",
     metric: str = "eval_loss",
     output_dir: str = "./plots",
-    save_html: bool = False,
+    ext: str = "png",
     debug: bool = False
 ):
     if debug:
@@ -215,9 +225,8 @@ def main(
     title = f"{group.replace('_', ' ').title()}: {metric.replace('_', ' ').title()} (IQM)"
     chart = create_chart(df, metric, title)
     
-    ext = "html" if save_html else "svg"
-    Path(output_dir).mkdir(exist_ok=True, parents=True)
-    save_path = Path(output_dir) / f"{group}_{metric.replace('/', '_')}_iqm_smoothed.{ext}"
+    save_path = Path(output_dir) / ext / f"{group}_{metric.replace('/', '_')}_iqm_smoothed.{ext}"
+    save_path.parent.mkdir(exist_ok=True, parents=True)
     chart.save(str(save_path))
     print(f"\n✅ Chart saved to: {save_path}")
     

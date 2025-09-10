@@ -57,6 +57,7 @@ def regrama(
     update_frequency: int = 1000,
     score_threshold: float = 0.01,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    max_reset_frac: float | None = None,
 ) -> optax.GradientTransformationExtraArgs:
     """ (Resetting nuerons guided by) Gradient Magnitude based Nueronal Activity Metric (ReGraMa): [Liu et al.](https://arxiv.org/pdf/2505.24061v1) """
 
@@ -72,8 +73,17 @@ def regrama(
     def get_reset_mask(
         scores: Float[Array, "#neurons"],
     ) -> Bool[Array, "#neurons"]:
-        score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
-        return score_mask
+        threshold_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
+
+        if (max_reset_frac is None) or (max_reset_frac <= 0.0):
+            return threshold_mask
+
+        size = scores.shape[-1]
+        k_max = jnp.asarray(jnp.floor(max_reset_frac * size), dtype=jnp.int32)
+        n_in = jnp.asarray(jnp.sum(threshold_mask), dtype=jnp.int32)
+        k_eff = jnp.minimum(k_max, n_in)
+        gated_scores = jnp.where(threshold_mask, scores, jnp.inf)
+        return utils.get_bottom_k_mask(gated_scores, k_eff)
 
     @jax.jit
     def update(
@@ -97,6 +107,7 @@ def regrama(
 
             scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
+            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
 
             _rng, key = random.split(state.rng)
             key_tree = utils.gen_key_tree(key, weights)
@@ -107,6 +118,7 @@ def regrama(
             )
 
             # Update bias
+
             _biases = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b), reset_mask, biases
             )

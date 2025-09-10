@@ -150,8 +150,8 @@ class PPO:
             actor_linearised_neuron_logs = get_linearised_neuron_logs(actor_preactivations_flat)  # pyright: ignore[reportArgumentType]
             value_linearised_neuron_logs = get_linearised_neuron_logs(value_preactivations_flat)  # pyright: ignore[reportArgumentType]
 
-            # actor_activations_hist_dict = pytree_histogram(actor_activations)
-            # value_activations_hist_dict = pytree_histogram(value_activations)
+            actor_activations_hist_dict = pytree_histogram(actor_activations)
+            value_activations_hist_dict = pytree_histogram(value_activations)
 
             vf_optim_logs = vf.opt_state["reset_method"].logs
             actor_optim_logs = policy.opt_state["reset_method"].logs
@@ -167,12 +167,12 @@ class PPO:
                 "metrics/values": values.mean(),
 
                 # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
-                # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
+                **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
                 **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
                 **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
                 **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
                 **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-                # **prefix_dict("nn/value_activations", value_activations_hist_dict),
+                **prefix_dict("nn/value_activations", value_activations_hist_dict),
                 # **prefix_dict("nn/value_activations", value_activations_hist_dict),
                 **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
                 **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
@@ -182,7 +182,8 @@ class PPO:
                 **prefix_dict("actor", actor_optim_logs),
                 **prefix_dict("value", vf_optim_logs),
 
-                # **prefix_dict("nn/srank", srank_logs),
+                **prefix_dict("nn/actor_srank", actor_srank_logs),
+                **prefix_dict("nn/value_srank", value_srank_logs),
 
                 "metrics/values": values.mean(),
             }, actor_feats["main"], value_feats)

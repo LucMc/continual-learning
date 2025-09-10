@@ -16,9 +16,10 @@
 
 VENV_DIR="../../../.venv"
 algo="${1:-ccbp}"
-wandb_entity="${2:-lucmc}"
-wandb_project="${3:-crl_experiments}"
-seed="${4:-42}"
+script="${2:-sweep_perm_mnist}"
+wandb_entity="${3:-lucmc}"
+wandb_project="${4:-crl_experiments}"
+seed="${5:-42}"
 
 # Setup environment
 if ! command -v uv &> /dev/null; then
@@ -31,4 +32,4 @@ source "$VENV_DIR/bin/activate"
 
 # Run hyperparameter configuration
 echo "Running $algo config $SLURM_ARRAY_TASK_ID seed $seed"
-python sweep_slippery_ant.py --algo "$algo" --config-id "$SLURM_ARRAY_TASK_ID" --seed "$seed" --wandb-entity "$wandb_entity" --wandb-project "$wandb_project"
+python $script.py --algo "$algo" --config-id "$SLURM_ARRAY_TASK_ID" --seed "$seed" --wandb-entity "$wandb_entity" --wandb-project "$wandb_project"

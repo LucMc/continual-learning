@@ -56,6 +56,7 @@ def redo(
     seed: int,
     update_frequency: int = 1000,
     score_threshold: float = 0.0095,
+    max_reset_frac: float | None = None,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
 ) -> optax.GradientTransformationExtraArgs:
     """ Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902) """
@@ -72,8 +73,17 @@ def redo(
     def get_reset_mask(
         scores: Float[Array, "#neurons"],
     ) -> Bool[Array, "#neurons"]:
-        score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
-        return score_mask
+        threshold_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
+
+        if (max_reset_frac is None) or (max_reset_frac <= 0.0):
+            return threshold_mask
+
+        size = scores.shape[-1]
+        k_max = jnp.asarray(jnp.floor(max_reset_frac * size), dtype=jnp.int32)
+        n_in = jnp.asarray(jnp.sum(threshold_mask), dtype=jnp.int32)
+        k_eff = jnp.minimum(k_max, n_in)
+        gated_scores = jnp.where(threshold_mask, scores, jnp.inf)
+        return utils.get_bottom_k_mask(gated_scores, k_eff)
 
     @jax.jit
     def update(
@@ -98,6 +108,7 @@ def redo(
                 for key, feature_tuple in zip(features.keys(), features.values())
             }
             reset_mask = jax.tree.map(get_reset_mask, scores)
+            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
             _rng, key = random.split(state.rng)
             key_tree = utils.gen_key_tree(key, weights)
 
