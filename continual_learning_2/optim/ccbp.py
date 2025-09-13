@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Literal
 
 import flax
 import jax
@@ -52,6 +52,7 @@ def continuous_reset_weights(
     replacement_rate: Float[Array, ""] = 0.012,
     sharpness: Float[Array, ""] = 16, # How linear/expone)ntial? inf=hard resets
     threshold: Float[Array, ""] = 0.95, # Where is the cut off to hard reset
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp"
 ):
     all_layer_names = list(weights.keys())
     logs = {}
@@ -64,7 +65,13 @@ def continuous_reset_weights(
 
         # transform = lambda x: 1 / (1 + jnp.exp(sharpness * (x - threshold))) # Naturally 0-1
         # transform = lambda x: jnp.clip(jnp.exp(-sharpness * (x - threshold)), 0, 1)
-        transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1)
+
+        match transform_type:
+            case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1)
+            case "sigmoid": transform = lambda x: jnp.minimum(sharpness / (1 + jnp.exp(x - threshold)), 1)
+            case "softplus": transform = lambda x: jnp.minimum(jnp.log(1 + sharpness*jnp.exp(x - threshold)), 1)
+            case "linear": transform = lambda x: jnp.clip(-sharpness * (x - threshold),0, 1)
+
         transformed_utilities = jax.tree.map(transform, utilities)
 
         reset_prop = replacement_rate * transformed_utilities[layer_name]
@@ -125,6 +132,7 @@ def ccbp(
     update_frequency: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp"
 ) -> optax.GradientTransformationExtraArgs:
     """Continuous Continual Backpropergation (CCBP)"""
 
@@ -221,7 +229,8 @@ def ccbp(
                 weight_init_fn,
                 replacement_rate,
                 sharpness,
-                threshold
+                threshold,
+                transform_type,
             )
 
             # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction

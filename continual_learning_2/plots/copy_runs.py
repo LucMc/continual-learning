@@ -114,7 +114,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Copies one or all of the runs in a wandb project to another.")
-    parser.add_argument("-se", "--src-entity", type=str, default="indezera", help="Source wandb entity name.")
+    parser.add_argument("-se", "--src-entity", type=str, default=None, help="Source wandb entity name.")
     parser.add_argument("-sp", "--src-project", type=str, help="Name of the wandb projecet.")
     parser.add_argument("-de", "--dst-entity", type=str, default=None, help="Destination wandb entity name.")
     parser.add_argument("-dp", "--dst-project", type=str, default=None, help="Name of destination wandb project.")

@@ -12,13 +12,26 @@ from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
 from continual_learning_2.trainers.continual_supervised_learning import HeadResetClassificationCSLTrainer
 
+# SWEEP_RANGES = {
+#     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
+#     "adamw": {"learning_rate": [1e-3, 3e-4, 1e-4]},
+#     "muon": {"learning_rate": [1e-3, 3e-4, 1e-4]},
+#
+#     "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+#     "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+#     "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
+#     "ccbp": {"tx_lr": [1e-3], "decay_rate": [0., 0.99], "replacement_rate": [0.01, 0.05, 0.2], "update_frequency": [100, 1000]},
+#     "shrink_and_perturb": {"tx_lr": [1e-3], "shrink": [1-1e-3, 1-1e-4, 1-1e-5], "perturb": [1e-3, 1e-4, 1e-5], "every_n": [1, 10, 100]},
+# }
+
+
 SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "adamw": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "muon": {"learning_rate": [1e-3, 3e-4, 1e-4]},
 
-    "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
-    "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+    "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+    "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
     "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
     "ccbp": {"tx_lr": [1e-3], "decay_rate": [0., 0.99], "replacement_rate": [0.01, 0.05, 0.2], "update_frequency": [100, 1000]},
     "shrink_and_perturb": {"tx_lr": [1e-3], "shrink": [1-1e-3, 1-1e-4, 1-1e-5], "perturb": [1e-3, 1e-4, 1e-5], "every_n": [1, 10, 100]},
@@ -68,7 +81,7 @@ def run_config(algo: str, config_id: int, seed: int = 42, wandb_entity: str = No
         data_cfg=DatasetConfig(
             name="permuted_mnist",
             seed=seed,
-            batch_size=32,
+            batch_size=16,
             num_tasks=50,
             num_epochs_per_task=1,
             num_workers=0,
@@ -80,7 +93,7 @@ def run_config(algo: str, config_id: int, seed: int = 42, wandb_entity: str = No
             run_name=f"{algo}_{tag}_s{seed}",
             wandb_entity=wandb_entity,
             wandb_project=wandb_project,
-            group=f"perm_mnist_{algo}_sweep",
+            group=f"perm_mnist_{algo}_sweep_16_50_2",
             wandb_mode="online" if wandb_project else "disabled",
             interval=100,
             eval_during_training=True,

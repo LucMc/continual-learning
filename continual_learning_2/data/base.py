@@ -381,6 +381,41 @@ class ClassIncrementalDataset(SplitDataset):
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
+    def _cumulative_class_mask(self, task_id: int) -> jax.Array:
+        """Create mask for all classes seen up to and including task_id."""
+        num_classes_seen = self.class_increment * (task_id + 1)
+        classes_seen = self.class_order[:num_classes_seen]
+        mask = jnp.zeros((self.NUM_CLASSES,), dtype=bool).at[classes_seen].set(True)
+        return mask
+
+    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]:
+        metrics = {}
+
+        if forgetting:
+            for task in range(self.current_task):
+                test_set = self._get_task_test(task)
+                task_mask = self._cumulative_class_mask(task)
+                task_metrics = self._eval_task(model, test_set, class_mask=task_mask)
+                metrics.update(prefix_dict(f"metrics/task_{task}", task_metrics))
+
+        # Evaluate current task with cumulative masking
+        print(f"- Evaluating on task {self.current_task}")
+        task_mask = self._cumulative_class_mask(self.current_task)
+        latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
+
+        # Use task-aware metrics as primary metrics for class-incremental learning
+        metrics.update(prefix_dict("metrics", {
+            "eval_loss":     latest["eval_loss_task"],
+            "eval_accuracy": latest["eval_accuracy_task"],
+            # keep CI metrics for reference
+            "eval_loss_ci":     latest["eval_loss_ci"],
+            "eval_accuracy_ci": latest["eval_accuracy_ci"],
+        }))
+
+        # Also store the full set under the task-specific prefix
+        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
+        return metrics
+
     def _get_task(self, task_id: int) -> grain.DataLoader:
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")

@@ -57,7 +57,7 @@ def run_all_perm_mnist():
         "regrama": RegramaConfig(
             tx=base_optim,
             update_frequency=1000,
-            score_threshold=0.0095,
+            score_threshold=0.25,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
@@ -71,7 +71,7 @@ def run_all_perm_mnist():
         "redo": RedoConfig(
             tx=base_optim,
             update_frequency=1000,
-            score_threshold=0.025,
+            score_threshold=0.65,
             # score_threshold=0.001,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
@@ -118,8 +118,8 @@ def run_all_perm_mnist():
             data_cfg=DatasetConfig(
                 name="permuted_mnist",
                 seed=args.seed,
-                batch_size=1,
-                num_tasks=250,
+                batch_size=8,
+                num_tasks=150,
                 num_epochs_per_task=1,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
             ),
