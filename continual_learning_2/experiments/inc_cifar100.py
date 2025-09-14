@@ -115,8 +115,8 @@ def run_all_inc_cifar100():
                 seed=args.seed,
                 batch_size=64,
                 num_tasks=100,
-                num_epochs_per_task=1,
-                num_workers=0,  # (os.cpu_count() or 0) // 2,
+                num_epochs_per_task=4,
+                num_workers=2,  # (os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(
                 resume=args.resume,

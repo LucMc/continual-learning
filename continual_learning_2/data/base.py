@@ -403,11 +403,11 @@ class ClassIncrementalDataset(SplitDataset):
         task_mask = self._cumulative_class_mask(self.current_task)
         latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
 
-        # Use task-aware metrics as primary metrics for class-incremental learning
+        # Primary metrics: use task-aware (masked) for main tracking
         metrics.update(prefix_dict("metrics", {
             "eval_loss":     latest["eval_loss_task"],
             "eval_accuracy": latest["eval_accuracy_task"],
-            # keep CI metrics for reference
+            # CI metrics show performance on all classes (should be lower)
             "eval_loss_ci":     latest["eval_loss_ci"],
             "eval_accuracy_ci": latest["eval_accuracy_ci"],
         }))
@@ -442,10 +442,8 @@ class ClassIncrementalDataset(SplitDataset):
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
-        num_classes = self.class_increment * (task_id + 1)
-        seen = set(self.class_order[:num_classes].tolist())
-        ds = self._dataset_test.filter(lambda x: x[self.data_label] in seen)
-        # ds = self._dataset_test.filter(lambda x: x[self.data_label] in list(range(task_id+1)))
+        # Use full test set (all classes) to properly compare CI vs task-aware metrics
+        ds = self._dataset_test
 
         return grain.DataLoader(
             data_source=ds,
