@@ -81,8 +81,8 @@ def run_all_slippery_ant():
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.99,
-            replacement_rate=1e-4,
-            maturity_threshold=1000,
+            replacement_rate=0.0002,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),

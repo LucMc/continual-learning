@@ -130,6 +130,7 @@ def run_config(
     seed: int = 42,
     wandb_entity: str = None,
     wandb_project: str = None,
+    wandb_mode: str = "online",
 ):
     configs = _all_configs_for(algo)  # UPDATED
     if config_id >= len(configs):
@@ -185,7 +186,7 @@ def run_config(
             wandb_project=wandb_project,
             group=f"slippery_ant_{algo}_sweep",
             save=False,
-            wandb_mode="online" if wandb_project else "disabled",
+            wandb_mode=wandb_mode
         ),
     )
     trainer.train()
@@ -206,6 +207,7 @@ def run_all_configs(
     wandb_project: Optional[str] = None,
     config_start: Optional[int] = None,
     config_end: Optional[int] = None,
+    wandb_mode: str = "online"
 ):
     cfgs = _all_configs_for(algo)
     total = len(cfgs)
@@ -220,7 +222,7 @@ def run_all_configs(
         tag = _format_tag(cfgs[cid])
         print(f"\n=== [{cid}/{total - 1}] {algo} :: {tag} ===")
         try:
-            run_config(algo, cid, seed, wandb_entity, wandb_project)
+            run_config(algo, cid, seed, wandb_entity, wandb_project, wandb_mode)
         except KeyboardInterrupt:
             print("\nInterrupted by user; stopping sweep.")
             break
@@ -241,6 +243,7 @@ class Args:
     seed: int = 42
     wandb_entity: Optional[str] = None
     wandb_project: Optional[str] = None
+    wandb_mode: str = "online"
     list_configs: bool = False
 
     run_all: bool = False

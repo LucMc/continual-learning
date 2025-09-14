@@ -1,272 +1,245 @@
+from __future__ import annotations
+
 from typing import Any, TypeVar
 
-import chex
 import flax.traverse_util
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpy.typing as npt
 from jaxtyping import Array, Float, PyTree
-
+import numpy.typing as npt
 import wandb
+
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.types import Histogram, LayerActivationsDict, LogDict
-
-
-def log(logs: dict, step: int) -> None:
-    # TODO: probably remove once PPO has been migrated
-    for key, value in logs.items():
-        if isinstance(value, Histogram):
-            logs[key] = wandb.Histogram(value.data, np_histogram=value.np_histogram)  # pyright: ignore[reportArgumentType]
-    wandb.log(logs, step=step)
 
 
 def prefix_dict(prefix: str, d: dict[str, Any]) -> dict[str, Any]:
     return {f"{prefix}/{k}": v for k, v in d.items()}
 
+def _to_numpy(a):  # JAX/NumPy -> NumPy
+    return np.asarray(a)
 
-def pytree_histogram(pytree: PyTree[Array], bins: int = 64) -> dict[str, Histogram]:
-    flat_dict = flax.traverse_util.flatten_dict(pytree, sep="/")
-    ret = {}
-    for k, v in flat_dict.items():
-        if isinstance(v, tuple):  # For activations
-            v = v[0]
-        assert isinstance(v, Array) or isinstance(v, np.ndarray)
-        ret[k] = Histogram(
-            total_events=v.reshape(-1).shape[0], np_histogram=jnp.histogram(v, bins=bins)
-        )  # pyright: ignore[reportArgumentType]
-    return ret
+def _to_scalar(x: Any) -> float | int:
+    arr = _to_numpy(x)
+    return arr.item() if arr.shape == () else float(arr.mean())
+
+def _safe_hist_from_sequence(seq, default_bins: int = 64) -> tuple[np.ndarray, np.ndarray]:
+    """NumPy 2.x–safe histogram for constant arrays, NaNs/Infs filtered."""
+    arr = _to_numpy(seq).ravel()
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return np.array([0], dtype=np.int64), np.array([0.0, 1.0], dtype=np.float64)
+    
+    uniq = np.unique(arr)
+    
+    # Handle case where all values are identical
+    if uniq.size == 1:
+        # Create a histogram with 1 bin centered around the single value
+        single_val = uniq[0]
+        # Create edges that encompass the single value
+        edges = np.array([single_val - 0.5, single_val + 0.5], dtype=np.float64)
+        counts = np.array([arr.size], dtype=np.int64)
+        return counts, edges
+    
+    num_bins = int(min(default_bins, max(1, uniq.size)))
+    hist, edges = np.histogram(arr, bins=num_bins)
+    return hist.astype(np.int64), edges.astype(np.float64)
+
+def _as_wandb_hist(value: Histogram) -> wandb.Histogram | None:
+    """Prefer precomputed hist; else compute a safe one from data."""
+    np_hist = getattr(value, "np_histogram", None)
+    if isinstance(np_hist, tuple) and len(np_hist) == 2:
+        counts, edges = np_hist
+        return wandb.Histogram(
+            np_histogram=(_to_numpy(counts).astype(np.int64), _to_numpy(edges).astype(np.float64))
+        )
+    data = getattr(value, "data", None)
+    if data is not None:
+        counts, edges = _safe_hist_from_sequence(data)
+        return wandb.Histogram(np_histogram=(counts, edges))
+    return None
 
 
 def get_logs(
     name: str,
     data: Float[npt.NDArray | Array, "..."],
-    axis: int | None = None,
     hist: bool = True,
     std: bool = True,
-) -> "LogDict":
-    ret: "LogDict" = {
-        f"{name}_mean": jnp.mean(data, axis=axis),
-        f"{name}_min": jnp.min(data, axis=axis),
-        f"{name}_max": jnp.max(data, axis=axis),
+) -> LogDict:
+    ret: LogDict = {
+        f"{name}_mean": jnp.mean(data),
+        f"{name}_min": jnp.min(data),
+        f"{name}_max": jnp.max(data),
     }
     if std:
-        ret[f"{name}_std"] = jnp.std(data, axis=axis)
+        ret[f"{name}_std"] = jnp.std(data)
     if hist:
-        data = data.reshape(-1)
-        ret[f"{name}"] = Histogram(data=data, total_events=data.shape[0])
-
+        flat = data.reshape(-1)
+        # Leave np_histogram=None -> logger will build a safe histogram
+        ret[f"{name}"] = Histogram(data=flat, total_events=flat.shape[0])  # pyright: ignore[reportArgumentType]
     return ret
 
+def pytree_histogram(pytree: PyTree[Array], bins: int = 64) -> dict[str, Histogram]:
+    """Per‑leaf histograms; jnp.histogram keeps this usable inside JIT."""
+    flat = flax.traverse_util.flatten_dict(pytree, sep="/")
+    out: dict[str, Histogram] = {}
+    for k, v in flat.items():
+        if isinstance(v, tuple):  # activations sometimes come as (value, ...)
+            v = v[0]
+        counts, edges = jnp.histogram(v, bins=bins)
+        out[k] = Histogram(total_events=v.size, np_histogram=(counts, edges))
+    return out
 
 def explained_variance(
     y_pred: Float[npt.NDArray | Array, " total_num_steps"],
     y_true: Float[npt.NDArray | Array, " total_num_steps"],
 ) -> Float[Array, ""]:
-    # From SB3 https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/common/utils.py#L50
-    assert y_true.ndim == 1 and y_pred.ndim == 1
     var_y = jnp.var(y_true)
     return jnp.where(var_y == 0, jnp.nan, 1 - jnp.var(y_true - y_pred) / var_y)
 
-
-def get_dormant_neuron_logs(
-    layer_activations: LayerActivationsDict, dormant_neuron_threshold: float = 0.1
-) -> LogDict:
-    """Compute the dormant neuron ratio per layer using Equation 1 from
-    "The Dormant Neuron Phenomenon in Deep Reinforcement Learning" (Sokar et al., 2023; https://proceedings.mlr.press/v202/sokar23a/sokar23a.pdf).
-
-    Adapted from https://github.com/google/dopamine/blob/master/dopamine/labs/redo/tfagents/sac_train_eval.py#L563"""
-
-    logs = {}
-    total_dead_neurons, total_hidden_count = 0, 0
-
-    for act_key, act_value in layer_activations.items():
-        chex.assert_rank(act_value, 2)  # (batch_size, layer_dim)
-        neurons_score = jnp.mean(jnp.abs(act_value), axis=0)  # (layer_dim,)
-        neurons_score = neurons_score / (jnp.mean(neurons_score) + 1e-6)  # (layer_dim,)
-
-        num_dormant_neurons = jnp.sum(neurons_score <= dormant_neuron_threshold)
-
-        layer_dim = neurons_score.shape[0]
-
-        logs[f"{act_key}_ratio"] = (num_dormant_neurons / layer_dim) * 100
-        logs[f"{act_key}_count"] = num_dormant_neurons
-        total_dead_neurons += num_dormant_neurons
-        total_hidden_count += layer_dim
-
-    logs.update(
-        {
-            "total_ratio": jnp.array((total_dead_neurons / total_hidden_count) * 100),
-            "total_count": total_dead_neurons,
-        }
-    )
-
+def get_dormant_neuron_logs(layer_activations: LayerActivationsDict, threshold: float = 0.1) -> LogDict:
+    logs: LogDict = {}
+    total_dead, total = 0, 0
+    for key, act in layer_activations.items():
+        chex_rank = 2  # (batch, dim)
+        # if you want, assert rank here with chex.assert_rank(act, chex_rank)
+        scores = jnp.mean(jnp.abs(act), axis=0)
+        scores = scores / (jnp.mean(scores) + 1e-6)
+        dead = jnp.sum(scores <= threshold)
+        logs[f"{key}_ratio"] = (dead / scores.shape[0]) * 100
+        logs[f"{key}_count"] = dead
+        total_dead += dead
+        total += scores.shape[0]
+    logs["total_ratio"] = jnp.array((total_dead / total) * 100)
+    logs["total_count"] = total_dead
     return logs
 
-
-def get_linearised_neuron_logs(
-    layer_preactivations: LayerActivationsDict, linearised_threshold: float = 0.9
-) -> LogDict:
-    """Compute the linearised neuron ratio per layer.
-    Linearised units are "zombie" units which essentially always activate.
-
-    Concept taken from "Disentangling the Causes of Plasticity Loss in Neural Networks" (Lyle et al., 2024)."""
-
-    logs = {}
-    total_linearised_neurons, total_hidden_count = 0, 0
-
-    for act_key, act_value in layer_preactivations.items():
-        chex.assert_rank(act_value, 2)  # (batch_size, layer_dim)
-        # NOTE: we simply get the percentage of batch items for which the pre-activation value of
-        # a given neuron was positive. This will count activation % for ReLU and similar activations
-        # but probably isn't a good measure for smooth activation functions.
-        # For those we'd need to compute the variance of the pre-activation and then threshold it.
-        activation_percent = jnp.mean(act_value > 0, axis=0)  # (layer_dim,)
-        num_linearised_neurons = jnp.sum(activation_percent >= linearised_threshold)
-
-        layer_dim = activation_percent.shape[0]
-
-        logs[f"{act_key}_ratio"] = (num_linearised_neurons / layer_dim) * 100
-        logs[f"{act_key}_count"] = num_linearised_neurons
-        total_linearised_neurons += num_linearised_neurons
-        total_hidden_count += layer_dim
-
-    logs.update(
-        {
-            "total_ratio": jnp.array((total_linearised_neurons / total_hidden_count) * 100),
-            "total_count": total_linearised_neurons,
-        }
-    )
-
+def get_linearised_neuron_logs(layer_preactivations: LayerActivationsDict, threshold: float = 0.9) -> LogDict:
+    logs: LogDict = {}
+    total_lin, total = 0, 0
+    for key, act in layer_preactivations.items():
+        pct = jnp.mean(act > 0, axis=0)
+        lin = jnp.sum(pct >= threshold)
+        logs[f"{key}_ratio"] = (lin / pct.shape[0]) * 100
+        logs[f"{key}_count"] = lin
+        total_lin += lin
+        total += pct.shape[0]
+    logs["total_ratio"] = jnp.array((total_lin / total) * 100)
+    logs["total_count"] = total_lin
     return logs
 
-
-def compute_srank(
-    feature_matrix: Float[Array, "num_features feature_dim"], delta: float = 0.01
-) -> Float[Array, ""]:
-    """Compute effective rank (srank) of a feature matrix.
-
-    Args:
-        feature_matrix: Matrix of shape [num_features, feature_dim]
-        delta: Threshold parameter (default: 0.01)
-
-    Returns:
-        Effective rank (srank) value
-    """
-    # NOTE: jax linalg does not do bfloat16 etc
-    feature_matrix = feature_matrix.astype(jnp.float32)
-
-    s = jnp.linalg.svd(feature_matrix, compute_uv=False)
-    cumsum = jnp.cumsum(s)
-    total = jnp.sum(s)
-    ratios = cumsum / total
-    mask = ratios >= (1.0 - delta)
-    srank = jnp.argmax(mask) + 1
-    return srank
+def compute_srank(feature_matrix: Float[Array, "num_features feature_dim"], delta: float = 0.01) -> Float[Array, ""]:
+    s = jnp.linalg.svd(feature_matrix.astype(jnp.float32), compute_uv=False)
+    ratios = jnp.cumsum(s) / jnp.sum(s)
+    return jnp.argmax(ratios >= (1.0 - delta)) + 1
 
 
 def average_histograms(histograms: list[Histogram]) -> Histogram:
-    data = [  # counts, edges, total_events
-        (h.np_histogram[0], h.np_histogram[1], h.total_events)
-        for h in histograms
-        if h.np_histogram is not None
-    ]
+    """Average a list of Histogram objects by resampling onto a common grid."""
+    if not histograms:
+        return Histogram(total_events=0, np_histogram=(np.array([0], dtype=np.int64),
+                                                       np.array([0.0, 1.0], dtype=np.float64)))
+    data = [(h.np_histogram[0], h.np_histogram[1], h.total_events)
+            for h in histograms if h.np_histogram is not None]
+    if not data:
+        return Histogram(total_events=0, np_histogram=(np.array([0], dtype=np.int64),
+                                                       np.array([0.0, 1.0], dtype=np.float64)))
 
-    global_min = min([h[1][0] for h in data])
-    global_max = max([h[1][-1] for h in data])
-    max_edges = max([len(h[1]) for h in data])
+    counts_list = [_to_numpy(c) for (c, _, _) in data]
+    edges_list  = [_to_numpy(e) for (_, e, _) in data]
+    weights     = [float(np.asarray(t).sum()) for (_, _, t) in data]
 
-    target_bin_edges = np.linspace(global_min, global_max, 2 * max_edges - 1)
-    target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
+    global_min = min(e[0] for e in edges_list)
+    global_max = max(e[-1] for e in edges_list)
+    max_edges  = max(len(e) for e in edges_list)
 
-    resampled_counts_list, weights = [], []
-    for counts, bin_edges, total_events in data:
-        original_bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        resampled_counts = np.interp(target_bin_centers, original_bin_centers, counts)
-        resampled_counts_list.append(resampled_counts)
-        weights.append(total_events)
+    # Match prior behavior: increase resolution relative to the largest source
+    target_edges   = np.linspace(global_min, global_max, 2 * max_edges - 1)
+    target_centers = (target_edges[:-1] + target_edges[1:]) / 2
 
-    averaged_counts = np.average(
-        np.array(resampled_counts_list), axis=0, weights=np.array(weights)
-    )
+    resampled = []
+    for counts, edges in zip(counts_list, edges_list):
+        centers = (edges[:-1] + edges[1:]) / 2
+        resampled.append(np.interp(target_centers, centers, counts))
 
-    return Histogram(
-        total_events=np.sum(weights),
-        np_histogram=(averaged_counts, target_bin_edges),
-    )
-
+    avg_counts = np.average(np.stack(resampled, axis=0), axis=0, weights=np.asarray(weights))
+    return Histogram(total_events=np.sum(weights),
+                     np_histogram=(avg_counts.astype(np.float64), target_edges.astype(np.float64)))
 
 def average_histograms_concatenated(histograms: Histogram) -> Histogram:
+    """Average a time/scan‑stacked Histogram (counts/edges stacked on leading dims)."""
     assert histograms.np_histogram is not None
-    global_min = jnp.min(histograms.np_histogram[0])
-    global_max = jnp.max(histograms.np_histogram[0])
-    max_edges = histograms.np_histogram[1].shape[-1]
+    counts, edges = histograms.np_histogram  # shape: [..., BINS], [..., BINS]
+    c_flat = counts.reshape(-1, counts.shape[-1]).astype(jnp.float32)
+    e_flat = edges.reshape(-1, edges.shape[-1]).astype(jnp.float32)
 
-    target_bin_edges = jnp.linspace(global_min, global_max, 2 * max_edges - 1)
-    target_bin_centers = (target_bin_edges[:-1] + target_bin_edges[1:]) / 2
+    global_min = jnp.min(e_flat[:, 0])
+    global_max = jnp.max(e_flat[:, -1])
+    max_edges  = e_flat.shape[-1]
+
+    target_edges   = jnp.linspace(global_min, global_max, 2 * max_edges - 1)
+    target_centers = (target_edges[:-1] + target_edges[1:]) / 2
 
     @jax.vmap
-    def resample(data):
-        counts, bin_edges = data
-        original_bin_centers = (bin_edges[..., :-1] + bin_edges[..., 1:]) / 2
-        resampled_counts = jnp.interp(target_bin_centers, original_bin_centers, counts)
-        return resampled_counts
+    def _resample(c, e):
+        centers = (e[:-1] + e[1:]) / 2
+        return jnp.interp(target_centers, centers, c)
 
-    flattened_histograms = jax.tree.map(
-        lambda x: x.reshape(-1, x.shape[-1]).astype(jnp.float32), histograms.np_histogram
-    )
-    flattened_events = jnp.reshape(histograms.total_events, -1)
-    resampled_counts = resample(flattened_histograms)
-    averaged_counts = jnp.average(resampled_counts, axis=0, weights=flattened_events)
+    resampled = _resample(c_flat, e_flat)  # [N, NEW_BINS]
+    weights   = jnp.reshape(histograms.total_events, -1).astype(jnp.float32)  # [N]
+    avg_counts = jnp.average(resampled, axis=0, weights=weights)
 
-    return Histogram(
-        total_events=jnp.sum(histograms.total_events),  # pyright: ignore[reportArgumentType]
-        np_histogram=(averaged_counts, target_bin_edges),
-    )
+    return Histogram(total_events=jnp.sum(histograms.total_events),  # pyright: ignore[reportArgumentType]
+                     np_histogram=(avg_counts, target_edges))
 
 
 MetricsType = TypeVar("MetricsType", bound=LogDict | dict[str, float])
 
-
 def accumulate_metrics(metrics: list[MetricsType]) -> MetricsType:
-    ret = {}
-    for k in metrics[0]:
-        if not isinstance(metrics[0][k], Histogram):
-            ret[k] = float(np.mean([m[k] for m in metrics]))  # pyright: ignore[reportArgumentType,reportCallIssue]
+    ret: dict[str, Any] = {}
+    first = metrics[0]
+    for k in first:
+        v0 = first[k]
+        if isinstance(v0, Histogram):
+            ret[k] = average_histograms([m[k] for m in metrics])  # type: ignore[index]
         else:
-            ret[k] = average_histograms([m[k] for m in metrics])  # pyright: ignore[reportArgumentType,reportCallIssue]
-
+            ret[k] = float(np.mean([_to_scalar(m[k]) for m in metrics]))  # type: ignore[index]
     return ret  # pyright: ignore[reportReturnType]
-
 
 def accumulate_concatenated_metrics(metrics: LogDict) -> LogDict:
-    ret = {}
-    for k in metrics:
-        if not isinstance(metrics[k], Histogram):
-            ret[k] = jnp.mean(metrics[k])  # pyright: ignore[reportArgumentType,reportCallIssue]
+    ret: LogDict = {}
+    for k, v in metrics.items():
+        if isinstance(v, Histogram):
+            ret[k] = average_histograms_concatenated(v)
         else:
-            ret[k] = average_histograms_concatenated(metrics[k])  # pyright: ignore[reportArgumentType,reportCallIssue]
-
+            ret[k] = jnp.mean(v)
     return ret  # pyright: ignore[reportReturnType]
 
 
-def get_last_metrics(metrics: LogDict) -> LogDict:
-    ret = {}
-    for k in metrics:
-        item = metrics[k]
-        if not isinstance(item, Histogram):
-            ret[k] = item[-1]  # pyright: ignore[reportIndexIssue]
+def log(logs: dict, step: int) -> None:
+    """Legacy helper used in some codepaths."""
+    cleaned: dict[str, Any] = {}
+    for key, value in logs.items():
+        if isinstance(value, Histogram):
+            h = _as_wandb_hist(value)
+            if h is not None:
+                cleaned[key] = h
+            else:
+                # Optional: summarize unusable histogram data as scalars
+                data = getattr(value, "data", None)
+                if data is not None:
+                    arr = _to_numpy(data)
+                    if arr.size:
+                        arr = arr[np.isfinite(arr)]
+                        if arr.size:
+                            cleaned[key + "/mean"] = float(arr.mean())
+                            cleaned[key + "/std"]  = float(arr.std())
+                            cleaned[key + "/min"]  = float(arr.min())
+                            cleaned[key + "/max"]  = float(arr.max())
         else:
-            total_events = item.total_events[-1]  # pyright: ignore[reportIndexIssue]
-            data = None
-            if item.data is not None:
-                data = item.data[-1]  # pyright: ignore[reportIndexIssue]
-            np_histogram = None
-            if item.np_histogram is not None:
-                np_histogram = item.np_histogram[0][-1], item.np_histogram[1][-1]
-            ret[k] = Histogram(total_events, data, np_histogram)
-
-    return ret  # pyright: ignore[reportReturnType]
+            cleaned[key] = _to_scalar(value) if hasattr(value, "shape") else value
+    wandb.log(cleaned, step=step)
 
 
 class Logger:
@@ -274,7 +247,7 @@ class Logger:
 
     def __init__(self, logging_config: LoggingConfig, run_config: dict):
         self.cfg = logging_config
-        self.buffer = []
+        self.buffer: list[LogDict] = []
         wandb.init(
             name=self.cfg.run_name,
             project=self.cfg.wandb_project,
@@ -285,49 +258,32 @@ class Logger:
             resume="allow",
         )
 
-    def get_distribution_logs(
-        self,
-        name: str,
-        data: Float[npt.NDArray | Array, "..."],
-        axis: int | None = None,
-        log_histogram: bool = True,
-        log_std: bool = True,
-    ) -> "LogDict":
-        ret: "LogDict" = {
-            f"{name}_mean": jnp.mean(data, axis=axis),
-            f"{name}_min": jnp.min(data, axis=axis),
-            f"{name}_max": jnp.max(data, axis=axis),
-        }
-        if log_std:
-            ret[f"{name}_std"] = jnp.std(data, axis=axis)
-        if log_histogram:
-            data = data.reshape(-1)
-            ret[f"{name}"] = Histogram(data=data, total_events=data.shape[0])
-
-        return ret
-
     def accumulate(self, logs: LogDict):
         self.buffer.append(logs)
 
     def _log(self, logs: LogDict | dict[str, float], step: int):
+        cleaned: dict[str, Any] = {}
         for key, value in logs.items():
             if isinstance(value, Histogram):
-                logs[key] = wandb.Histogram(value.data, np_histogram=value.np_histogram)  # pyright: ignore[reportArgumentType]
-        wandb.log(logs, step=step)
+                h = _as_wandb_hist(value)
+                if h is not None:
+                    cleaned[key] = h
+            else:
+                cleaned[key] = _to_scalar(value) if hasattr(value, "shape") else value
+        wandb.log(cleaned, step=step)
 
     def push(self, step: int) -> None:
-        if len(self.buffer) == 0:
-            return
-
-        logs = accumulate_metrics(self.buffer)
-        self.buffer.clear()
-        self._log(logs, step)
+        if self.buffer:
+            logs = accumulate_metrics(self.buffer)
+            self.buffer.clear()
+            self._log(logs, step)
 
     def log(self, logs: LogDict | dict[str, float], step: int):
         self._log(logs, step)
 
     def close(self):
-        wandb.finish()
+        try:
+            wandb.finish()
+        except Exception:
+            pass
 
-    def __del__(self):
-        self.close()
