@@ -121,9 +121,9 @@ def get_reset_mask(
             1.0,
             0.0
         )
-        remainder = jnp.zeros_like(remainder)
+        remainder = 0
     else:
-        top_up = jnp.zeros_like(n_to_replace)
+        top_up = 0
 
     masked_utility = jnp.where(maturity_mask, updated_utility, jnp.inf) # Immature nodes are inf to avoid replacing
     k_masked_utility = utils.get_bottom_k_mask(masked_utility, n_to_replace + top_up)  # bool
@@ -227,6 +227,14 @@ def cbp(
                 reset_mask,
             )
 
+            # reset weights given mask
+            _weights, reset_logs = utils.reset_weights(
+                key_tree,
+                reset_mask,  # No out_layer
+                weights,  # Yes out_layer
+                weight_init_fn,  # state.initial_weights
+            )
+
             _mean_feature_act = jax.tree.map(
                 partial(get_updated_mfa, decay_rate=decay_rate), state.mean_feature_act, _features
             )
@@ -245,14 +253,6 @@ def cbp(
                 _mean_feature_act,
                 state.ages,  # 2 Uses pre-reset post-increment in official code
                 reset_mask
-            )
-
-            # reset weights given mask (uses original weights above for bias correction)
-            _weights, reset_logs = utils.reset_weights(
-                key_tree,
-                reset_mask,  # No out_layer
-                weights,  # Yes out_layer
-                weight_init_fn,  # state.initial_weights
             )
 
             new_params = {}
