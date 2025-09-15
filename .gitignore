@@ -213,3 +213,4 @@ flake.lock
 flake.nix
 .envrc
 checkpoints/
+.claude
