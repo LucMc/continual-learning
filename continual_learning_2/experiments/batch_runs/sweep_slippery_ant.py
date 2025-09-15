@@ -89,8 +89,6 @@ SWEEP_RANGES = {
         "replacement_rate": [0.012, 0.015, 0.020],
         "transform_type": ["linear"],
     },
-}
-
 
     "shrink_and_perturb": {
         "seed": [0, 1, 2, 3, 4],
@@ -257,6 +255,19 @@ def list_configs(algo: str):
     print(f"Total configs: {len(configs)}")
 
 
+def get_count(algo: str):
+    configs = _all_configs_for(algo)
+    total = len(configs)
+    max_index = total - 1
+
+    print(f"Algorithm: {algo}")
+    print(f"Total configurations: {total}")
+    print(f"SLURM array range: 0-{max_index}")
+    print("")
+    print("To submit the sweep, run:")
+    print(f"sbatch --array=0-{max_index} slurm_hyperparameter_sweep.sh {algo}")
+
+
 def run_all_configs(
     algo: str,
     seed: int = 0,
@@ -295,13 +306,14 @@ def run_all_configs(
 
 @dataclass
 class Args:
-    algo: Literal["adam", "regrama", "redo", "cbp", "ccbp", "shrink_and_perturb"]
+    algo: Literal[*list(SWEEP_RANGES.keys())]
     config_id: Optional[int] = None
     seed: int = 42
     wandb_entity: Optional[str] = None
     wandb_project: Optional[str] = None
     wandb_mode: str = "online"
     list_configs: bool = False
+    get_count: bool = False
 
     run_all: bool = False
     config_start: Optional[int] = None
@@ -313,6 +325,8 @@ if __name__ == "__main__":
 
     if args.list_configs:
         list_configs(args.algo)
+    elif args.get_count:
+        get_count(args.algo)
     else:
         if args.run_all:
             run_all_configs(

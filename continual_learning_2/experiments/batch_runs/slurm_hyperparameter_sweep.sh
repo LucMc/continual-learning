@@ -19,7 +19,7 @@ algo="${1:-ccbp}"
 script="${2:-perm_mnist}"
 wandb_entity="${3:-lucmc}"
 wandb_project="${4:-crl_experiments}"
-seed="${5:-42}"
+seed="${5:-0}"
 
 # Setup environment
 if ! command -v uv &> /dev/null; then
