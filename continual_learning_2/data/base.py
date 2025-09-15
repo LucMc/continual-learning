@@ -54,17 +54,15 @@ def _eval_model(
     model: TrainState,
     x: jax.Array,
     y: jax.Array,
-    class_mask: jax.Array | None = None,   # <- NEW
+    class_mask: jax.Array | None = None,
 ) -> dict[str, float]:
     logits = model.apply_fn(model.params, x, training=False)
 
-    # Class-incremental (unmasked) metrics
     ci_loss = optax.softmax_cross_entropy(logits, y).mean()
     ci_acc  = jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1))
 
     out = {"eval_loss_ci": ci_loss, "eval_accuracy_ci": ci_acc}
 
-    # Task-aware (masked) metrics if a mask is provided
     if class_mask is not None:
         loss_mask = jnp.broadcast_to(class_mask, y.shape)       # [B, K]
         masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
@@ -133,21 +131,17 @@ class SplitDataset(ContinualLearningDataset):
                 task_metrics = self._eval_task(model, test_set, class_mask=task_mask)
                 metrics.update(prefix_dict(f"metrics/task_{task}", task_metrics))
 
-        # Evaluate current task
         print(f"- Evaluating on task {self.current_task}")
         task_mask = self._task_class_mask(self.current_task)
         latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
 
-        # Make the task-aware numbers the primary 'metrics/*' so the plot matches training
         metrics.update(prefix_dict("metrics", {
             "eval_loss":     latest["eval_loss_task"],
             "eval_accuracy": latest["eval_accuracy_task"],
-            # keep CI metrics for reference
             "eval_loss_ci":     latest["eval_loss_ci"],
             "eval_accuracy_ci": latest["eval_accuracy_ci"],
         }))
 
-        # Also store the full set under the task-specific prefix
         metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
         return metrics
 
@@ -162,12 +156,12 @@ class SplitDataset(ContinualLearningDataset):
         self,
         model: TrainState,
         test_set: grain.DataLoader,
-        class_mask: jax.Array | None = None,             # <- NEW
+        class_mask: jax.Array | None = None,
     ) -> dict[str, float]:
         logs = []
         for data in test_set:
             x, y = data
-            logs.append(_eval_model(model, x, y, class_mask))        # <- pass mask
+            logs.append(_eval_model(model, x, y, class_mask))
         return accumulate_metrics(logs)
 
     def _get_task(self, task_id: int) -> grain.DataLoader:
@@ -398,16 +392,13 @@ class ClassIncrementalDataset(SplitDataset):
                 task_metrics = self._eval_task(model, test_set, class_mask=task_mask)
                 metrics.update(prefix_dict(f"metrics/task_{task}", task_metrics))
 
-        # Evaluate current task with cumulative masking
         print(f"- Evaluating on task {self.current_task}")
         task_mask = self._cumulative_class_mask(self.current_task)
         latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
 
-        # Primary metrics: use task-aware (masked) for main tracking
         metrics.update(prefix_dict("metrics", {
             "eval_loss":     latest["eval_loss_task"],
             "eval_accuracy": latest["eval_accuracy_task"],
-            # CI metrics show performance on all classes (should be lower)
             "eval_loss_ci":     latest["eval_loss_ci"],
             "eval_accuracy_ci": latest["eval_accuracy_ci"],
         }))
@@ -442,7 +433,6 @@ class ClassIncrementalDataset(SplitDataset):
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
-        # Use full test set (all classes) to properly compare CI vs task-aware metrics
         ds = self._dataset_test
 
         return grain.DataLoader(

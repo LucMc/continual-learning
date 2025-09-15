@@ -38,7 +38,6 @@ class RegramaOptimState:
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
-# -------------- GraMa Score calculation ---------------
 def get_score(
     grads: Float[Array, "#batch #inweights #neurons"]
 ) -> Float[Array, "#neurons"]:
@@ -51,7 +50,6 @@ def get_score(
     return score
 
 
-# -------------- Main ReGraMa Optimiser body ---------------
 def regrama(
     seed: int,
     update_frequency: int = 1000,

@@ -38,7 +38,6 @@ class RedoOptimState:
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
-# -------------- Redo Score calculation ---------------
 def get_score(
     features: Float[Array, "#batch #neurons"],
 ) -> Float[Array, "#neurons"]:
@@ -51,7 +50,6 @@ def get_score(
     return score
 
 
-# -------------- Main Redo Optimiser body ---------------
 def redo(
     seed: int,
     update_frequency: int = 1000,

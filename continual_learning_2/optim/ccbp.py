@@ -43,7 +43,6 @@ def get_updated_utility(
     updated_utility = (decay_rate * utility) + (1-decay_rate) * score
     return updated_utility
 
-# -------------- weight reset ---------------
 def continuous_reset_weights(
     key_tree: PRNGKeyArray,
     weights: PyTree[Float[Array, "..."]],
@@ -122,7 +121,6 @@ def continuous_reset_weights(
     return weights, logs
 
 
-# -------------- Main CCBP Optimiser body ---------------
 def ccbp(
     seed: int,
     replacement_rate: float = 0.012,

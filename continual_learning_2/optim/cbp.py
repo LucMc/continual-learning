@@ -41,7 +41,6 @@ class CbpOptimState:
     )
 
 
-# -------------- CBP Weight reset ---------------
 def get_updated_utility(  # Add batch dim
     out_w_mag: Float[Array, "#weights"],
     utility: Float[Array, "#neurons"],
@@ -49,7 +48,7 @@ def get_updated_utility(  # Add batch dim
     decay_rate: Float[Array, ""] = 0.9,
 ):
     updated_utility = (
-        ((1-decay_rate) * utility) + (decay_rate * jnp.abs(features)).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
+        (decay_rate * utility) + ((1-decay_rate) * jnp.abs(features)).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
     ).flatten()  # Arr[#neurons]
 
     return updated_utility
@@ -78,11 +77,11 @@ def bias_correction(
         next_weights = weights[next_layer_name]
         mask = reset_mask[layer_name]
         
-        bias_correction_factor = 1 - decay_rate ** ages[layer_name]
+        bias_correction_factor = 1 - decay_rate ** (ages[layer_name]+1)
         
         correction_term = jnp.where(
             mask,
-            mean_feature_act[layer_name] / jnp.maximum(bias_correction_factor, 1e-8),
+            mean_feature_act[layer_name] / jnp.maximum(bias_correction_factor, 1e-6),
             0.0
         )
         
@@ -92,8 +91,8 @@ def bias_correction(
         corrected_biases[next_layer_name] = next_bias + bias_correction_delta
     
     # Skip last layer
-    output_layer_name = all_layers[-1]
-    corrected_biases[output_layer_name] = biases[output_layer_name]
+    # output_layer_name = all_layers[-1]
+    # corrected_biases[output_layer_name] = biases[output_layer_name]
     
     return corrected_biases
 
@@ -122,16 +121,15 @@ def get_reset_mask(
             1.0,
             0.0
         )
-        
+    else:
+        top_up = 0
 
-    # Just mask*updated_utility?
     masked_utility = jnp.where(maturity_mask, updated_utility, jnp.inf) # Immature nodes are inf to avoid replacing
     k_masked_utility = utils.get_bottom_k_mask(masked_utility, n_to_replace + top_up)  # bool
 
     return k_masked_utility, remainder
 
 
-# -------------- Main CBP Optimiser body ---------------
 def cbp(
     seed: int,
     replacement_rate: float = 1e-4,
@@ -182,7 +180,7 @@ def cbp(
 
             new_rng, util_key, acc_key = random.split(state.rng, 3)
             key_tree = utils.gen_key_tree(util_key, weights)
-            acc_tree = utils.gen_key_tree(util_key, weights)
+            acc_tree = utils.gen_key_tree(acc_key, weights)
             acc_tree.pop(out_layer_name)  # Add this line to remove the output layer
 
 
@@ -252,7 +250,7 @@ def cbp(
                 weights,  # Uses original weights
                 zeroed_biases,
                 _mean_feature_act,
-                _ages,  # 2
+                state.ages,  # 2 Uses pre-reset post-increment in official code
                 reset_mask
             )
 
