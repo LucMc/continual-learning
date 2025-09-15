@@ -20,6 +20,7 @@ SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "regrama": {
         "tx_lr": [1e-3],
+        "seed": [0, 1, 2, 3, 4],
         # "update_frequency": [100, 1000, 5000, 10_000],
         "update_frequency": [100, 1000, 5000],
         "max_reset_frac": [None, 0.1],
@@ -29,6 +30,7 @@ SWEEP_RANGES = {
     # "regrama": {"tx_lr": [1e-3], "update_frequency": [100, 1000, 10_000, 100_000], "score_threshold": [0.003, 0.003]} # Added ones
     "redo": {
         "tx_lr": [1e-3],
+        "seed": [0, 1, 2, 3, 4],
         # "update_frequency": [100, 1000, 5000, 10_000],
         "update_frequency": [100, 1000, 5000],
         "max_reset_frac": [None, 0.1],
@@ -37,20 +39,61 @@ SWEEP_RANGES = {
     },
     # "redo": {"tx_lr": [1e-3], "update_frequency": [100], "score_threshold": [0.000001, 0.00001, 0.0001, 0.002, 0.003, 0.004, 0.005, 0.02, 0.3]}, # Added regrama ones plus a few inbetweens
     "cbp": {
+        "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.95, 0.99],
         "replacement_rate": [1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-4],
         "maturity_threshold": [10, 100, 1000, 10_000],
     },
-    "ccbp": {
+
+ "ccbp_exp": {
+        "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
-        "decay_rate": [0.0, 0.99],
-        "sharpness": [5.0, 10.0, 15.0, 20.0],
-        "threshold": [0.3, 0.5, 0.7, 1.0],
+        "decay_rate": [0.9],
+        "sharpness": [6.0, 8.0, 12.0, 16.0],
+        "threshold": [0.8667, 0.9000, 0.9333, 0.9500],
         "update_frequency": [1000],
-        "replacement_rate": [0.01, 0.05, 0.2, 0.5, 1.0],
+        "replacement_rate": [0.01],
+        "transform_type": ["exp"],
     },
+
+    "ccbp_sigmoid": {
+        "seed": [0, 1, 2, 3, 4],
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [12.0, 16.0, 24.0, 32.0],
+        "threshold": [0.8968, 0.9226, 0.9484, 0.9613],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01],
+        "transform_type": ["sigmoid"],
+    },
+
+    "ccbp_softplus": {
+        "seed": [0, 1, 2, 3, 4],
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [10.0, 14.0, 18.0, 22.0],
+        "threshold": [0.8992, 0.9280, 0.9440, 0.9542],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01],
+        "transform_type": ["softplus"],
+    },
+
+    "ccbp_linear": {
+        "seed": [0, 1, 2, 3, 4],
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [8.0, 12.0, 16.0],
+        "threshold": [0.9312, 0.9541, 0.9656],
+        "update_frequency": [1000],
+        "replacement_rate": [0.012, 0.015, 0.020],
+        "transform_type": ["linear"],
+    },
+}
+
+
     "shrink_and_perturb": {
+        "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "shrink": [0.995, 0.999],
         "perturb": [0.002, 0.005, 0.01],
@@ -78,6 +121,20 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
         return AdamConfig(learning_rate=params["learning_rate"])
 
     tx = AdamConfig(learning_rate=params.get("tx_lr", 1e-3))
+
+    if algo in ("ccbp", "ccbp_exp", "ccbp_sigmoid", "ccbp_softplus", "ccbp_linear"):
+        return CcbpConfig(
+            tx=tx,
+            decay_rate=params["decay_rate"],
+            replacement_rate=params.get("replacement_rate"),
+            sharpness=params["sharpness"],
+            threshold=params["threshold"],
+            update_frequency=params["update_frequency"],
+            transform_type=params.get("transform_type"),
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        )
+
     configs = {
         "regrama": lambda: RegramaConfig(
             tx=tx,
@@ -103,15 +160,15 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
-        "ccbp": lambda: CcbpConfig(
-            tx=tx,
-            decay_rate=params["decay_rate"],
-            sharpness=params["sharpness"],
-            threshold=params["threshold"],
-            update_frequency=params["update_frequency"],
-            seed=seed,
-            weight_init_fn=jax.nn.initializers.lecun_normal(),
-        ),
+        # "ccbp": lambda: CcbpConfig(
+        #     tx=tx,
+        #     decay_rate=params["decay_rate"],
+        #     sharpness=params["sharpness"],
+        #     threshold=params["threshold"],
+        #     update_frequency=params["update_frequency"],
+        #     seed=seed,
+        #     weight_init_fn=jax.nn.initializers.lecun_normal(),
+        # ),
         "shrink_and_perturb": lambda: ShrinkAndPerterbConfig(
             tx=tx,
             param_noise_fn=jax.nn.initializers.lecun_normal(),
@@ -127,7 +184,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
 def run_config(
     algo: str,
     config_id: int,
-    seed: int = 42,
+    seed: int = 0,
     wandb_entity: str = None,
     wandb_project: str = None,
     wandb_mode: str = "online",
@@ -138,9 +195,9 @@ def run_config(
         return
 
     params = configs[config_id]
-    tag = _format_tag(params)  # UPDATED
+    tag = _format_tag(params)
 
-    opt_config = build_optimizer(algo, params, seed)
+    opt_config = build_optimizer(algo, params, params["seed"]+seed)
 
     trainer = JittedContinualPPOTrainer(
         seed=seed,
@@ -193,7 +250,7 @@ def run_config(
 
 
 def list_configs(algo: str):
-    configs = _all_configs_for(algo)  # UPDATED
+    configs = _all_configs_for(algo)
     for i, params in enumerate(configs):
         tag = _format_tag(params)
         print(f"{i}: {tag}")
@@ -202,7 +259,7 @@ def list_configs(algo: str):
 
 def run_all_configs(
     algo: str,
-    seed: int = 42,
+    seed: int = 0,
     wandb_entity: Optional[str] = None,
     wandb_project: Optional[str] = None,
     config_start: Optional[int] = None,

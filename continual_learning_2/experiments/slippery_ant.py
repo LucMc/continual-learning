@@ -68,7 +68,8 @@ def run_all_slippery_ant():
             # replacement_rate=0.01,
             sharpness=10,
             threshold=0.5,
-            update_frequency=1000
+            update_frequency=1000,
+            transform_type="linear"
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),

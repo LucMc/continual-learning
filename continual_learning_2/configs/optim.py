@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import jax
 import flax.linen as nn
-from typing import Callable
+from typing import Callable, Literal
 import chex
 import optax
 
@@ -77,3 +77,4 @@ class CcbpConfig(ResetMethodConfig):
     threshold: float = 0.95
     decay_rate: float = 0.99
     update_frequency: int = 1000
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp"

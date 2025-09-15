@@ -54,3 +54,6 @@
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_cbp_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_redo_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_regrama_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
+     # Combined
+     # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics dormant,linearized --combine-networks --output-dir plots/main --ext png
+

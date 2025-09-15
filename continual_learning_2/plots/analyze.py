@@ -3,103 +3,56 @@ import tyro
 import numpy as np
 import altair as alt
 from pathlib import Path
-import wandb  # Add direct wandb import
+import wandb
 import pandas as pd
 from collections import defaultdict
 from typing import Optional, Union, List
 
-
 def compute_iqm(values: np.ndarray) -> float:
-    if len(values) == 0:
-        return np.nan
-
-    if len(values) < 4:
-        return np.mean(values)
-    
+    if len(values) < 4: return np.mean(values)
     q25, q75 = np.percentile(values, [25, 75])
     mask = (values >= q25) & (values <= q75)
-    
-    if np.any(mask):
-        return np.mean(values[mask])
-
-    return np.mean(values)
+    return np.mean(values[mask]) if np.any(mask) else np.mean(values)
 
 
 def fetch_runs(entity: str, project: str, group: str):
     api = wandb.Api()
-    
-    filters = {"group": group}
-    
-    runs = api.runs(
-        f"{entity}/{project}",
-        filters=filters,
-        per_page=300
-    )
-    
-    all_runs = list(runs)
-    
-    print(f"Total runs fetched: {len(all_runs)}")
-    
-    run_states = defaultdict(int)
-    for run in all_runs:
-        run_states[run.state] += 1
-    print(f"Run states: {dict(run_states)}")
-    
-    return [x for x in all_runs if x.state == "finished"] # Only finished runs
+    runs = list(api.runs(f"{entity}/{project}", filters={"group": group}, per_page=300))
+    finished = [r for r in runs if r.state == "finished"]
+    print(f"Fetched {len(runs)} runs, {len(finished)} finished")
+    return finished
 
 
 def combine_network_metrics(df: pd.DataFrame, base_metric: str) -> pd.DataFrame:
-    """Combine value and actor network metrics into total metrics."""
-    # Map base metrics to their network-specific versions
-    metric_mapping = {
-        'dormant_neurons': {
-            'value': 'nn/value_dormant_neurons/total_ratio',
-            'actor': 'nn/actor_dormant_neurons/total_ratio',
-            'total': 'nn/total_dormant_neurons/total_ratio'
-        },
-        'linearised_neurons': {
-            'value': 'nn/value_linearised_neurons/total_ratio',
-            'actor': 'nn/actor_linearised_neurons/total_ratio',
-            'total': 'nn/total_linearised_neurons/total_ratio'
-        }
+    mapping = {
+        'dormant_neurons': {'value': 'nn/value_dormant_neurons/total_ratio',
+                           'actor': 'nn/actor_dormant_neurons/total_ratio',
+                           'total': 'nn/total_dormant_neurons/total_ratio'},
+        'linearised_neurons': {'value': 'nn/value_linearised_neurons/total_ratio',
+                              'actor': 'nn/actor_linearised_neurons/total_ratio',
+                              'total': 'nn/total_linearised_neurons/total_ratio'}
     }
 
-    if base_metric not in metric_mapping:
-        return df
+    if base_metric not in mapping: return df
+    metrics = mapping[base_metric]
 
-    metrics = metric_mapping[base_metric]
+    value_data = df[df['metric'] == metrics['value']]
+    actor_data = df[df['metric'] == metrics['actor']]
 
-    # Check if we have both value and actor data
-    value_data = df[df['metric'] == metrics['value']].copy() if any(df['metric'] == metrics['value']) else None
-    actor_data = df[df['metric'] == metrics['actor']].copy() if any(df['metric'] == metrics['actor']) else None
+    if value_data.empty or actor_data.empty: return df
 
-    if value_data is None or actor_data is None:
-        return df
+    merged = pd.merge(value_data[['algorithm', 'step', 'iqm', 'q25', 'q75', 'n_seeds', 'n_values']],
+                     actor_data[['algorithm', 'step', 'iqm', 'q25', 'q75']],
+                     on=['algorithm', 'step'], suffixes=('_value', '_actor'))
 
-    # Merge on algorithm and step to combine metrics
-    merged = pd.merge(
-        value_data[['algorithm', 'step', 'iqm', 'q25', 'q75', 'n_seeds', 'n_values']],
-        actor_data[['algorithm', 'step', 'iqm', 'q25', 'q75']],
-        on=['algorithm', 'step'],
-        suffixes=('_value', '_actor')
-    )
+    if merged.empty: return df
 
-    if merged.empty:
-        return df
-
-    # Compute combined totals (simple average for now)
-    merged['iqm_total'] = (merged['iqm_value'] + merged['iqm_actor']) / 2
-    merged['q25_total'] = (merged['q25_value'] + merged['q25_actor']) / 2
-    merged['q75_total'] = (merged['q75_value'] + merged['q75_actor']) / 2
-
-    # Create total metric entries
     total_data = merged[['algorithm', 'step', 'n_seeds', 'n_values']].copy()
-    total_data['iqm'] = merged['iqm_total']
-    total_data['q25'] = merged['q25_total']
-    total_data['q75'] = merged['q75_total']
+    total_data['iqm'] = (merged['iqm_value'] + merged['iqm_actor']) / 2
+    total_data['q25'] = (merged['q25_value'] + merged['q25_actor']) / 2
+    total_data['q75'] = (merged['q75_value'] + merged['q75_actor']) / 2
     total_data['metric'] = metrics['total']
 
-    # Combine with original data
     return pd.concat([df, total_data], ignore_index=True)
 
 
@@ -411,103 +364,25 @@ def create_chart(df: pd.DataFrame, metrics: Union[str, List[str]], title: str = 
     ).interactive()
 
 
-def main(
-    wandb_entity: str,
-    wandb_project: str = "crl_experiments",
-    group: str | None ="default_group",
-    metric: Optional[str] = None,
-    metrics: Optional[List[str]] = None,
-    combine_networks: bool = False,
-    output_dir: str = "./plots",
-    ext: str = "png",
-    debug: bool = False
-):
-    """
-    Analyze and plot metrics from W&B experiments.
-
-    Args:
-        wandb_entity: W&B entity name
-        wandb_project: W&B project name
-        group: W&B group name for filtering runs
-        metric: Single metric to plot (deprecated, use metrics instead)
-        metrics: List of metrics to plot
-        combine_networks: If True, combines value/actor network metrics into totals.
-                         Use shortcuts: 'dormant' for dormant_neurons, 'linearized' for linearised_neurons
-        output_dir: Directory to save plots
-        ext: File extension for saved plots
-        debug: Enable debug mode for verbose output
-
-    Examples:
-        # Plot single metric
-        python analyze.py --wandb-entity myentity --group mygroup --metric charts/mean_episodic_return
-
-        # Plot multiple metrics separately
-        python analyze.py --wandb-entity myentity --group mygroup --metrics charts/mean_episodic_return,nn/value_dormant_neurons/total_ratio
-
-        # Combine network metrics with totals
-        python analyze.py --wandb-entity myentity --group mygroup --metrics dormant,linearized --combine-networks
-    """
-    if debug:
-        # Set wandb to debug mode for more verbose output
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-
-    # Handle metric/metrics parameter logic
-    if metrics is None and metric is None:
-        metric = "eval_loss"  # default
-
-    if metric is not None and metrics is None:
-        metrics = [metric]
-    elif metric is not None and metrics is not None:
-        print("Warning: Both 'metric' and 'metrics' provided. Using 'metrics'.")
-
-    # Handle comma-separated metrics as convenience (split single string with commas)
-    if metrics and len(metrics) == 1 and ',' in metrics[0]:
-        metrics = [m.strip() for m in metrics[0].split(',')]
-        print(f"Parsed comma-separated metrics: {metrics}")
-
-    # Handle shorthand for common network metrics
-    if combine_networks and metrics:
-        expanded_metrics = []
-        for m in metrics:
-            if m == 'dormant':
-                expanded_metrics.append('dormant_neurons')
-            elif m == 'linearized' or m == 'linearised':
-                expanded_metrics.append('linearised_neurons')
-            else:
-                expanded_metrics.append(m)
-        metrics = expanded_metrics
-
-    print(f"Fetching data for group: '{group}', metrics: {metrics}")
+def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str = "default_group",
+         metric: Optional[str] = None, metrics: Optional[List[str]] = None, combine_networks: bool = False,
+         output_dir: str = "./plots", ext: str = "png", debug: bool = False):
+    if not metrics: metrics = [metric] if metric else ["eval_loss"]
+    if len(metrics) == 1 and ',' in metrics[0]: metrics = [m.strip() for m in metrics[0].split(',')]
     if combine_networks:
-        print("Combining value and actor network metrics into totals")
+        metrics = ['dormant_neurons' if m == 'dormant' else 'linearised_neurons' if m in ['linearized', 'linearised'] else m for m in metrics]
 
     df = fetch_and_process_data(wandb_entity, wandb_project, group, metrics, combine_networks)
-    
-    if df.empty:
-        print(f"No data found for group: '{group}', metrics: {metrics}. Please check your inputs.")
-        print("\nTroubleshooting tips:")
-        print("1. Verify the metric names are exact (check W&B UI)")
-        print("2. Ensure runs in this group have logged these metrics")
-        print("3. Check if runs are still running/crashed")
-        return
+    if df.empty: return print(f"No data found for group: '{group}'")
 
-    # Create title
-    if combine_networks:
-        title = f"{group.replace('_', ' ').title()}: Network Metrics Comparison (IQM)"
-        save_suffix = "combined_networks"
-    else:
-        metric_names = [m.replace('_', ' ').title() for m in metrics]
-        title = f"{group.replace('_', ' ').title()}: {', '.join(metric_names)} (IQM)"
-        save_suffix = '_'.join([m.replace('/', '_') for m in metrics])
-
+    title = f"{group.replace('_', ' ').title()}: {'Network Metrics' if combine_networks else ', '.join(metrics)} (IQM)"
+    save_suffix = "combined_networks" if combine_networks else '_'.join([m.replace('/', '_') for m in metrics])
     chart = create_chart(df, metrics, title, combine_networks)
 
     save_path = Path(output_dir) / ext / f"{group}_{save_suffix}_iqm_smoothed.{ext}"
     save_path.parent.mkdir(exist_ok=True, parents=True)
     chart.save(str(save_path))
-    print(f"\n✅ Chart saved to: {save_path}")
-    
+    print(f"Chart saved to: {save_path}")
     return chart
 
 

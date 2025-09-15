@@ -1,4 +1,5 @@
 import flax
+
 from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
@@ -96,7 +97,6 @@ def bias_correction(
     
     return corrected_biases
 
-# -------------- lowest utility mask ---------------
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
@@ -121,6 +121,7 @@ def get_reset_mask(
             1.0,
             0.0
         )
+        remainder = 0
     else:
         top_up = 0
 
