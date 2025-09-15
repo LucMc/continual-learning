@@ -155,6 +155,19 @@ def list_configs(algo: str):
         print(f"{i}: {tag}")
     print(f"Total configs: {len(configs)}")
 
+
+def get_count(algo: str):
+    configs = _all_configs_for(algo)
+    total = len(configs)
+    max_index = total - 1
+
+    print(f"Algorithm: {algo}")
+    print(f"Total configurations: {total}")
+    print(f"SLURM array range: 0-{max_index}")
+    print("")
+    print("To submit the sweep, run:")
+    print(f"sbatch --array=0-{max_index} slurm_hyperparameter_sweep.sh {algo}")
+
 def run_all_configs(
     algo: str,
     seed: int = 42,
@@ -198,6 +211,7 @@ class Args:
     wandb_entity: Optional[str] = None
     wandb_project: Optional[str] = None
     list_configs: bool = False
+    get_count: bool = False
 
     run_all: bool = False
     config_start: Optional[int] = None
@@ -209,6 +223,8 @@ if __name__ == "__main__":
     
     if args.list_configs:
         list_configs(args.algo)
+    elif args.get_count:
+        get_count(args.algo)
     else:
         if args.run_all:
             run_all_configs(
