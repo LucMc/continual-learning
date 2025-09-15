@@ -42,12 +42,35 @@ class ContinualLearningDataset(abc.ABC):
     def spec(self) -> jax.ShapeDtypeStruct: ...
 
 
+# @jax.jit
+# def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> dict[str, float]:
+#     logits = model.apply_fn(model.params, x, training=False)
+#     loss = optax.softmax_cross_entropy(logits, y).mean()
+#     accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
+#     return {"eval_loss": loss, "eval_accuracy": accuracy} # Removed float() as this breaks mnist
+
 @jax.jit
-def _eval_model(model: TrainState, x: jax.Array, y: jax.Array) -> dict[str, float]:
+def _eval_model(
+    model: TrainState,
+    x: jax.Array,
+    y: jax.Array,
+    class_mask: jax.Array | None = None,
+) -> dict[str, float]:
     logits = model.apply_fn(model.params, x, training=False)
-    loss = optax.softmax_cross_entropy(logits, y).mean()
-    accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
-    return {"eval_loss": loss, "eval_accuracy": accuracy} # Removed float() as this breaks mnist
+
+    ci_loss = optax.softmax_cross_entropy(logits, y).mean()
+    ci_acc  = jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1))
+
+    out = {"eval_loss_ci": ci_loss, "eval_accuracy_ci": ci_acc}
+
+    if class_mask is not None:
+        loss_mask = jnp.broadcast_to(class_mask, y.shape)       # [B, K]
+        masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
+        ta_loss = optax.safe_softmax_cross_entropy(masked_logits, y).mean()
+        ta_acc  = jnp.mean(jnp.argmax(masked_logits, axis=-1) == jnp.argmax(y, axis=-1))
+        out.update({"eval_loss_task": ta_loss, "eval_accuracy_task": ta_acc})
+
+    return out
 
 
 class SplitDataset(ContinualLearningDataset):
@@ -100,25 +123,45 @@ class SplitDataset(ContinualLearningDataset):
 
     def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]:
         metrics = {}
+
         if forgetting:
             for task in range(self.current_task):
                 test_set = self._get_task_test(task)
-                print(f"- Evaluating on task {task}")
-                metrics.update(
-                    prefix_dict(f"metrics/task_{task}", self._eval_task(model, test_set))
-                )
+                task_mask = self._task_class_mask(task)
+                task_metrics = self._eval_task(model, test_set, class_mask=task_mask)
+                metrics.update(prefix_dict(f"metrics/task_{task}", task_metrics))
+
         print(f"- Evaluating on task {self.current_task}")
-        latest_metrics = self._eval_task(model, self._get_task_test(self.current_task))
-        metrics.update(prefix_dict("metrics", latest_metrics))
-        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest_metrics))
+        task_mask = self._task_class_mask(self.current_task)
+        latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
+
+        metrics.update(prefix_dict("metrics", {
+            "eval_loss":     latest["eval_loss_task"],
+            "eval_accuracy": latest["eval_accuracy_task"],
+            "eval_loss_ci":     latest["eval_loss_ci"],
+            "eval_accuracy_ci": latest["eval_accuracy_ci"],
+        }))
+
+        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
         return metrics
 
-    def _eval_task(self, model: TrainState, test_set: grain.DataLoader) -> dict[str, float]:
+    def _task_class_mask(self, task_id: int) -> jax.Array:
+        num_classes_in_task = self.NUM_CLASSES // self.num_tasks
+        classes = jnp.arange(num_classes_in_task * task_id,
+                             num_classes_in_task * (task_id + 1))
+        mask = jnp.zeros((self.NUM_CLASSES,), dtype=bool).at[classes].set(True)
+        return mask
+
+    def _eval_task(
+        self,
+        model: TrainState,
+        test_set: grain.DataLoader,
+        class_mask: jax.Array | None = None,
+    ) -> dict[str, float]:
         logs = []
         for data in test_set:
             x, y = data
-            logs.append(_eval_model(model, x, y))
-
+            logs.append(_eval_model(model, x, y, class_mask))
         return accumulate_metrics(logs)
 
     def _get_task(self, task_id: int) -> grain.DataLoader:
@@ -332,6 +375,38 @@ class ClassIncrementalDataset(SplitDataset):
 
         self._dataset_train, self._dataset_test = self.dataset["train"], self.dataset["test"]
 
+    def _cumulative_class_mask(self, task_id: int) -> jax.Array:
+        """Create mask for all classes seen up to and including task_id."""
+        num_classes_seen = self.class_increment * (task_id + 1)
+        classes_seen = self.class_order[:num_classes_seen]
+        mask = jnp.zeros((self.NUM_CLASSES,), dtype=bool).at[classes_seen].set(True)
+        return mask
+
+    def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]:
+        metrics = {}
+
+        if forgetting:
+            for task in range(self.current_task):
+                test_set = self._get_task_test(task)
+                task_mask = self._cumulative_class_mask(task)
+                task_metrics = self._eval_task(model, test_set, class_mask=task_mask)
+                metrics.update(prefix_dict(f"metrics/task_{task}", task_metrics))
+
+        print(f"- Evaluating on task {self.current_task}")
+        task_mask = self._cumulative_class_mask(self.current_task)
+        latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
+
+        metrics.update(prefix_dict("metrics", {
+            "eval_loss":     latest["eval_loss_task"],
+            "eval_accuracy": latest["eval_accuracy_task"],
+            "eval_loss_ci":     latest["eval_loss_ci"],
+            "eval_accuracy_ci": latest["eval_accuracy_ci"],
+        }))
+
+        # Also store the full set under the task-specific prefix
+        metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
+        return metrics
+
     def _get_task(self, task_id: int) -> grain.DataLoader:
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
@@ -358,7 +433,7 @@ class ClassIncrementalDataset(SplitDataset):
         if task_id < 0 or task_id >= self.num_tasks:
             raise ValueError(f"Invalid task id: {task_id}")
 
-        ds = self._dataset_test.filter(lambda x: x[self.data_label] in list(range(task_id+1)))
+        ds = self._dataset_test
 
         return grain.DataLoader(
             data_source=ds,

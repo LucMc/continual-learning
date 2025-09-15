@@ -38,7 +38,6 @@ class RegramaOptimState:
     logs: FrozenDict = FrozenDict({"nodes_reset": 0})
 
 
-# -------------- GraMa Score calculation ---------------
 def get_score(
     grads: Float[Array, "#batch #inweights #neurons"]
 ) -> Float[Array, "#neurons"]:
@@ -51,12 +50,12 @@ def get_score(
     return score
 
 
-# -------------- Main ReGraMa Optimiser body ---------------
 def regrama(
     seed: int,
     update_frequency: int = 1000,
     score_threshold: float = 0.01,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    max_reset_frac: float | None = None,
 ) -> optax.GradientTransformationExtraArgs:
     """ (Resetting nuerons guided by) Gradient Magnitude based Nueronal Activity Metric (ReGraMa): [Liu et al.](https://arxiv.org/pdf/2505.24061v1) """
 
@@ -72,8 +71,17 @@ def regrama(
     def get_reset_mask(
         scores: Float[Array, "#neurons"],
     ) -> Bool[Array, "#neurons"]:
-        score_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
-        return score_mask
+        threshold_mask = scores <= score_threshold  # get nodes over maturity threshold Arr[Bool]
+
+        if (max_reset_frac is None) or (max_reset_frac <= 0.0):
+            return threshold_mask
+
+        size = scores.shape[-1]
+        k_max = jnp.asarray(jnp.floor(max_reset_frac * size), dtype=jnp.int32)
+        n_in = jnp.asarray(jnp.sum(threshold_mask), dtype=jnp.int32)
+        k_eff = jnp.minimum(k_max, n_in)
+        gated_scores = jnp.where(threshold_mask, scores, jnp.inf)
+        return utils.get_bottom_k_mask(gated_scores, k_eff)
 
     @jax.jit
     def update(
@@ -97,7 +105,10 @@ def regrama(
 
             scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
-            key_tree = utils.gen_key_tree(state.rng, weights)
+            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
+
+            _rng, key = random.split(state.rng)
+            key_tree = utils.gen_key_tree(key, weights)
 
             # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
@@ -105,8 +116,9 @@ def regrama(
             )
 
             # Update bias
+
             _biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=float), b), reset_mask, biases
+                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b), reset_mask, biases
             )
 
             new_params = {}
@@ -119,7 +131,7 @@ def regrama(
                 }
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
-            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1)
+            new_state = state.replace(logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng)
             # new_params.update(excluded)  # TODO
 
             # Reset optim, i.e. Adamw params
@@ -128,6 +140,7 @@ def regrama(
 
             return jax.tree.unflatten(jax.tree.structure(params), flat_new_params), new_state, _tx_state
 
-        return jax.lax.cond(state.time_step % update_frequency == 0, _regrama, no_update, updates)
+        condition = jnp.logical_and(state.time_step > 0, (state.time_step % update_frequency == 0))
+        return jax.lax.cond(condition, _regrama, no_update, updates)
 
     return optax.GradientTransformationExtraArgs(init=init, update=update)

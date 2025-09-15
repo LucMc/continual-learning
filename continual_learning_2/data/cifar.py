@@ -28,7 +28,8 @@ class ProcessCIFAR(grain.RandomMapTransform):
         x = pix.random_flip_left_right(keys[0], image, probability=0.5)
         x = pix.pad_to_size(x, target_height=32 + 4, target_width=32 + 4, mode="reflect")
         x = pix.random_crop(keys[1], x, crop_sizes=(32, 32, 3))
-        x = pix.rotate(x, angle=jax.random.randint(keys[2], shape=(), minval=0, maxval=15))
+        angle_rad = jax.random.randint(keys[2], shape=(), minval=0, maxval=15) * (jnp.pi / 180.0)
+        x = pix.rotate(x, angle=angle_rad) # pix uses rads, torchvision uses degrees
         return x
 
     def random_map(self, element: dict, rng: np.random.Generator) -> DatasetItem:
@@ -40,7 +41,7 @@ class ProcessCIFAR(grain.RandomMapTransform):
         # Standardisation
         mean, std = (0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)
         mean, std = np.broadcast_to(mean, x.shape), np.broadcast_to(std, x.shape)
-        x = x - mean / std
+        x = (x - mean) / std
 
         # Misc transforms
         x = self.process_image(rng.integers(0, np.iinfo(np.int64).max), x)

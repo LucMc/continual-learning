@@ -166,14 +166,14 @@ class PPO:
                 "metrics/clip_fracs": clip_fracs,
                 "metrics/values": values.mean(),
 
-                **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
-                **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
+                # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
+                # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
                 **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
                 **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
                 **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
                 **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-                **prefix_dict("nn/value_activations", value_activations_hist_dict),
-                **prefix_dict("nn/value_activations", value_activations_hist_dict),
+                # **prefix_dict("nn/value_activations", value_activations_hist_dict),
+                # **prefix_dict("nn/value_activations", value_activations_hist_dict),
                 **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
                 **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
                 **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
@@ -182,7 +182,8 @@ class PPO:
                 **prefix_dict("actor", actor_optim_logs),
                 **prefix_dict("value", vf_optim_logs),
 
-                # **prefix_dict("nn/srank", srank_logs),
+                **prefix_dict("nn/actor_srank", actor_srank_logs),
+                **prefix_dict("nn/value_srank", value_srank_logs),
 
                 "metrics/values": values.mean(),
             }, actor_feats["main"], value_feats)
@@ -216,8 +217,8 @@ class PPO:
             metrics = metrics | {
                 "nn/policy_gradient_norm": jnp.linalg.norm(policy_grads_flat),
                 "nn/policy_parameter_norm": jnp.linalg.norm(policy_params_flat),
-                **prefix_dict("nn/policy_gradients", policy_grads_hist_dict),
-                **prefix_dict("nn/policy_parameters", policy_param_hist_dict),
+                # **prefix_dict("nn/policy_gradients", policy_grads_hist_dict),
+                # **prefix_dict("nn/policy_parameters", policy_param_hist_dict),
                 "nn/vf_gradient_norm": jnp.linalg.norm(vf_grads_flat),
                 "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
                 # **prefix_dict("nn/vf_gradients", vf_grads_hist_dict),

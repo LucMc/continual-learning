@@ -8,8 +8,8 @@ import flax
 from flax.training.train_state import TrainState
 import optax
 
-import continual_learning.optim as optim
 from typing import Callable
+from copy import deepcopy
 
 
 def get_out_weights_mag(weights):
@@ -74,13 +74,14 @@ def attach_reset_method(
         tx = transforms[0][1]
         reset_method = transforms[1][1]
 
+        raw_grads = updates
         updates, new_state["tx"] = tx.update(updates, state["tx"], params, **extra_args)
         new_params_with_opt = optax.apply_updates(params, updates)
 
         # Reset method
         new_params_with_reset, new_state["reset_method"], new_state["tx"] = (
             reset_method.update(
-                updates,
+                raw_grads, # Use original grads before optim transform
                 state["reset_method"],
                 new_params_with_opt,
                 features=features,
@@ -115,7 +116,6 @@ def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     weights: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = None,
 ):
     all_layer_names = list(weights.keys())
     all_mask_names = list(reset_mask.keys())  # Just to check layer names are the same
@@ -147,7 +147,7 @@ def reset_weights(
             if len(out_weight_shape) == 2:  # Dense layer
                 if len(weights[layer_name].shape) == 4:  # Check if previous layer was conv
                     spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
+                    out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
                 else:  # Dense -> Dense
                     out_mask_1d = in_mask_1d
 
@@ -173,151 +173,81 @@ def reset_weights(
     return weights, logs
 
 
-def continuous_reset_weights(
-    key_tree: PRNGKeyArray,
-    reset_mask: PyTree[Float[Array, "#neurons"]],
-    weights: PyTree[Float[Array, "..."]],
-    utilities: PyTree[Float[Array, "..."]],
-    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = 0.001,
-):
-    all_layer_names = list(weights.keys())
-    all_mask_names = list(reset_mask.keys())
-    logs = {}
-
-    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
-
-    for idx, layer_name in enumerate(all_layer_names[:-1]):
-        assert layer_name in all_mask_names, (
-            f"Layer names should be identical: {layer_name} not in {all_mask_names}"
-        )
-
-        in_mask_1d = reset_mask[layer_name]
-
-        # Reset incoming weights
-        in_weight_mask = expand_mask_for_weights(
-            in_mask_1d, weights[layer_name].shape, mask_type="incoming"
-        )
-
-        target_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
-
-        stepped_weights = (1 - replacement_rate) * weights[layer_name] + replacement_rate * target_weights
-        # Softmax ensures these balance
-        weights[layer_name] = jnp.where(
-            in_weight_mask,
-            utilities[layer_name] * weights[layer_name]
-            + (1 - utilities[layer_name]) * stepped_weights,
-            weights[layer_name],
-        )
-
-        # Reset outgoing weights
-        if idx + 1 < len(all_layer_names):
-            next_layer = all_layer_names[idx + 1]
-            out_weight_shape = weights[next_layer].shape
-
-            # Handle shape transitions
-            if len(out_weight_shape) == 2:  # Dense layer
-                if len(weights[layer_name].shape) == 4:  # Previous layer was conv
-                    spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_mask_1d = jnp.repeat(in_mask_1d, spatial_size)
-                    out_utilities_1d = jnp.repeat(utilities[layer_name], spatial_size)
-
-                else:  # Dense -> Dense
-                    out_mask_1d = in_mask_1d
-                    out_utilities_1d = utilities[layer_name]
-
-            elif len(out_weight_shape) == 4:  # Conv layer
-                out_mask_1d = in_mask_1d
-                out_utilities_1d = utilities[layer_name]
-
-            out_weight_mask = expand_mask_for_weights(
-                out_mask_1d, out_weight_shape, mask_type="outgoing"
-            )
-
-            stepped_out = (1 - replacement_rate) * weights[next_layer] + replacement_rate * jnp.zeros_like(weights[next_layer])
-
-            expanded_utils = expand_mask_for_weights(
-                out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
-            )
-            weights[next_layer] = jnp.where(
-                out_weight_mask,
-                (expanded_utils * weights[next_layer]) + (1 - expanded_utils) * stepped_out,
-                weights[next_layer],
-            )
-
-        # Logging TODO: Plot these
-        effective_reset = (in_mask_1d * replacement_rate).mean() * (
-            1 - utilities[layer_name]
-        ).mean()
-
-        logs[layer_name] = {
-            "effective_reset_rate": effective_reset,
-            "max_mask_value": in_mask_1d.max(),
-            "mean_mask_value": in_mask_1d.mean(),
-        }
-
-    logs[all_layer_names[-1]] = {
-        "effective_reset_rate": 0.0,
-        "max_mask_value": 0.0,
-        "mean_mask_value": 0.0,
-    }
-
-    return weights, logs
-
-
-
 def reset_optim_params(tx_state, reset_mask):
     """Reset optimizer params using reset_mask"""
 
-    def composite(tx_state):
-        # handle optax chains etc
-        new_inner_states = {}
-        for name, txs in tx_state.inner_states.items():
-            new_inner_states[name] = reset_optim_params(txs.inner_state, reset_mask)
-
-        return tx_state._replace(inner_states=new_inner_states)
-
     def reset_params(tx_state):
-        def map_fn(path, value):
-            # resets weights and biases similar to in cbp, but to zero
-            if "kernel" in path:
-                layer_name = path[0]
-                if layer_name in reset_mask:
-                    mask = reset_mask[layer_name]
-                    mask_expanded = mask[None, :]  # Array: [1, out_features]
-                    return jnp.where(mask_expanded, 0.0, value)
+        def map_fn(momentum):
 
-            elif "bias" in path:
-                layer_name = path[0]  # .key if dict
-                if layer_name in reset_mask:
-                    mask = reset_mask[layer_name]
-                    return jnp.where(mask, 0.0, value)
-            return value
+            all_layer_names = list(momentum.keys())
+            momentum = deepcopy(momentum)
+            for idx, layer_name in enumerate(list(momentum.keys())[:-1]): # momentum is mu/nu
+                in_mask_1d = reset_mask[layer_name]
+
+                in_momentum_mask = expand_mask_for_weights(
+                    in_mask_1d, momentum[layer_name]["kernel"].shape, mask_type="incoming"
+                )
+
+                # Zero the incoming momentums
+                momentum[layer_name]["kernel"] = jnp.where(in_momentum_mask, jnp.zeros_like(momentum[layer_name]["kernel"]), momentum[layer_name]["kernel"])
+
+                # Reset outgoing momentum
+                if idx + 1 < len(all_layer_names):
+                    next_layer = all_layer_names[idx + 1]
+                    out_momentum_shape = momentum[next_layer]["kernel"].shape
+
+                    if len(out_momentum_shape) == 2:  # Dense layer
+                        if len(momentum[layer_name]["kernel"].shape) == 4:  # Check if previous layer was conv
+                            spatial_size = out_momentum_shape[0] // in_mask_1d.size
+                            out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
+                        else:  # Dense -> Dense
+                            out_mask_1d = in_mask_1d
+
+                    elif len(out_momentum_shape) == 4:  # Conv layer
+                        out_mask_1d = in_mask_1d
+
+                    # Apply outgoing mask
+                    out_momentum_mask = expand_mask_for_weights(
+                        out_mask_1d, out_momentum_shape, mask_type="outgoing"
+                    )
+
+                    momentum[next_layer]["kernel"] = jnp.where(
+                        out_momentum_mask, jnp.zeros_like(momentum[next_layer]["kernel"]), momentum[next_layer]["kernel"]
+                    )
+                    # Reset bias too
+                    momentum[layer_name]["bias"] = jnp.where(reset_mask[layer_name][None:], jnp.zeros_like(momentum[layer_name]["bias"]), momentum[layer_name]["bias"])
+
+            return momentum 
 
         new_state_dict = {}
-        if type(tx_state) == dict:
-            if "reset_method" in tx_state.keys():
-                return {
-                    "reset_method": tx_state["reset_method"],
-                    "tx": (reset_params(tx_state["tx"][0]),) + tx_state["tx"][1:],
-                }
-            else:
-                raise "Unknown reset method"
+
+        if isinstance(tx_state, dict):
+            return {
+                "reset_method": tx_state["reset_method"],
+                "tx": (reset_params(tx_state["tx"][0]),) + tx_state["tx"][1:],
+            }
+
+        elif isinstance(tx_state, tuple) and len(tx_state) == 2:
+            new_elems = []
+            for state in tx_state:
+                if isinstance(state, optax.EmptyState):
+                    new_elems.append(state)
+                else:
+                    new_elems.append(reset_params(state))  # transformed namedtuple
+
+            return tuple(new_elems)
+            # return (reset_params(tx_state[0]),) + tx_state[1:]
 
         if hasattr(tx_state, "mu"):
             new_state_dict["mu"] = {
-                "params": flax.traverse_util.path_aware_map(map_fn, tx_state.mu["params"])
+                "params": map_fn(tx_state.mu["params"]) # flax.traverse_util.path_aware_map(map_fn, tx_state.mu["params"])
             }
 
         if hasattr(tx_state, "nu"):
             new_state_dict["nu"] = {
-                "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
+                "params": map_fn(tx_state.nu["params"])
+                # "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
             }
-
-        if (
-            isinstance(tx_state, tuple) and len(tx_state) == 2
-        ):  # Make more generic by checking specific type instead
-            return (reset_params(tx_state[0]),) + tx_state[1:]
 
         # copy other attributes
         for attr in tx_state._fields:
@@ -326,12 +256,6 @@ def reset_optim_params(tx_state, reset_mask):
 
         return type(tx_state)(**new_state_dict)
 
-    # if hasattr(tx_state, "inner_states"):
-    #     return composite(tx_state)
-    # else:
-    #     if isinstance(tx_state, tuple):
-    #         return (reset_params(tx_state[0]),) + tx_state[1:]
-    #     else:
     return reset_params(tx_state)
 
 
@@ -362,182 +286,3 @@ def get_bottom_k_mask(values, n_to_replace):
     mask = ranks < n_to_replace
 
     return mask
-
-
-"""
-        # copy other attributes
-        breakpoint()
-        # new_state_dict["reset_method"] = tx_state["reset_method"]
-        new_state_dict_tx = {}
-        for attr in tx_state["tx"]._fields:
-            if attr not in ["mu", "nu"] and hasattr(tx_state["tx"], attr):
-                new_state_dict_tx[attr] = getattr(tx_state["tx"], attr)
-        
-        return type(tx_state)(tx=new_state_dict_tx, res)
-    
-    if hasattr(tx_state, "inner_states"):
-        return composite(tx_state)
-    else:
-        # for single optimizer states (i.e. just Adam)
-        if isinstance(tx_state, tuple):
-            # put back into tuple
-            return (reset_params(tx_state[0]),) + tx_state[1:]
-        else:
-            return reset_params(tx_state)
-
-
-def old_reset_weights(
-    key_tree: PRNGKeyArray,
-    reset_mask: PyTree[Bool[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    # initial_weights: PyTree[Float[Array, "..."]],
-    weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: Float[Array, ""] = None,
-):
-    weight_layer_names = list(layer_w.keys())
-    activation_layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(weight_layer_names) - 1):
-        w_in_layer = weight_layer_names[i]
-        w_out_layer = weight_layer_names[i + 1]
-
-        m_in_layer = activation_layer_names[i]
-        m_out_layer = activation_layer_names[i + 1]
-
-        # mask_broadcast = jax.lax.select(len(layer_w[w_in_layer])==4, [None,None,None,1], [])
-        assert reset_mask[m_in_layer].dtype == bool, "Mask type isn't bool"
-        # assert len(reset_mask[m_in_layer].flatten()) == layer_w[w_out_layer].shape[0], (  # ?
-        #     f"Reset mask shape incorrect: {len(reset_mask[m_in_layer].flatten())} should be {layer_w[w_out_layer].shape[0]}"
-        # )
-
-        in_reset_mask = reset_mask[m_in_layer].reshape(-1)  # [1, out_size]
-        random_weights = weight_init_fn(key_tree[w_in_layer], layer_w[w_in_layer].shape)
-        _in_layer_w = jnp.where(in_reset_mask, random_weights, layer_w[w_in_layer])
-
-        _out_layer_w = jnp.where(
-            in_reset_mask, jnp.zeros_like(layer_w[w_out_layer]), layer_w[w_out_layer]
-        )
-        n_reset = reset_mask[m_in_layer].sum()
-
-        layer_w[w_in_layer] = _in_layer_w
-        layer_w[w_out_layer] = _out_layer_w
-
-        logs[w_in_layer] = {"nodes_reset": n_reset}
-
-    logs[w_out_layer] = {"nodes_reset": 0}
-
-    return layer_w, logs
-
-
-def old_continuous_weight_reset(
-    reset_mask: PyTree[Float[Array, "#neurons"]],
-    layer_w: PyTree[Float[Array, "..."]],
-    initial_weights: PyTree[Float[Array, "..."]],
-    utilities: PyTree[Float[Array, "..."]],
-    replacement_rate: Float[Array, ""] = 0.001,
-):
-    layer_names = list(reset_mask.keys())
-    logs = {}
-
-    for i in range(len(layer_names) - 1):
-        in_layer = layer_names[i]
-        out_layer = layer_names[i + 1]
-
-        zero_out_weights = jnp.zeros(layer_w[out_layer].shape, float)
-
-        in_reset_mask = reset_mask[in_layer].reshape(1, -1)  # [1, out_size]
-
-        stepped_in_weights = (replacement_rate * initial_weights[in_layer]) + (
-            (1 - replacement_rate) * layer_w[in_layer]
-        )
-        stepped_util_in_weights = (
-            utilities[in_layer] * layer_w[in_layer]
-            + (1 - utilities[in_layer]) * stepped_in_weights
-        )
-        _in_layer_w = jnp.where(in_reset_mask, stepped_util_in_weights, layer_w[in_layer])
-
-        stepped_out_weights = (replacement_rate * zero_out_weights) + (
-            (1 - replacement_rate) * layer_w[out_layer]
-        )
-
-        out_reset_mask = reset_mask[in_layer].reshape(-1, 1)  # [in_size, 1]
-        stepped_util_out_weights = (
-            utilities[out_layer] * layer_w[out_layer]
-            + (1 - utilities[out_layer]) * stepped_out_weights
-        )
-
-        _out_layer_w = jnp.where(out_reset_mask, stepped_util_out_weights, layer_w[out_layer])
-
-        layer_w[in_layer] = _in_layer_w
-        layer_w[out_layer] = _out_layer_w
-
-        logs[in_layer] = {"nodes_reset": 0}  # n_reset no longer applicable
-    logs[out_layer] = {"nodes_reset": 0}
-    return layer_w, logs
-
-# CBP
-def get_updated_utility(  # Add batch dim
-    utility: Float[Array, "#neurons"],
-    features: Float[Array, "#batch #neurons"],  # Vmap over batches
-    decay_rate: Float[Array, ""] = 0.9,
-    out_w_mag: Float[Array, "#weights"] | None = None
-):
-    if out_w_mag
-    updated_utility = (
-        (decay_rate * utility) + (1 - decay_rate) * jnp.abs(features).mean(axis=tuple(range(features.ndim-1))) * out_w_mag
-    ).flatten()  # Arr[#neurons]
-
-    return updated_utility
-
-# CCBP
-def get_updated_utility(  # Add batch dim
-    out_w_mag: Float[Array, "#weights"],
-    utility: Float[Array, "#neurons"],
-    features: Float[Array, "#batch #neurons"],
-    decay_rate: Float[Array, ""] = 0.9,
-) -> Float[Array, "#neurons"]:
-    # TODO: Mean activations etc over the whole network instead of per layer
-    # Remove batch dim from some inputs just in case
-    reduce_axis = tuple(range(features.ndim - 1))
-    mean_act_per_neuron = jnp.abs(features).mean(axis=reduce_axis)
-
-    # Running stats normalising both out and in utils
-    updated_utility = (
-        (decay_rate * utility)
-        + (1 - decay_rate)
-        * 0.5
-        * (
-            (mean_act_per_neuron / (jnp.mean(mean_act_per_neuron) + 1e-8))  # Inbound stat
-            + (out_w_mag / (jnp.mean(out_w_mag) + 1e-8))  # Outbound stat
-        )
-    ).flatten()  # Arr[#neurons]
-    # avg neuron is arround 1 utility, using relu means min act of 0
-
-    return updated_utility
-
-# ReDo
-# These methods could for sure be the same and just pass in different criteria
-def get_score(
-    features: Float[Array, "#batch #neurons"],
-) -> Float[Array, "#neurons"]:
-    # Avg over other dims
-    reduce_axes = tuple(range(features.ndim - 1))
-    mean_act_per_neuron = jnp.mean(jnp.abs(features), axis=reduce_axes)  # Arr[#neurons]
-    score = mean_act_per_neuron / (
-        jnp.mean(mean_act_per_neuron) + 1e-8
-    )  # Arr[#neurons] / Scalar
-    return score
-
-# Regrama
-def get_score(
-    grads: Float[Array, "#batch #inweights #neurons"]
-) -> Float[Array, "#neurons"]:
-    # Avg over other dims
-    reduce_axes = tuple(range(grads.ndim - 1))
-    mean_grad_per_neuron = jnp.mean(jnp.abs(grads), axis=reduce_axes)  # Arr[#neurons]
-    score = mean_grad_per_neuron / (
-        jnp.mean(mean_grad_per_neuron) + 1e-8
-    )  # Arr[#neurons] / Scalar
-    return score
-    """
