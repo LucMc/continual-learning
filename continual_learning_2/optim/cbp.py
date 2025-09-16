@@ -1,5 +1,4 @@
 import flax
-
 from flax import struct
 from flax.core import FrozenDict
 from flax.typing import FrozenVariableDict
@@ -97,38 +96,29 @@ def bias_correction(
     
     return corrected_biases
 
-def get_reset_mask(
-    updated_utility: Float[Array, "#neurons"],
-    ages: Float[Array, "#neurons"],
-    remainder: Float[Array, "#neurons"],
-    key: PRNGKey,
-    maturity_threshold: Int[Array, ""] = 100,
-    replacement_rate: Float[Array, ""] = 0.01,
-    accumulate: Bool[Array, ""] = False,
-) -> Bool[Array, "#neurons"]:
-    # ages+1 because cbp updates ages first, whereas we do it together with resetting
-    maturity_mask = (
-        ages + 1 > maturity_threshold
-    )  # get nodes over maturity threshold Arr[Bool]
+def get_reset_mask(updated_utility, ages, remainder, key,
+                   maturity_threshold=100,
+                   replacement_rate=0.01,
+                   accumulate=False):
+    maturity_mask = (ages + 1 > maturity_threshold)
+    n_mature = jnp.sum(maturity_mask)
 
-    ideally_replace = (jnp.sum(maturity_mask) * replacement_rate) + remainder # float
-    n_to_replace = jnp.floor(ideally_replace).astype(jnp.int32) # int
-    remainder = ideally_replace - n_to_replace # float
-
-    if not accumulate:
-        top_up = jnp.where(
-            random.uniform(key, shape=()) < remainder,
-            1.0,
-            0.0
-        )
-        remainder = jnp.zeros_like(remainder)
+    if accumulate:
+        ideally = n_mature * replacement_rate + remainder
+        n_to_replace = jnp.floor(ideally).astype(jnp.int32)
+        new_remainder = ideally - n_to_replace
+        top_up = 0
     else:
-        top_up = jnp.zeros_like(n_to_replace)
+        ideally = n_mature * replacement_rate          # ← no carry
+        n_to_replace = jnp.floor(ideally).astype(jnp.int32)
+        frac = ideally - n_to_replace
+        top_up = (random.uniform(key, ()) < frac).astype(jnp.int32)
+        new_remainder = 0.0                             # ← don’t carry over
 
-    masked_utility = jnp.where(maturity_mask, updated_utility, jnp.inf) # Immature nodes are inf to avoid replacing
-    k_masked_utility = utils.get_bottom_k_mask(masked_utility, n_to_replace + top_up)  # bool
-
-    return k_masked_utility, remainder
+    masked_utility = jnp.where(maturity_mask, updated_utility, jnp.inf)
+    k_masked_utility = utils.get_bottom_k_mask(masked_utility,
+                                               n_to_replace + top_up)
+    return k_masked_utility, new_remainder
 
 
 def cbp(
@@ -151,7 +141,7 @@ def cbp(
 
         return CbpOptimState(
             # initial_weights=deepcopy(weights),
-            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
+            utilities=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
             mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
             rng=jax.random.PRNGKey(seed),
@@ -227,27 +217,7 @@ def cbp(
                 reset_mask,
             )
 
-            _mean_feature_act = jax.tree.map(
-                partial(get_updated_mfa, decay_rate=decay_rate), state.mean_feature_act, _features
-            )
-
-            # zero biases of reset nodes
-            zeroed_biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name])},
-                biases,
-            )
-
-            # Bias correction
-            corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
-                weights,  # Uses original weights
-                zeroed_biases,
-                _mean_feature_act,
-                state.ages,  # 2 Uses pre-reset post-increment in official code
-                reset_mask
-            )
-
-            # reset weights given mask (uses original weights above for bias correction)
+            # reset weights given mask
             _weights, reset_logs = utils.reset_weights(
                 key_tree,
                 reset_mask,  # No out_layer
@@ -255,6 +225,29 @@ def cbp(
                 weight_init_fn,  # state.initial_weights
             )
 
+            _mean_feature_act = jax.tree.map(
+                partial(get_updated_mfa, decay_rate=decay_rate), state.mean_feature_act, _features
+            )
+
+            _utility = jax.tree.map(lambda u, m: jnp.where(m, 0.0, u), _utility, reset_mask)
+            _mean_feature_act = jax.tree.map(lambda mfa, m: jnp.where(m, 0.0, mfa), _mean_feature_act, reset_mask)
+
+
+            # zero biases of reset nodes (unchanged)
+            zeroed_biases = jax.tree.map(
+                lambda m, b: jnp.where(m, jnp.zeros_like(b), b),
+                reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name], dtype=bool)},
+                biases,
+            )
+
+            corrected_biases = bias_correction(
+                weights,                  # original weights
+                zeroed_biases,
+                _mean_feature_act,
+                state.ages,                 # << key change
+                reset_mask,
+                decay_rate,
+            )
             new_params = {}
             _logs = {k: 0 for k in state.logs}
 
