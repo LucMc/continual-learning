@@ -25,4 +25,5 @@ __all__ = [
     "VectorEnv",
     "JittableContinualLearningEnv",
     "ContinualAnt",
+    "ContinualHumanoid",
 ]

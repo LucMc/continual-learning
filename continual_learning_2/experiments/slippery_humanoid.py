@@ -43,7 +43,7 @@ class Args:
     include: list[str] = field(default_factory=list)
 
 
-def run_all_slippery_ant():
+def run_all_slippery_humanoid():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -144,10 +144,10 @@ def run_all_slippery_ant():
                 entropy_coefficient=1e-3,
                 clip_eps=0.2,
                 vf_coefficient=0.5,
-                normalize_advantages=True,
+                normalize_advhumanoidages=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_ant", num_envs=2048, num_tasks=20, episode_length=1000
+                "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
@@ -157,7 +157,7 @@ def run_all_slippery_ant():
                 run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_ant_full2",
+                group="slippery_humanoid_full2",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
@@ -170,7 +170,7 @@ def run_all_slippery_ant():
 
 
 if __name__ == "__main__":
-    run_all_slippery_ant()
+    run_all_slippery_humanoid()
 
 #     num_rollout_steps=2048 * 32 * 5,
 #     num_epochs=4,
