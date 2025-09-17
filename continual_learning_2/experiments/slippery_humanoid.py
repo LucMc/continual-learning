@@ -144,7 +144,7 @@ def run_all_slippery_humanoid():
                 entropy_coefficient=1e-3,
                 clip_eps=0.2,
                 vf_coefficient=0.5,
-                normalize_advhumanoidages=True,
+                normalize_advantages=True,
             ),
             env_cfg=EnvConfig(
                 "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
@@ -185,4 +185,3 @@ if __name__ == "__main__":
 # env_cfg=EnvConfig(
 #     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
 # ),
-

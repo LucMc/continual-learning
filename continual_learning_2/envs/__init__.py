@@ -6,7 +6,7 @@ from .base import (
     JittableVectorEnv,
     VectorEnv,
 )
-from .slippery_ant import ContinualAnt
+from .slippery_ant import ContinualAnt, ContinualHumanoid
 
 
 def get_benchmark(
@@ -15,6 +15,8 @@ def get_benchmark(
 ) -> ContinualLearningEnv | JittableContinualLearningEnv:
     if env_config.name == "slippery_ant":
         return ContinualAnt(seed, env_config)
+    if env_config.name == "slippery_humanoid":
+        return ContinualHumanoid(seed, env_config)
     else:
         raise ValueError(f"Unknown environment: {env_config.name}")
 
