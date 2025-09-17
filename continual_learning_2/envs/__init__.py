@@ -6,7 +6,7 @@ from .base import (
     JittableVectorEnv,
     VectorEnv,
 )
-from .slippery_ant import ContinualAnt, ContinualHumanoid
+from .slippery_mujoco import ContinualAnt, ContinualHumanoid
 
 
 def get_benchmark(
