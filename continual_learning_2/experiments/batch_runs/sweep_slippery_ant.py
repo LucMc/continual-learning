@@ -50,10 +50,10 @@ SWEEP_RANGES = {
         "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
-        "sharpness": [6.0, 8.0, 12.0, 16.0],
-        "threshold": [0.80, 0.85, 0.9, 0.95],
+        "sharpness": [5.0, 15.0, 20.0],
+        "threshold": [0.01, 0.1, 0.5, 0.95],
         "update_frequency": [1000],
-        "replacement_rate": [0.01],
+        "replacement_rate": [0.01, 0.1],
         "transform_type": ["exp"],
     },
 

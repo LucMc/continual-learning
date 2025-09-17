@@ -66,14 +66,10 @@ def continuous_reset_weights(
         # transform = lambda x: jnp.clip(jnp.exp(-sharpness * (x - threshold)), 0, 1)
 
         match transform_type:
-            case "exp":
-                transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
-            case "sigmoid":
-                transform = lambda x: jnp.minimum(2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0)
-            case "softplus":
-                transform = lambda x: jnp.minimum(jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0)
-            case "linear":
-                transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
+            case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
+            case "sigmoid": transform = lambda x: jnp.minimum(2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0)
+            case "softplus": transform = lambda x: jnp.minimum(jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0)
+            case "linear": transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
 
         transformed_utilities = jax.tree.map(transform, utilities)
 
