@@ -1,12 +1,11 @@
 import optax
-from dataclasses import dataclass
 
+from flax import struct
 from continual_learning.types import GradientTransformationExtraArgsReset
 from jaxtyping import PyTree
 
 
-@dataclass(frozen=True)
-class IdentityState:
+class IdentityState(struct.PyTreeNode):
     logs: dict
 
 

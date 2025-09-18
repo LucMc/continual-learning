@@ -30,7 +30,6 @@ from continual_learning.types import (
     Rollout,
     StdType,
 )
-from continual_learning.utils.nn import flatten_last
 from continual_learning.utils.buffers import compute_gae_scan
 from continual_learning.utils.monitoring import (
     Logger,
@@ -76,8 +75,8 @@ class PPO:
             mutable=("activations", "preactivations"),
         )
 
-        actor_activations = flatten_last(actor_intermediates["activations"])
-        value_activations = flatten_last(value_intermediates["activations"])
+        actor_activations = actor_intermediates["activations"]
+        value_activations = value_intermediates["activations"]
 
         actor_activations_flat = {
             k: v[0]  # pyright: ignore[reportIndexIssue]
@@ -189,6 +188,7 @@ class PPO:
             # Intermediates
             actor_feats = actor_intermediates["activations"]  # ["main"]
             value_feats = value_intermediates["activations"]
+
             vf_optim_logs = vf.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
             actor_optim_logs = policy.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
 
