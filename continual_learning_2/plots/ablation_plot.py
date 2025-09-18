@@ -61,7 +61,7 @@ def fetch_ablation_data(entity: str, project: str, group: str, metric: str, spli
 
     for run in runs:
         parsed = parse_run_name(run.name)
-        history = run.history(keys=[metric, "_step"])
+        history = run.history(keys=[metric, "_step"], samples=5000)
         if history.empty: continue
 
         for _, row in history.iterrows():
