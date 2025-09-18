@@ -12,12 +12,12 @@ from flax.training.train_state import TrainState
 from jaxtyping import PRNGKeyArray
 
 import wandb
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.optim import AdamConfig
-from continual_learning_2.configs.rl import PolicyNetworkConfig, ValueFunctionConfig
-from continual_learning_2.models import get_model, get_model_cls
-from continual_learning_2.models.rl import Policy
-from continual_learning_2.types import Activation, StdType
+from continual_learning.configs.models import MLPConfig
+from continual_learning.configs.optim import AdamConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, ValueFunctionConfig
+from continual_learning.models import get_model, get_model_cls
+from continual_learning.models.rl import Policy
+from continual_learning.types import Activation, StdType
 
 
 class Transition(NamedTuple):
@@ -226,7 +226,7 @@ def rollout(
 
 def main():
     wandb.init(
-        project="continual_learning_2",
+        project="continual_learning",
         name="brax_ppo_scratch_4_attempt_11",
         tags=["BRAX-PPO", "ant"],
         # mode="disabled",

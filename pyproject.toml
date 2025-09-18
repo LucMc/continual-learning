@@ -60,8 +60,6 @@ line-length = 95
 include = [
     "continual_learning",
     "continual_learning.*",
-    "continual_learning_2",
-    "continual_learning_2.*",
 ]
 
 [tool.black]
