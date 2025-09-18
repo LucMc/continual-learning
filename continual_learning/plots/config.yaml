@@ -1,0 +1,113 @@
+_wandb:
+    value:
+        cli_version: 0.21.0
+        e:
+            gombksznj7776sp132hetj8bvepyin25:
+                args:
+                    - -se
+                    - lucmc
+                    - -sp
+                    - crl_final
+                    - --src-group
+                    - ccbp_server
+                    - --dst-group
+                    - new_group
+                codePath: continual_learning/plots/copy_runs.py
+                codePathLocal: copy_runs.py
+                cpu_count: 6
+                cpu_count_logical: 12
+                cudaVersion: "12.6"
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "172129046528"
+                email: lucmccutcheon.home@gmail.com
+                executable: /home/dook/new-cont-rl/continual-learning/.venv/bin/python3
+                git:
+                    commit: d456e5236a6aee60ef9f9a035414063b71e48c67
+                    remote: https://github.com/LucMc/continual-learning.git
+                gpu: NVIDIA GeForce RTX 3080
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      memoryTotal: "10737418240"
+                      name: NVIDIA GeForce RTX 3080
+                      uuid: GPU-0a89f444-1e36-a486-2588-e6c6382b12be
+                host: DESKTOP-MPAPUU0
+                memory:
+                    total: "33603919872"
+                os: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35
+                program: /home/dook/new-cont-rl/continual-learning/continual_learning/plots/copy_runs.py
+                python: CPython 3.12.7
+                root: /home/dook/new-cont-rl/continual-learning/continual_learning/plots
+                startedAt: "2025-09-05T15:50:47.013615Z"
+                writerId: gombksznj7776sp132hetj8bvepyin25
+        m: []
+        python_version: 3.12.7
+        t:
+            "3":
+                - 2
+                - 3
+                - 13
+                - 16
+            "4": 3.12.7
+            "5": 0.21.0
+            "12": 0.21.0
+            "13": linux-x86_64
+algorithm:
+    value:
+        clip_eps: 0.2
+        entropy_coefficient: 0.001
+        gae_lambda: 0.95
+        gamma: 0.97
+        normalize_advantages: true
+        num_epochs: 4
+        num_gradient_steps: 32
+        num_rollout_steps: 196608
+        policy_config:
+            min_std: 0.001
+            network:
+                activation_fn: Activation.SiLU
+                bias_init: jax.nn.initializers.zeros
+                dropout: null
+                dtype: jax.numpy.float32
+                hidden_size: 32
+                kernel_init: jax._src.nn.initializers.variance_scaling.<locals>.init
+                num_layers: 4
+                output_size: 8
+                use_bias: true
+            optimizer:
+                beta1: 0.9
+                beta2: 0.999
+                epsilon: 1e-08
+                learning_rate: 0.001
+            std_type: MLP_HEAD
+            var_scale: 1
+        vf_coefficient: 0.5
+        vf_config:
+            network:
+                activation_fn: Activation.SiLU
+                bias_init: jax.nn.initializers.zeros
+                dropout: null
+                dtype: jax.numpy.float32
+                hidden_size: 256
+                kernel_init: jax._src.nn.initializers.variance_scaling.<locals>.init
+                num_layers: 5
+                output_size: 1
+                use_bias: true
+            optimizer:
+                beta1: 0.9
+                beta2: 0.999
+                epsilon: 1e-08
+                learning_rate: 0.001
+benchmark:
+    value:
+        episode_length: 1000
+        name: slippery_ant
+        num_envs: 2048
+        num_tasks: 20
+training:
+    value:
+        resume: false
+        resume_from_step: -1
+        steps_per_task: 20000000

@@ -10,7 +10,6 @@ dependencies = [
     "gymnasium[mujoco]>=1.0.0",
     "jaxtyping>=0.2.34",
     "metaworld>=3.0",
-    "jax[cuda12]>=0.4.34",
     "gymnasium-robotics",
     "jaxtyping>=0.2.34",
     "beartype",
@@ -35,6 +34,7 @@ cpu = ["jax>=0.5.0"]
 # https://github.com/jax-ml/jax/issues/27062
 metal = ["jax<=0.5.0", "jax-metal>=0.1.0; sys_platform == 'darwin'"]
 cuda12 = ["jax[cuda12]>=0.5.0"]
+cuda13 = ["jax[cuda13]>=0.7.0"]
 tpu = ["jax[tpu]>=0.5.0"]
 testing = ["chex>=0.1.89", "pytest>=8.3.5"]
 profile = ["tensorflow-cpu>=2.19.0", "tensorboard>=2.19.0"]
@@ -46,13 +46,14 @@ conflicts = [
         { extra = "cpu" },
         { extra = "metal" },
         { extra = "cuda12" },
+        { extra = "cuda13" },
         { extra = "tpu" },
     ],
 ]
 environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 
 [tool.ruff]
-ignore = ["F722"]
+ignore = ["F722", "E731"]
 ignore-init-module-imports = true
 line-length = 95
 
@@ -60,8 +61,6 @@ line-length = 95
 include = [
     "continual_learning",
     "continual_learning.*",
-    "continual_learning_2",
-    "continual_learning_2.*",
 ]
 
 [tool.black]
