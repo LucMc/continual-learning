@@ -5,15 +5,14 @@ import flax
 import jax
 import jax.numpy as jnp
 import jax.random as random
-import optax
-from chex import dataclass
-from copy import deepcopy
+from flax import struct
+import flax.traverse_util
 
+from continual_learning_2.types import GradientTransformationExtraArgsReset
 import continual_learning_2.utils.optim as utils
 
 
-@dataclass
-class ShrinkPerturbOptimState:
+class ShrinkPerturbOptimState(struct.PyTreeNode):
     count: chex.Array
     rng: chex.PRNGKey
     logs: dict
@@ -25,7 +24,7 @@ def shrink_perturb(
     shrink: float = 0.8,
     perturb: float = 0.01,
     every_n: int = 1,
-) -> optax.GradientTransformationExtraArgs:
+) -> GradientTransformationExtraArgsReset:
     """Shrink and perturb: [Ash & Adams, 2020](https://arxiv.org/abs/1910.08475)"""
 
     def init(params):
@@ -35,6 +34,8 @@ def shrink_perturb(
         )
 
     def update(updates, state, params=None, features=None, tx_state=None):
+        del updates, features
+
         if params is None:
             raise ValueError("Update requires params argument")
 
@@ -73,4 +74,4 @@ def shrink_perturb(
 
         return jax.lax.cond(should_apply, apply_shrink_perturb, no_shrink_perturb, params)
 
-    return optax.GradientTransformationExtraArgs(init=init, update=update)
+    return GradientTransformationExtraArgsReset(init=init, update=update)  # pyright: ignore[reportArgumentType]

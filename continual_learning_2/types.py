@@ -1,12 +1,13 @@
 import enum
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Protocol
 
 import flax.linen
 import flax.struct
 import jax
 import numpy as np
 import numpy.typing as npt
-from jaxtyping import Array, Bool, Float, Int, PyTree, Shaped
+from jaxtyping import Array, Bool, Float, Int, PyTree
+import optax
 
 from continual_learning_2.utils.nn import Identity
 
@@ -90,3 +91,19 @@ class Rollout(NamedTuple):
     # Auxiliary policy outputs
     log_probs: Float[LogProb, "timestep env"] | None = None
     values: Float[Value, "timestep env 1"] | None = None
+
+
+# Optimisers
+class TransformUpdateExtraArgsResetFn(Protocol):
+    def __call__(
+        self,
+        updates: optax.Updates,
+        state: optax.OptState,
+        params: optax.Params,
+        features: PyTree,
+        tx_state: optax.OptState,
+    ) -> tuple[optax.Updates, optax.OptState, optax.OptState]: ...
+
+
+class GradientTransformationExtraArgsReset(optax.GradientTransformation):
+    update: TransformUpdateExtraArgsResetFn  # pyright: ignore[reportIncompatibleVariableOverride]

@@ -1,17 +1,31 @@
 import optax
-from chex import dataclass
+from dataclasses import dataclass
+
+from continual_learning_2.types import GradientTransformationExtraArgsReset
+from jaxtyping import PyTree
+
 
 @dataclass(frozen=True)
 class IdentityState:
-    logs: dict 
+    logs: dict
+
 
 def identity_reset(*args, **kwargs):
-    """ Identity reset method """
-    
+    """Identity reset method"""
+    del args, kwargs
+
     def init_fn(params, *args, **kwargs):
+        del params, args, kwargs
         return IdentityState(logs={})
-    
-    def update_fn(updates, state, params, features, tx_state, *args, **extra_args):
+
+    def update_fn(
+        updates: optax.Updates,
+        state: optax.OptState,
+        params: optax.Params,
+        features: PyTree,
+        tx_state: optax.OptState,
+    ) -> tuple[optax.Updates, optax.OptState, optax.OptState]:
+        del updates, features
         return params, state, tx_state
-    
-    return optax.GradientTransformationExtraArgs(init_fn, update_fn)
+
+    return GradientTransformationExtraArgsReset(init=init_fn, update=update_fn)  # pyright: ignore[reportArgumentType]

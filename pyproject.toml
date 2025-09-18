@@ -52,7 +52,7 @@ conflicts = [
 environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 
 [tool.ruff]
-ignore = ["F722"]
+ignore = ["F722", "E731"]
 ignore-init-module-imports = true
 line-length = 95
 

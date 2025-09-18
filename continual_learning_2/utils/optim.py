@@ -4,12 +4,12 @@ from jaxtyping import Array, Float, PRNGKeyArray, PyTree
 from jaxtyping import (
     Bool,
 )
-import flax
-from flax.training.train_state import TrainState
 import optax
 
 from typing import Callable
 from copy import deepcopy
+
+from continual_learning_2.types import GradientTransformationExtraArgsReset
 
 
 def get_out_weights_mag(weights):
@@ -47,42 +47,40 @@ def get_out_weights_mag(weights):
 
 
 def attach_reset_method(
-    *args: tuple[str, optax.GradientTransformation],
+    tx: optax.GradientTransformation,
+    reset_method: GradientTransformationExtraArgsReset,
 ) -> optax.GradientTransformationExtraArgs:
-    names = [name for name, _ in args]
-
-    if len(names) != len(set(names)):
-        raise ValueError(f"Named transformations must have unique names, but got {names}")
-
-    transforms = [(name, optax.with_extra_args_support(t)) for name, t in args]
+    tx = optax.with_extra_args_support(tx)
 
     def init_fn(params):
-        states = {}
-        for name, tx in transforms:
-            states[name] = tx.init(params)
-        return states
+        return {
+            "tx": tx.init(params),
+            "reset_method": reset_method.init(params),
+        }
 
-    def update_fn(updates, state, params=None, features=None, **extra_args):
+    def update_fn(
+        updates: optax.Updates,
+        state: optax.OptState,
+        params: optax.Params | None = None,
+        **extra_args,
+    ):
         """Updated named chain update from Optax to enable resetting of base optim running stats"""
 
-        new_state = {}
-        assert len(transforms) == 2, "chain the optim with the reset method only"
-        assert "tx" == args[0][0], "'tx' is the first part of this chain"
-        assert "reset_method" == args[1][0], "'reset_method' is the second part of this chain"
+        assert params is not None
+        features = extra_args.pop("features")
 
-        # TX update
-        tx = transforms[0][1]
-        reset_method = transforms[1][1]
+        new_state = {}
+        tx_state, reset_method_state = state["tx"], state["reset_method"]  # pyright: ignore[reportIndexIssue]
 
         raw_grads = updates
-        updates, new_state["tx"] = tx.update(updates, state["tx"], params, **extra_args)
+        updates, new_state["tx"] = tx.update(updates, tx_state, params, **extra_args)
         new_params_with_opt = optax.apply_updates(params, updates)
 
         # Reset method
         new_params_with_reset, new_state["reset_method"], new_state["tx"] = (
             reset_method.update(
-                raw_grads, # Use original grads before optim transform
-                state["reset_method"],
+                raw_grads,  # Use original grads before optim transform
+                reset_method_state,
                 new_params_with_opt,
                 features=features,
                 tx_state=new_state["tx"],
@@ -154,6 +152,8 @@ def reset_weights(
             elif len(out_weight_shape) == 4:  # Conv layer
                 # expected_in_channels = out_weight_shape[2]
                 out_mask_1d = in_mask_1d
+            else:
+                raise ValueError(f"Unsupported weight shape: {out_weight_shape}")
 
             # Apply outgoing mask
             out_weight_mask = expand_mask_for_weights(
@@ -178,10 +178,9 @@ def reset_optim_params(tx_state, reset_mask):
 
     def reset_params(tx_state):
         def map_fn(momentum):
-
             all_layer_names = list(momentum.keys())
             momentum = deepcopy(momentum)
-            for idx, layer_name in enumerate(list(momentum.keys())[:-1]): # momentum is mu/nu
+            for idx, layer_name in enumerate(list(momentum.keys())[:-1]):  # momentum is mu/nu
                 in_mask_1d = reset_mask[layer_name]
 
                 in_momentum_mask = expand_mask_for_weights(
@@ -189,7 +188,11 @@ def reset_optim_params(tx_state, reset_mask):
                 )
 
                 # Zero the incoming momentums
-                momentum[layer_name]["kernel"] = jnp.where(in_momentum_mask, jnp.zeros_like(momentum[layer_name]["kernel"]), momentum[layer_name]["kernel"])
+                momentum[layer_name]["kernel"] = jnp.where(
+                    in_momentum_mask,
+                    jnp.zeros_like(momentum[layer_name]["kernel"]),
+                    momentum[layer_name]["kernel"],
+                )
 
                 # Reset outgoing momentum
                 if idx + 1 < len(all_layer_names):
@@ -197,7 +200,9 @@ def reset_optim_params(tx_state, reset_mask):
                     out_momentum_shape = momentum[next_layer]["kernel"].shape
 
                     if len(out_momentum_shape) == 2:  # Dense layer
-                        if len(momentum[layer_name]["kernel"].shape) == 4:  # Check if previous layer was conv
+                        if (
+                            len(momentum[layer_name]["kernel"].shape) == 4
+                        ):  # Check if previous layer was conv
                             spatial_size = out_momentum_shape[0] // in_mask_1d.size
                             out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
                         else:  # Dense -> Dense
@@ -205,6 +210,8 @@ def reset_optim_params(tx_state, reset_mask):
 
                     elif len(out_momentum_shape) == 4:  # Conv layer
                         out_mask_1d = in_mask_1d
+                    else:
+                        raise ValueError(f"Unsupported weight shape: {out_momentum_shape}")
 
                     # Apply outgoing mask
                     out_momentum_mask = expand_mask_for_weights(
@@ -212,12 +219,18 @@ def reset_optim_params(tx_state, reset_mask):
                     )
 
                     momentum[next_layer]["kernel"] = jnp.where(
-                        out_momentum_mask, jnp.zeros_like(momentum[next_layer]["kernel"]), momentum[next_layer]["kernel"]
+                        out_momentum_mask,
+                        jnp.zeros_like(momentum[next_layer]["kernel"]),
+                        momentum[next_layer]["kernel"],
                     )
                     # Reset bias too
-                    momentum[layer_name]["bias"] = jnp.where(reset_mask[layer_name][None:], jnp.zeros_like(momentum[layer_name]["bias"]), momentum[layer_name]["bias"])
+                    momentum[layer_name]["bias"] = jnp.where(
+                        reset_mask[layer_name][None:],
+                        jnp.zeros_like(momentum[layer_name]["bias"]),
+                        momentum[layer_name]["bias"],
+                    )
 
-            return momentum 
+            return momentum
 
         new_state_dict = {}
 
@@ -240,17 +253,19 @@ def reset_optim_params(tx_state, reset_mask):
 
         if hasattr(tx_state, "mu"):
             new_state_dict["mu"] = {
-                "params": map_fn(tx_state.mu["params"]) # flax.traverse_util.path_aware_map(map_fn, tx_state.mu["params"])
+                "params": map_fn(
+                    tx_state.mu["params"]  # pyright: ignore[reportAttributeAccessIssue]
+                )  # flax.traverse_util.path_aware_map(map_fn, tx_state.mu["params"])
             }
 
         if hasattr(tx_state, "nu"):
             new_state_dict["nu"] = {
-                "params": map_fn(tx_state.nu["params"])
+                "params": map_fn(tx_state.nu["params"])  # pyright: ignore[reportAttributeAccessIssue]
                 # "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
             }
 
         # copy other attributes
-        for attr in tx_state._fields:
+        for attr in tx_state._fields:  # pyright: ignore[reportAttributeAccessIssue]
             if attr not in ["mu", "nu"] and hasattr(tx_state, attr):
                 new_state_dict[attr] = getattr(tx_state, attr)
 

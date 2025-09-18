@@ -1,6 +1,5 @@
 # pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
 import abc
-import sys
 from typing import Generator
 
 import datasets
@@ -23,22 +22,26 @@ class ContinualLearningDataset(abc.ABC):
     @abc.abstractmethod
     def __init__(self, config: DatasetConfig): ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def state(self) -> dict: ...
 
     @abc.abstractmethod
     def load(self, state: dict, resumed_loader: grain.DataLoader) -> None: ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def tasks(self) -> Generator[grain.DataLoader, None, None]: ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def operations(self) -> list[grain.Transformation]: ...
 
     @abc.abstractmethod
     def evaluate(self, model: TrainState, forgetting: bool = False) -> dict[str, float]: ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def spec(self) -> jax.ShapeDtypeStruct: ...
 
 
@@ -48,6 +51,7 @@ class ContinualLearningDataset(abc.ABC):
 #     loss = optax.softmax_cross_entropy(logits, y).mean()
 #     accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 #     return {"eval_loss": loss, "eval_accuracy": accuracy} # Removed float() as this breaks mnist
+
 
 @jax.jit
 def _eval_model(
@@ -59,15 +63,15 @@ def _eval_model(
     logits = model.apply_fn(model.params, x, training=False)
 
     ci_loss = optax.softmax_cross_entropy(logits, y).mean()
-    ci_acc  = jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1))
+    ci_acc = jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1))
 
     out = {"eval_loss_ci": ci_loss, "eval_accuracy_ci": ci_acc}
 
     if class_mask is not None:
-        loss_mask = jnp.broadcast_to(class_mask, y.shape)       # [B, K]
+        loss_mask = jnp.broadcast_to(class_mask, y.shape)  # [B, K]
         masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
         ta_loss = optax.safe_softmax_cross_entropy(masked_logits, y).mean()
-        ta_acc  = jnp.mean(jnp.argmax(masked_logits, axis=-1) == jnp.argmax(y, axis=-1))
+        ta_acc = jnp.mean(jnp.argmax(masked_logits, axis=-1) == jnp.argmax(y, axis=-1))
         out.update({"eval_loss_task": ta_loss, "eval_accuracy_task": ta_acc})
 
     return out
@@ -75,6 +79,7 @@ def _eval_model(
 
 class SplitDataset(ContinualLearningDataset):
     current_task: int
+    data_label: str
 
     NUM_CLASSES: int
     KEEP_IN_MEMORY: bool | None = None
@@ -133,22 +138,30 @@ class SplitDataset(ContinualLearningDataset):
 
         print(f"- Evaluating on task {self.current_task}")
         task_mask = self._task_class_mask(self.current_task)
-        latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
+        latest = self._eval_task(
+            model, self._get_task_test(self.current_task), class_mask=task_mask
+        )
 
-        metrics.update(prefix_dict("metrics", {
-            "eval_loss":     latest["eval_loss_task"],
-            "eval_accuracy": latest["eval_accuracy_task"],
-            "eval_loss_ci":     latest["eval_loss_ci"],
-            "eval_accuracy_ci": latest["eval_accuracy_ci"],
-        }))
+        metrics.update(
+            prefix_dict(
+                "metrics",
+                {
+                    "eval_loss": latest["eval_loss_task"],
+                    "eval_accuracy": latest["eval_accuracy_task"],
+                    "eval_loss_ci": latest["eval_loss_ci"],
+                    "eval_accuracy_ci": latest["eval_accuracy_ci"],
+                },
+            )
+        )
 
         metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
         return metrics
 
     def _task_class_mask(self, task_id: int) -> jax.Array:
         num_classes_in_task = self.NUM_CLASSES // self.num_tasks
-        classes = jnp.arange(num_classes_in_task * task_id,
-                             num_classes_in_task * (task_id + 1))
+        classes = jnp.arange(
+            num_classes_in_task * task_id, num_classes_in_task * (task_id + 1)
+        )
         mask = jnp.zeros((self.NUM_CLASSES,), dtype=bool).at[classes].set(True)
         return mask
 
@@ -204,10 +217,7 @@ class SplitDataset(ContinualLearningDataset):
         return grain.DataLoader(
             data_source=ds,
             sampler=grain.IndexSampler(
-                num_records=len(ds),
-                shuffle=False,
-                num_epochs=1,
-                seed=self.seed
+                num_records=len(ds), shuffle=False, num_epochs=1, seed=self.seed
             ),
             operations=[
                 *self.operations,
@@ -394,14 +404,21 @@ class ClassIncrementalDataset(SplitDataset):
 
         print(f"- Evaluating on task {self.current_task}")
         task_mask = self._cumulative_class_mask(self.current_task)
-        latest = self._eval_task(model, self._get_task_test(self.current_task), class_mask=task_mask)
+        latest = self._eval_task(
+            model, self._get_task_test(self.current_task), class_mask=task_mask
+        )
 
-        metrics.update(prefix_dict("metrics", {
-            "eval_loss":     latest["eval_loss_task"],
-            "eval_accuracy": latest["eval_accuracy_task"],
-            "eval_loss_ci":     latest["eval_loss_ci"],
-            "eval_accuracy_ci": latest["eval_accuracy_ci"],
-        }))
+        metrics.update(
+            prefix_dict(
+                "metrics",
+                {
+                    "eval_loss": latest["eval_loss_task"],
+                    "eval_accuracy": latest["eval_accuracy_task"],
+                    "eval_loss_ci": latest["eval_loss_ci"],
+                    "eval_accuracy_ci": latest["eval_accuracy_ci"],
+                },
+            )
+        )
 
         # Also store the full set under the task-specific prefix
         metrics.update(prefix_dict(f"metrics/task_{self.current_task}", latest))
@@ -412,7 +429,9 @@ class ClassIncrementalDataset(SplitDataset):
             raise ValueError(f"Invalid task id: {task_id}")
 
         num_classes = self.class_increment * (task_id + 1)
-        ds = self._dataset_train.filter(lambda x: x[self.data_label] in self.class_order[:num_classes])
+        ds = self._dataset_train.filter(
+            lambda x: x[self.data_label] in self.class_order[:num_classes]
+        )
 
         return grain.DataLoader(
             data_source=ds,
@@ -438,10 +457,7 @@ class ClassIncrementalDataset(SplitDataset):
         return grain.DataLoader(
             data_source=ds,
             sampler=grain.IndexSampler(
-                num_records=len(ds),
-                shuffle=False,
-                num_epochs=1,
-                seed=self.seed
+                num_records=len(ds), shuffle=False, num_epochs=1, seed=self.seed
             ),
             operations=[
                 *self.operations,

@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import tyro
 from chex import dataclass
 
-from continual_learning_2.configs import *
 from continual_learning_2.configs.envs import EnvConfig
 from continual_learning_2.configs.logging import LoggingConfig
 from continual_learning_2.configs.models import MLPConfig
@@ -25,7 +24,7 @@ SWEEP_RANGES = {
         "update_frequency": [100, 1000, 5000],
         "max_reset_frac": [None, 0.1],
         # "score_threshold": [0.001, 0.002, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.09, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
-        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
+        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75],  # fmt: skip
     },
     # "regrama": {"tx_lr": [1e-3], "update_frequency": [100, 1000, 10_000, 100_000], "score_threshold": [0.003, 0.003]} # Added ones
     "redo": {
@@ -35,7 +34,7 @@ SWEEP_RANGES = {
         "update_frequency": [100, 1000, 5000],
         "max_reset_frac": [None, 0.1],
         # "score_threshold": [0.001, 0.002, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.09, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
-        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
+        "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75],  # fmt: skip
     },
     # "redo": {"tx_lr": [1e-3], "update_frequency": [100], "score_threshold": [0.000001, 0.00001, 0.0001, 0.002, 0.003, 0.004, 0.005, 0.02, 0.3]}, # Added regrama ones plus a few inbetweens
     "cbp": {
@@ -45,8 +44,7 @@ SWEEP_RANGES = {
         "replacement_rate": [1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-4],
         "maturity_threshold": [10, 100, 1000, 10_000],
     },
-
- "ccbp_exp": {
+    "ccbp_exp": {
         "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -56,7 +54,6 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["exp"],
     },
-
     "ccbp_sigmoid": {
         "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
@@ -67,7 +64,6 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["sigmoid"],
     },
-
     "ccbp_softplus": {
         "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
@@ -78,7 +74,6 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["softplus"],
     },
-
     "ccbp_linear": {
         "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
@@ -89,7 +84,6 @@ SWEEP_RANGES = {
         "replacement_rate": [0.012, 0.015, 0.020],
         "transform_type": ["linear"],
     },
-
     "shrink_and_perturb": {
         "seed": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
@@ -138,7 +132,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             tx=tx,
             update_frequency=params["update_frequency"],
             score_threshold=params["score_threshold"],
-            max_reset_frac=params.get("max_reset_frac"), 
+            max_reset_frac=params.get("max_reset_frac"),
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -146,7 +140,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             tx=tx,
             update_frequency=params["update_frequency"],
             score_threshold=params["score_threshold"],
-            max_reset_frac=params.get("max_reset_frac"), 
+            max_reset_frac=params.get("max_reset_frac"),
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -195,7 +189,7 @@ def run_config(
     params = configs[config_id]
     tag = _format_tag(params)
 
-    opt_config = build_optimizer(algo, params, params["seed"]+seed)
+    opt_config = build_optimizer(algo, params, params["seed"] + seed)
 
     trainer = JittedContinualPPOTrainer(
         seed=seed,
@@ -241,7 +235,7 @@ def run_config(
             wandb_project=wandb_project,
             group=f"slippery_ant_{algo}_sweep",
             save=False,
-            wandb_mode=wandb_mode
+            wandb_mode=wandb_mode,
         ),
     )
     trainer.train()
@@ -275,7 +269,7 @@ def run_all_configs(
     wandb_project: Optional[str] = None,
     config_start: Optional[int] = None,
     config_end: Optional[int] = None,
-    wandb_mode: str = "online"
+    wandb_mode: str = "online",
 ):
     cfgs = _all_configs_for(algo)
     total = len(cfgs)
