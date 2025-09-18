@@ -47,6 +47,79 @@ from continual_learning.utils.training import TrainState
 
 class PPO:
     @staticmethod
+    def get_neuron_logs(
+        data: Rollout,
+        policy: TrainState,
+        vf: TrainState,
+        key: PRNGKeyArray,
+        batch_size: int = 16384,
+    ) -> tuple[PRNGKeyArray, LogDict]:
+        key, permutation_key = jax.random.split(key)
+        rollout_size = data.observations.shape[0] * data.observations.shape[1]
+
+        indices = jax.random.choice(
+            permutation_key, rollout_size, shape=(batch_size,), replace=False
+        )
+        flattened_data = jax.tree.map(lambda x: x.reshape((rollout_size, *x.shape[2:])), data)
+        activations_batch = flattened_data.observations[indices]
+
+        _, actor_intermediates = policy.apply_fn(
+            policy.params,
+            activations_batch,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+        _, value_intermediates = vf.apply_fn(
+            vf.params,
+            activations_batch,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+
+        actor_activations = flatten_last(actor_intermediates["activations"])
+        value_activations = flatten_last(value_intermediates["activations"])
+
+        actor_activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(actor_activations, sep="/").items()
+        }
+        value_activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(value_activations, sep="/").items()
+        }
+        actor_dormant_neuron_logs = get_dormant_neuron_logs(actor_activations_flat)  # pyright: ignore[reportArgumentType]
+        value_dormant_neuron_logs = get_dormant_neuron_logs(value_activations_flat)  # pyright: ignore[reportArgumentType]
+        actor_srank_logs = jax.tree.map(compute_srank, actor_activations_flat)
+        value_srank_logs = jax.tree.map(compute_srank, value_activations_flat)
+
+        actor_preactivations = actor_intermediates["preactivations"]
+        value_preactivations = value_intermediates["preactivations"]
+
+        actor_preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(actor_preactivations, sep="/").items()
+        }
+        value_preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(value_preactivations, sep="/").items()
+        }
+        actor_linearised_neuron_logs = get_linearised_neuron_logs(actor_preactivations_flat)  # pyright: ignore[reportArgumentType]
+        value_linearised_neuron_logs = get_linearised_neuron_logs(value_preactivations_flat)  # pyright: ignore[reportArgumentType]
+
+        return key, {
+            **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
+            **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
+            **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
+            **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
+            **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
+            **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
+            **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
+            **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
+            **prefix_dict("nn/actor_srank", actor_srank_logs),
+            **prefix_dict("nn/value_srank", value_srank_logs),
+        }
+
+    @staticmethod
     @partial(jax.jit, static_argnames=("cfg"), donate_argnames=("policy", "vf", "key"))
     def update(
         key: PRNGKeyArray,
@@ -81,7 +154,7 @@ class PPO:
                 data.observations,
                 training=True,
                 rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations"),
+                mutable=("activations"),
             )
             values = values.squeeze(-1)
 
@@ -94,7 +167,7 @@ class PPO:
                 data.observations,
                 training=True,
                 rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations"),
+                mutable=("activations"),
             )
             log_probs = dist.log_prob(data.actions)
             ratio = jnp.exp((log_ratio := log_probs - data.log_probs))
@@ -116,45 +189,6 @@ class PPO:
             # Intermediates
             actor_feats = actor_intermediates["activations"]  # ["main"]
             value_feats = value_intermediates["activations"]
-
-            actor_activations = jax.tree.map(flatten_last, actor_feats)
-            value_activations = jax.tree.map(flatten_last, value_feats)
-
-            actor_activations_flat = {
-                k: v[0]  # pyright: ignore[reportIndexIssue]
-                for k, v in flax.traverse_util.flatten_dict(actor_activations, sep="/").items()
-            }
-            value_activations_flat = {
-                k: v[0]  # pyright: ignore[reportIndexIssue]
-                for k, v in flax.traverse_util.flatten_dict(value_activations, sep="/").items()
-            }
-            actor_dormant_neuron_logs = get_dormant_neuron_logs(actor_activations_flat)  # pyright: ignore[reportArgumentType]
-            value_dormant_neuron_logs = get_dormant_neuron_logs(value_activations_flat)  # pyright: ignore[reportArgumentType]
-            actor_srank_logs = jax.tree.map(compute_srank, actor_activations_flat)
-            value_srank_logs = jax.tree.map(compute_srank, value_activations_flat)
-
-            actor_preactivations = actor_intermediates["preactivations"]
-            value_preactivations = value_intermediates["preactivations"]
-
-            actor_preactivations_flat = {
-                k: v[0]  # pyright: ignore[reportIndexIssue]
-                for k, v in flax.traverse_util.flatten_dict(
-                    actor_preactivations, sep="/"
-                ).items()
-            }
-            value_preactivations_flat = {
-                k: v[0]  # pyright: ignore[reportIndexIssue]
-                for k, v in flax.traverse_util.flatten_dict(
-                    value_preactivations, sep="/"
-                ).items()
-            }
-            actor_linearised_neuron_logs = get_linearised_neuron_logs(
-                actor_preactivations_flat
-            )  # pyright: ignore[reportArgumentType]
-            value_linearised_neuron_logs = get_linearised_neuron_logs(
-                value_preactivations_flat
-            )  # pyright: ignore[reportArgumentType]
-
             vf_optim_logs = vf.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
             actor_optim_logs = policy.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
 
@@ -167,22 +201,8 @@ class PPO:
                     "metrics/approx_kl": approx_kl,
                     "metrics/clip_fracs": clip_fracs,
                     "metrics/values": values.mean(),
-                    # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
-                    # **prefix_dict("nn/actor_activations", actor_activations_hist_dict),
-                    **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
-                    **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-                    **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
-                    **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-                    # **prefix_dict("nn/value_activations", value_activations_hist_dict),
-                    # **prefix_dict("nn/value_activations", value_activations_hist_dict),
-                    **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
-                    **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
-                    **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
-                    **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
                     **prefix_dict("actor", actor_optim_logs),
                     **prefix_dict("value", vf_optim_logs),
-                    **prefix_dict("nn/actor_srank", actor_srank_logs),
-                    **prefix_dict("nn/value_srank", value_srank_logs),
                 },
                 actor_feats["main"],
                 value_feats,
@@ -200,29 +220,21 @@ class PPO:
 
             # Update policy
             policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
-            # policy_grads_hist_dict = pytree_histogram(policy_grads["params"])
             policy = policy.apply_gradients(grads=policy_grads, features=actor_feats)
 
             policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
-            # policy_param_hist_dict = pytree_histogram(policy.params["params"])
 
             # Updave vf
             vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
-            # vf_grads_hist_dict = pytree_histogram(vf_grads["params"])
             vf = vf.apply_gradients(grads=vf_grads, features=value_feats)
 
             vf_params_flat, _ = jax.flatten_util.ravel_pytree(vf.params)
-            # vf_param_hist_dict = pytree_histogram(vf.params["params"])
 
             metrics = metrics | {
                 "nn/policy_gradient_norm": jnp.linalg.norm(policy_grads_flat),
                 "nn/policy_parameter_norm": jnp.linalg.norm(policy_params_flat),
-                # **prefix_dict("nn/policy_gradients", policy_grads_hist_dict),
-                # **prefix_dict("nn/policy_parameters", policy_param_hist_dict),
                 "nn/vf_gradient_norm": jnp.linalg.norm(vf_grads_flat),
                 "nn/vf_parameter_norm": jnp.linalg.norm(vf_params_flat),
-                # **prefix_dict("nn/vf_gradients", vf_grads_hist_dict),
-                # **prefix_dict("nn/vf_parameters", vf_param_hist_dict),
             }
 
             return (policy, vf, key), metrics
@@ -266,6 +278,8 @@ class PPO:
             data.values.reshape(-1), value_targets.reshape(-1)
         )
         logs.update(accumulate_concatenated_metrics(metrics))
+        key, neuron_logs = PPO.get_neuron_logs(data, policy, vf, key)
+        logs.update(neuron_logs)
 
         return key, policy, vf, logs
 
