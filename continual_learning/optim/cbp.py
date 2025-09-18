@@ -91,7 +91,7 @@ def bias_correction(weights, biases, mean_feature_act, ages, reset_mask, decay_r
 def get_reset_mask(
     updated_utility: Float[Array, "#neurons"],
     ages: Float[Array, "#neurons"],
-    remainder: Float[Array, "#neurons"] | int,
+    remainder: Float[Array, "#neurons"],
     key: PRNGKeyArray,
     maturity_threshold: int = 100,
     replacement_rate: float = 0.01,
@@ -108,7 +108,7 @@ def get_reset_mask(
 
     if not accumulate:
         top_up = jnp.where(random.uniform(key, shape=()) < remainder, 1.0, 0.0)
-        remainder = 0
+        remainder = jnp.zeros_like(remainder)
     else:
         top_up = 0
 

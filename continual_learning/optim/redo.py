@@ -88,10 +88,8 @@ def redo(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, RedoOptimState, optax.OptState]:
             del updates
-            assert isinstance(params, FrozenDict)
-            assert isinstance(features, dict)
 
-            flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
