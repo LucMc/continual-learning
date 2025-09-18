@@ -31,6 +31,45 @@ SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "adamw": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "muon": {"learning_rate": [1e-3, 3e-4, 1e-4]},
+    "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+    "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
+    "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
+    "ccbp_exp": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [6.0, 8.0, 12.0, 16.0],
+        "threshold": [0.80, 0.85, 0.9, 0.95],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01],
+        "transform_type": ["exp"],
+    },
+    "ccbp_sigmoid": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [12.0, 16.0, 24.0, 32.0],
+        "threshold": [0.8, 0.9, 0.95, 0.97],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01, 0.02, 0.03],
+        "transform_type": ["sigmoid"],
+    },
+    "ccbp_softplus": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [8.0, 12.0, 16.0, 20.0],
+        "threshold": [0.8, 0.9, 0.95, 0.97],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01, 0.02, 0.03],
+        "transform_type": ["softplus"],
+    },
+    "ccbp_linear": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.9],
+        "sharpness": [6.0, 8.0, 12.0, 16.0],
+        "threshold": [0.8, 0.9, 0.95, 0.97],
+        "update_frequency": [1000],
+        "replacement_rate": [0.01, 0.02, 0.03],
+        "transform_type": ["linear"],
+    },
     "regrama": {
         "tx_lr": [1e-3],
         "max_reset_frac": [None],
@@ -77,7 +116,6 @@ SWEEP_RANGES = {
         "perturb": [1e-3, 1e-4, 1e-5],
         "every_n": [1, 10, 100],
     },
-}
 
 
 def _all_configs_for(algo: str):
@@ -103,6 +141,19 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
         return MuonConfig(learning_rate=params["learning_rate"])
 
     tx = AdamConfig(learning_rate=params.get("tx_lr", 1e-3))
+
+    if algo in ("ccbp", "ccbp_exp", "ccbp_sigmoid", "ccbp_softplus", "ccbp_linear"):
+        return CcbpConfig(
+            tx=tx,
+            decay_rate=params["decay_rate"],
+            replacement_rate=params.get("replacement_rate"),
+            sharpness=params.get("sharpness", 16.0),
+            threshold=params.get("threshold", 0.95),
+            update_frequency=params["update_frequency"],
+            transform_type=params.get("transform_type", "exp"),
+            seed=seed,
+        )
+
     configs = {
         "regrama": lambda: RegramaConfig(
             tx=tx,
@@ -152,13 +203,13 @@ def run_config(
     wandb_entity: str = None,
     wandb_project: str = None,
 ):
-    configs = _all_configs_for(algo)  # UPDATED
+    configs = _all_configs_for(algo)
     if config_id >= len(configs):
         print(f"Config ID {config_id} out of range for {algo} (max: {len(configs) - 1})")
         return
 
     params = configs[config_id]
-    tag = _format_tag(params)  # UPDATED
+    tag = _format_tag(params)
 
     opt_config = build_optimizer(algo, params, seed)
 
@@ -198,6 +249,18 @@ def list_configs(algo: str):
     print(f"Total configs: {len(configs)}")
 
 
+def get_count(algo: str):
+    configs = _all_configs_for(algo)
+    total = len(configs)
+    max_index = total - 1
+
+    print(f"Algorithm: {algo}")
+    print(f"Total configurations: {total}")
+    print(f"SLURM array range: 0-{max_index}")
+    print("")
+    print("To submit the sweep, run:")
+    print(f"sbatch --array=0-{max_index} slurm_hyperparameter_sweep.sh {algo}")
+
 def run_all_configs(
     algo: str,
     seed: int = 42,
@@ -235,14 +298,13 @@ def run_all_configs(
 
 @dataclass
 class Args:
-    algo: Literal[
-        "adam", "adamw", "muon", "regrama", "redo", "cbp", "ccbp", "shrink_and_perturb"
-    ]
+    algo: Literal[*list(SWEEP_RANGES.keys())]
     config_id: Optional[int] = None
     seed: int = 42
     wandb_entity: Optional[str] = None
     wandb_project: Optional[str] = None
     list_configs: bool = False
+    get_count: bool = False
 
     run_all: bool = False
     config_start: Optional[int] = None
@@ -254,6 +316,8 @@ if __name__ == "__main__":
 
     if args.list_configs:
         list_configs(args.algo)
+    elif args.get_count:
+        get_count(args.algo)
     else:
         if args.run_all:
             run_all_configs(

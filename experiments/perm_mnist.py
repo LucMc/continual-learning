@@ -72,7 +72,7 @@ def run_all_perm_mnist():
         "redo": RedoConfig(
             tx=base_optim,
             update_frequency=1000,
-            score_threshold=0.65,
+            score_threshold=0.5,
             # score_threshold=0.001,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),

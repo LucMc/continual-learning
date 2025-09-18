@@ -64,18 +64,10 @@ def continuous_reset_weights(
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
         match transform_type:
-            case "exp":
-                transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
-            case "sigmoid":
-                transform = lambda x: jnp.minimum(
-                    2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0
-                )
-            case "softplus":
-                transform = lambda x: jnp.minimum(
-                    jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0
-                )
-            case "linear":
-                transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
+            case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
+            case "sigmoid": transform = lambda x: jnp.minimum(2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0)
+            case "softplus": transform = lambda x: jnp.minimum(jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0)
+            case "linear": transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
 
         transformed_utilities = jax.tree.map(transform, utilities)
 
@@ -236,7 +228,7 @@ def ccbp(
             _biases = biases
 
             new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: kinda sucks for adding logs
+            _logs = {k: 0 for k in state.logs}  # TODO: Slow operation
 
             # avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
             # avg_util = jax.tree.map(lambda v: v.mean(), _utility)
@@ -270,7 +262,7 @@ def ccbp(
                 time_step=state.time_step + 1,
             )
             flat_new_params, _ = jax.tree.flatten(new_params)
-            # TODO: Update bias and tx_state
+            # Experiment: Update bias and tx_state
 
             return (
                 jax.tree.unflatten(jax.tree.structure(params), flat_new_params),

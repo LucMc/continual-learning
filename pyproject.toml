@@ -30,12 +30,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cpu = ["jax>=0.5.0"]
+cpu = ["jax>=0.5.0,<0.7.0"]
 # https://github.com/jax-ml/jax/issues/27062
 metal = ["jax<=0.5.0", "jax-metal>=0.1.0; sys_platform == 'darwin'"]
-cuda12 = ["jax[cuda12]>=0.5.0"]
-cuda13 = ["jax[cuda13]>=0.7.0"]
-tpu = ["jax[tpu]>=0.5.0"]
+cuda12 = ["jax[cuda12]>=0.5.0,<0.7.0"]
+cuda13 = ["jax[cuda13]>=0.5.0,<0.7.0"]
+tpu = ["jax[tpu]>=0.5.0,<0.7.0"]
 testing = ["chex>=0.1.89", "pytest>=8.3.5"]
 profile = ["tensorflow-cpu>=2.19.0", "tensorboard>=2.19.0"]
 

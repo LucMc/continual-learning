@@ -15,11 +15,20 @@ from continual_learning.configs.training import RLTrainingConfig
 from continual_learning.trainers.continual_rl import JittedContinualPPOTrainer
 from continual_learning.types import Activation, StdType
 
+from continual_learning.configs import (
+    AdamConfig,
+    CbpConfig,
+    CcbpConfig,
+    RegramaConfig,
+    LoggingConfig,
+    RedoConfig,
+    ShrinkAndPerterbConfig,
+)
 SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "regrama": {
         "tx_lr": [1e-3],
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         # "update_frequency": [100, 1000, 5000, 10_000],
         "update_frequency": [100, 1000, 5000],
         "max_reset_frac": [None, 0.1],
@@ -29,33 +38,34 @@ SWEEP_RANGES = {
     # "regrama": {"tx_lr": [1e-3], "update_frequency": [100, 1000, 10_000, 100_000], "score_threshold": [0.003, 0.003]} # Added ones
     "redo": {
         "tx_lr": [1e-3],
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4, 5, 6],
         # "update_frequency": [100, 1000, 5000, 10_000],
-        "update_frequency": [100, 1000, 5000],
-        "max_reset_frac": [None, 0.1],
+        "update_frequency": [100],
+        "max_reset_frac": [None],
         # "score_threshold": [0.001, 0.002, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075, 0.09, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75], # fmt: skip
         "score_threshold": [0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.5, 0.75],  # fmt: skip
     },
     # "redo": {"tx_lr": [1e-3], "update_frequency": [100], "score_threshold": [0.000001, 0.00001, 0.0001, 0.002, 0.003, 0.004, 0.005, 0.02, 0.3]}, # Added regrama ones plus a few inbetweens
     "cbp": {
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.95, 0.99],
         "replacement_rate": [1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-4],
         "maturity_threshold": [10, 100, 1000, 10_000],
     },
-    "ccbp_exp": {
-        "seed": [0, 1, 2, 3, 4],
+
+ "ccbp_exp": {
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
-        "sharpness": [6.0, 8.0, 12.0, 16.0],
-        "threshold": [0.80, 0.85, 0.9, 0.95],
+        "sharpness": [5.0, 15.0, 20.0],
+        "threshold": [0.01, 0.1, 0.5, 0.95],
         "update_frequency": [1000],
-        "replacement_rate": [0.01],
+        "replacement_rate": [0.01, 0.1],
         "transform_type": ["exp"],
     },
     "ccbp_sigmoid": {
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [12.0, 16.0, 24.0, 32.0],
@@ -65,7 +75,7 @@ SWEEP_RANGES = {
         "transform_type": ["sigmoid"],
     },
     "ccbp_softplus": {
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [10.0, 14.0, 18.0, 22.0],
@@ -75,7 +85,7 @@ SWEEP_RANGES = {
         "transform_type": ["softplus"],
     },
     "ccbp_linear": {
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [8.0, 12.0, 16.0],
@@ -85,7 +95,7 @@ SWEEP_RANGES = {
         "transform_type": ["linear"],
     },
     "shrink_and_perturb": {
-        "seed": [0, 1, 2, 3, 4],
+        "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "shrink": [0.995, 0.999],
         "perturb": [0.002, 0.005, 0.01],
@@ -96,8 +106,14 @@ SWEEP_RANGES = {
 
 def _all_configs_for(algo: str):
     """Return list of param dicts for all combinations in SWEEP_RANGES[algo]."""
+
+    def _maybe_normalize_key(key: str) -> str:
+        return "seed" if key == "seeds" else key
+
     grid = list(
-        itertools.product(*[[(k, v) for v in vals] for k, vals in SWEEP_RANGES[algo].items()])
+        itertools.product(
+            *[[(_maybe_normalize_key(k), v) for v in vals] for k, vals in SWEEP_RANGES[algo].items()]
+        )
     )
     return [dict(cfg) for cfg in grid]
 
@@ -187,12 +203,13 @@ def run_config(
         return
 
     params = configs[config_id]
+    base_seed = params.get("seed", 0)
+    run_seed = base_seed + seed
     tag = _format_tag(params)
-
     opt_config = build_optimizer(algo, params, params["seed"] + seed)
 
     trainer = JittedContinualPPOTrainer(
-        seed=seed,
+        seed=run_seed,
         ppo_config=PPOConfig(
             policy_config=PolicyNetworkConfig(
                 optimizer=opt_config,
@@ -228,9 +245,9 @@ def run_config(
             normalize_advantages=True,
         ),
         env_cfg=EnvConfig("slippery_ant", num_envs=2048, num_tasks=20, episode_length=1000),
-        train_cfg=RLTrainingConfig(resume=False, steps_per_task=20_000_000),
+            train_cfg=RLTrainingConfig(resume=False, steps_per_task=20_000_000),
         logs_cfg=LoggingConfig(
-            run_name=f"{algo}_{tag}_s{seed}",
+            run_name=f"{algo}_{tag}_s{run_seed}",
             wandb_entity=wandb_entity,
             wandb_project=wandb_project,
             group=f"slippery_ant_{algo}_sweep",

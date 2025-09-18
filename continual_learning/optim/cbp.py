@@ -1,5 +1,4 @@
 import flax
-
 from flax import struct
 import flax.traverse_util
 from flax.core import FrozenDict
@@ -110,7 +109,11 @@ def get_reset_mask(
         top_up = jnp.where(random.uniform(key, shape=()) < remainder, 1.0, 0.0)
         remainder = jnp.zeros_like(remainder)
     else:
-        top_up = 0
+        ideally = n_mature * replacement_rate          # ← no carry
+        n_to_replace = jnp.floor(ideally).astype(jnp.int32)
+        frac = ideally - n_to_replace
+        top_up = (random.uniform(key, ()) < frac).astype(jnp.int32)
+        new_remainder = 0.0                             # ← don’t carry over
 
     masked_utility = jnp.where(
         maturity_mask, updated_utility, jnp.inf
@@ -137,7 +140,8 @@ def cbp(
         biases.pop(out_layer_name)
 
         return CbpOptimState(
-            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
+            utilities=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
+            # utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
             mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
             rng=jax.random.PRNGKey(seed),
@@ -229,22 +233,25 @@ def cbp(
                 _features,
             )
 
-            # zero biases of reset nodes
+            _utility = jax.tree.map(lambda u, m: jnp.where(m, 0.0, u), _utility, reset_mask)
+            _mean_feature_act = jax.tree.map(lambda mfa, m: jnp.where(m, 0.0, mfa), _mean_feature_act, reset_mask)
+
+
+            # zero biases of reset nodes (unchanged)
             zeroed_biases = jax.tree.map(
                 lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
                 reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name])},  # pyright: ignore[reportArgumentType]
                 biases,
             )
 
-            # Bias correction
-            corrected_biases = partial(bias_correction, decay_rate=decay_rate)(
-                weights,  # Uses original weights
+            corrected_biases = bias_correction(
+                weights,                  # original weights
                 zeroed_biases,
                 _mean_feature_act,
                 state.ages,  # 2 Uses pre-reset post-increment in official code
                 reset_mask,
+                decay_rate,
             )
-
             new_params = {}
             _logs = {k: 0 for k in state.logs}
 
