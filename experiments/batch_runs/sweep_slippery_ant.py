@@ -15,6 +15,15 @@ from continual_learning.configs.training import RLTrainingConfig
 from continual_learning.trainers.continual_rl import JittedContinualPPOTrainer
 from continual_learning.types import Activation, StdType
 
+from continual_learning.configs import (
+    AdamConfig,
+    CbpConfig,
+    CcbpConfig,
+    RegramaConfig,
+    LoggingConfig,
+    RedoConfig,
+    ShrinkAndPerterbConfig,
+)
 SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "regrama": {
