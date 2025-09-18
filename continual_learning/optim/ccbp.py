@@ -144,8 +144,7 @@ def ccbp(
     """Continuous Continual Backpropergation (CCBP)"""
 
     def init(params: optax.Params, **kwargs):
-        assert isinstance(params, FrozenDict)
-        flat_params = flax.traverse_util.flatten_dict(params["params"])
+        flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
         biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
@@ -153,7 +152,7 @@ def ccbp(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
-            remainder=jax.tree.map(lambda: 0.0, biases),
+            remainder=jax.tree.map(lambda _: 0.0, biases),
             mean_feature_act=jax.tree.map(
                 lambda layer: jnp.zeros_like(layer), biases
             ),  # TODO: Remove
@@ -172,7 +171,6 @@ def ccbp(
         tx_state: optax.OptState,
     ) -> tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
         del features
-        assert isinstance(params, FrozenDict)
 
         def no_update(updates):
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])
@@ -202,8 +200,7 @@ def ccbp(
         def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
-            assert isinstance(updates, FrozenDict)
-            flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
@@ -212,7 +209,7 @@ def ccbp(
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
+            flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
             weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
 
             weight_grads.pop(out_layer_name)

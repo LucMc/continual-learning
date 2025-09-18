@@ -132,8 +132,7 @@ def cbp(
     """Continual Backpropergation (CBP): [Sokar et al.](https://www.nature.com/articles/s41586-024-07711-7)"""
 
     def init(params: optax.Params, **kwargs):
-        assert isinstance(params, FrozenDict)
-        flat_params = flax.traverse_util.flatten_dict(params["params"])
+        flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
         biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
@@ -142,7 +141,7 @@ def cbp(
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
             mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
             rng=jax.random.PRNGKey(seed),
-            remainder=jax.tree.map(lambda: 0.0, biases),
+            remainder=jax.tree.map(lambda _: 0.0, biases),
             **kwargs,
         )
 
@@ -154,15 +153,13 @@ def cbp(
         features: PyTree,
         tx_state: optax.OptState,
     ) -> tuple[optax.Updates, CbpOptimState, optax.OptState]:
-        assert isinstance(params, FrozenDict)
-
         def _cbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CbpOptimState, optax.OptState]:
             del updates
 
             # Separate weights and biases
-            flat_params = flax.traverse_util.flatten_dict(params["params"])
+            flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
             flat_feats, _ = jax.tree.flatten(features)
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
