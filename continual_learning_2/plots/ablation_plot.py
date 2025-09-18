@@ -5,6 +5,7 @@ import altair as alt
 from pathlib import Path
 import wandb
 import pandas as pd
+import re
 from collections import defaultdict
 from typing import Optional, Literal
 
@@ -16,23 +17,35 @@ def compute_iqm(values: np.ndarray) -> float:
 
 
 def parse_run_name(run_name: str) -> dict:
-    parts = run_name.split('_')
-    if len(parts) < 3: return {"algorithm": run_name, "seed": "0"}
+    if '_' not in run_name:
+        return {"algorithm": run_name, "seed": "0"}
 
-    seed = parts[-1] if parts[-1].startswith('s') else "0"
-    algorithm = parts[0]
-    tag_part = '_'.join(parts[1:-1])
+    algorithm, remainder = run_name.split('_', 1)
     params = {}
+    seed_value: Optional[str] = None
 
-    for param_pair in tag_part.split(','):
-        if '=' in param_pair:
-            key, value = param_pair.split('=', 1)
-            try:
-                params[key] = float(value) if '.' in value or 'e' in value.lower() else int(value)
-            except ValueError:
-                params[key] = value
+    for param_pair in remainder.split(','):
+        if '=' not in param_pair:
+            continue
 
-    return {"algorithm": algorithm, "seed": seed, **params}
+        key, value = param_pair.split('=', 1)
+        try:
+            converted = float(value) if '.' in value or 'e' in value.lower() else int(value)
+        except ValueError:
+            converted = value
+
+        params[key] = converted
+        if key == 'seed':
+            seed_value = str(converted)
+
+    if 'seed' in params:
+        params.pop('seed')
+
+    if seed_value is None:
+        match = re.search(r'_s(\d+)$', run_name)
+        seed_value = match.group(1) if match else "0"
+
+    return {"algorithm": algorithm, "seed": seed_value, **params}
 
 
 def fetch_runs(entity: str, project: str, group: str):
@@ -60,7 +73,16 @@ def fetch_ablation_data(entity: str, project: str, group: str, metric: str, spli
 
     df = pd.DataFrame(run_data)
     if split_by and split_by in df.columns:
-        df['group'] = f"{split_by}=" + df[split_by].astype(str)
+        def normalized_split_value(row):
+            value = row[split_by]
+            if isinstance(value, str):
+                match = re.match(r'(.+)_s(\d+)$', value)
+                if match and str(row.get('seed')) == match.group(2):
+                    return match.group(1)
+            return value
+
+        normalized_values = df.apply(normalized_split_value, axis=1)
+        df['group'] = f"{split_by}=" + normalized_values.astype(str)
     else:
         df['group'] = df['algorithm']
 
@@ -72,8 +94,12 @@ def create_short_labels(df: pd.DataFrame, short_labels: bool = True) -> pd.DataF
 
     def shorten_group_name(group_name: str) -> str:
         if '=' in group_name:
+            segments = group_name.split(',')
+            if len(segments) == 1:
+                return group_name
+
             parts = []
-            for param in group_name.split(',')[1:]:
+            for param in segments[1:]:
                 if '=' in param:
                     key, value = param.split('=', 1)
                     key = '_'.join(key.split('_')[1:]) if key.startswith('redo_') else key
@@ -81,7 +107,7 @@ def create_short_labels(df: pd.DataFrame, short_labels: bool = True) -> pd.DataF
                     parts.append(f"{initials}={value}")
                 else:
                     parts.append(param)
-            return ','.join(parts)
+            return ','.join(parts) if parts else segments[0]
         elif '_' in group_name:
             parts = group_name.split('_')
             return '_'.join([p if i == 0 or (p.startswith('s') and p[1:].isdigit()) else p[:3]

@@ -9,6 +9,7 @@ from chex import dataclass
 from continual_learning_2.configs import (
     AdamConfig,
     AdamwConfig,
+    MuonConfig,
     CbpConfig,
     CcbpConfig,
     RegramaConfig,
@@ -50,10 +51,13 @@ def run_all_slippery_humanoid():
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
+    # base_optim = AdamConfig(learning_rate=1e-3)
+    base_optim = MuonConfig(learning_rate=1e-3)
+
     optimizers = {
-        "adam": AdamConfig(learning_rate=1e-3),
+        "standard": base_optim,
         "regrama": RegramaConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             update_frequency=1000,
             score_threshold=0.0095,
             max_reset_frac=None,
@@ -61,7 +65,7 @@ def run_all_slippery_humanoid():
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "ccbp": CcbpConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             seed=args.seed,
             decay_rate=0.9,
             replacement_rate=0.01,
@@ -71,7 +75,7 @@ def run_all_slippery_humanoid():
             transform_type="exp"
         ),
         "redo": RedoConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             update_frequency=1000,
             score_threshold=0.05,
             max_reset_frac=None,
@@ -79,7 +83,7 @@ def run_all_slippery_humanoid():
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "cbp": CbpConfig(
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             decay_rate=0.99,
             replacement_rate=0.0002,
             maturity_threshold=100,
@@ -88,7 +92,7 @@ def run_all_slippery_humanoid():
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             param_noise_fn=jax.nn.initializers.lecun_normal(),
-            tx=AdamConfig(learning_rate=1e-3),
+            tx=base_optim,
             seed=args.seed,
             shrink=1-0.001,
             perturb=0.005,
@@ -117,7 +121,7 @@ def run_all_slippery_humanoid():
                     optimizer=opt_conf,
                     network=MLPConfig(
                         num_layers=4,
-                        hidden_size=32,
+                        hidden_size=128,
                         output_size=17,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
@@ -129,14 +133,14 @@ def run_all_slippery_humanoid():
                     optimizer=opt_conf,
                     network=MLPConfig(
                         num_layers=5,
-                        hidden_size=256,
+                        hidden_size=512,
                         output_size=1,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 3,
+                num_rollout_steps=2048 * 32 * 6,
                 num_epochs=4,
                 num_gradient_steps=32,
                 gamma=0.97,
@@ -147,11 +151,11 @@ def run_all_slippery_humanoid():
                 normalize_advantages=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
+                "slippery_humanoid", num_envs=4096, num_tasks=1, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
-                steps_per_task=20_000_000,
+                steps_per_task=400_000_000,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_new_{args.seed}",

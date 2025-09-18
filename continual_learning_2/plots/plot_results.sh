@@ -32,7 +32,7 @@
  # python plot_policy_collapse.py --wandb-entity lucmc --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --collapse_threshold 9000 --output-dir plots/collapse_bar
 
  # Perm MNIST
- python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png
+ # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/actor_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_linearised_neurons/total_ratio --output-dir plots/perm_mnist --ext png
@@ -40,6 +40,7 @@
 
  # Ablations
      # CCBP
+     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by transform_type --ext png --output-dir plots/ablations/ccbp
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by decay_rate --ext png --output-dir plots/ablations/ccbp
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by sharpness --ext png --output-dir plots/ablations/ccbp
