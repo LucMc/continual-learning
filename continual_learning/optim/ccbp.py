@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 import optax
-from chex import dataclass
 from flax.core import FrozenDict
 import flax.traverse_util
 from jaxtyping import (
@@ -21,7 +20,6 @@ import continual_learning.utils.optim as utils
 from continual_learning.optim.cbp import CbpOptimState
 
 
-@dataclass
 class CcbpOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(

@@ -4,7 +4,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from continual_learning_2.configs.models import MLPConfig
+from continual_learning.configs.models import MLPConfig
 
 
 class MLP(nn.Module):

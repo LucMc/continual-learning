@@ -1,4 +1,4 @@
-from continual_learning_2.configs.dataset import DatasetConfig
+from continual_learning.configs.dataset import DatasetConfig
 
 from .base import ContinualLearningDataset
 from .cifar import (

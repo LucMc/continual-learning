@@ -10,8 +10,8 @@ from jaxtyping import Array, Float, PyTree
 import numpy.typing as npt
 import wandb
 
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.types import Histogram, LayerActivationsDict, LogDict
+from continual_learning.configs.logging import LoggingConfig
+from continual_learning.types import Histogram, LayerActivationsDict, LogDict
 
 
 def prefix_dict(prefix: str, d: dict[str, Any]) -> dict[str, Any]:

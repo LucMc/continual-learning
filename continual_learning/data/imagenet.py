@@ -6,9 +6,9 @@ import grain.python as grain
 import numpy as np
 from PIL import Image
 
-from continual_learning_2.configs import DatasetConfig
-from continual_learning_2.data.base import SplitDataset
-from continual_learning_2.types import DatasetItem
+from continual_learning.configs import DatasetConfig
+from continual_learning.data.base import SplitDataset
+from continual_learning.types import DatasetItem
 
 
 class ProcessImageNet(grain.MapTransform):

@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from continual_learning_2.configs.dataset import DatasetConfig
-from continual_learning_2.data.base import ClassIncrementalDataset, SplitDataset
-from continual_learning_2.types import DatasetItem
+from continual_learning.configs.dataset import DatasetConfig
+from continual_learning.data.base import ClassIncrementalDataset, SplitDataset
+from continual_learning.types import DatasetItem
 
 
 class ProcessCIFAR(grain.RandomMapTransform):
@@ -28,8 +28,10 @@ class ProcessCIFAR(grain.RandomMapTransform):
         x = pix.random_flip_left_right(keys[0], image, probability=0.5)
         x = pix.pad_to_size(x, target_height=32 + 4, target_width=32 + 4, mode="reflect")
         x = pix.random_crop(keys[1], x, crop_sizes=(32, 32, 3))
-        angle_rad = jax.random.randint(keys[2], shape=(), minval=0, maxval=15) * (jnp.pi / 180.0)
-        x = pix.rotate(x, angle=angle_rad) # pix uses rads, torchvision uses degrees
+        angle_rad = jax.random.randint(keys[2], shape=(), minval=0, maxval=15) * (
+            jnp.pi / 180.0
+        )
+        x = pix.rotate(x, angle=angle_rad)  # pix uses rads, torchvision uses degrees
         return x
 
     def random_map(self, element: dict, rng: np.random.Generator) -> DatasetItem:
@@ -103,7 +105,7 @@ class SplitCIFAR100(CIFAR, SplitDataset):
     NUM_CLASSES: int = 100
     DATASET_PATH = "cifar100"
     KEEP_IN_MEMORY: bool | None = True
-    DATA_LABEL: str = "fine_label" # As oposed to corse_label
+    DATA_LABEL: str = "fine_label"  # As oposed to corse_label
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):
         SplitDataset.__init__(self, config)
@@ -113,7 +115,7 @@ class SplitCIFAR100(CIFAR, SplitDataset):
 class ClassIncrementalCIFAR100(CIFAR, ClassIncrementalDataset):
     NUM_CLASSES: int = 100
     DATASET_PATH = "cifar100"
-    KEEP_IN_MEMORY: bool | None = True 
+    KEEP_IN_MEMORY: bool | None = True
     DATA_LABEL: str = "fine_label"
 
     def __init__(self, config: DatasetConfig, flatten: bool = False):

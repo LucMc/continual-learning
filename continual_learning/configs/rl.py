@@ -1,8 +1,8 @@
 import jax
 from flax import struct
 
-from continual_learning_2.configs.models import CNNConfig, MLPConfig, ResNetConfig
-from continual_learning_2.types import StdType
+from continual_learning.configs.models import CNNConfig, MLPConfig, ResNetConfig
+from continual_learning.types import StdType
 
 from .optim import OptimizerConfig
 

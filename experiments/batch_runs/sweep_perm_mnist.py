@@ -1,5 +1,5 @@
 import itertools
-import gc 
+import gc
 from typing import Any, Dict, Literal, Optional
 
 import jax
@@ -7,10 +7,12 @@ import jax.numpy as jnp
 import tyro
 from chex import dataclass
 
-from continual_learning_2.configs import *
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.trainers.continual_supervised_learning import HeadResetClassificationCSLTrainer
+from continual_learning.configs import *
+from continual_learning.configs.logging import LoggingConfig
+from continual_learning.configs.models import MLPConfig
+from continual_learning.trainers.continual_supervised_learning import (
+    HeadResetClassificationCSLTrainer,
+)
 
 # SWEEP_RANGES = {
 #     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
@@ -29,21 +31,68 @@ SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "adamw": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "muon": {"learning_rate": [1e-3, 3e-4, 1e-4]},
-
-    "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
-    "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
-    "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
-    "ccbp": {"tx_lr": [1e-3], "decay_rate": [0., 0.99], "replacement_rate": [0.01, 0.05, 0.2], "update_frequency": [100, 1000]},
-    "shrink_and_perturb": {"tx_lr": [1e-3], "shrink": [1-1e-3, 1-1e-4, 1-1e-5], "perturb": [1e-3, 1e-4, 1e-5], "every_n": [1, 10, 100]},
+    "regrama": {
+        "tx_lr": [1e-3],
+        "max_reset_frac": [None],
+        "update_frequency": [100, 1000, 10_000],
+        "score_threshold": [
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+        ],
+    },
+    "redo": {
+        "tx_lr": [1e-3],
+        "max_reset_frac": [None],
+        "update_frequency": [100, 1000, 10_000],
+        "score_threshold": [
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+        ],
+    },
+    "cbp": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.95, 0.99],
+        "replacement_rate": [1e-6, 1e-5, 1e-4],
+        "maturity_threshold": [100, 1000],
+    },
+    "ccbp": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.0, 0.99],
+        "replacement_rate": [0.01, 0.05, 0.2],
+        "update_frequency": [100, 1000],
+    },
+    "shrink_and_perturb": {
+        "tx_lr": [1e-3],
+        "shrink": [1 - 1e-3, 1 - 1e-4, 1 - 1e-5],
+        "perturb": [1e-3, 1e-4, 1e-5],
+        "every_n": [1, 10, 100],
+    },
 }
+
 
 def _all_configs_for(algo: str):
     """Return list of param dicts for all combinations in SWEEP_RANGES[algo]."""
-    grid = list(itertools.product(*[[(k, v) for v in vals] for k, vals in SWEEP_RANGES[algo].items()]))
+    grid = list(
+        itertools.product(*[[(k, v) for v in vals] for k, vals in SWEEP_RANGES[algo].items()])
+    )
     return [dict(cfg) for cfg in grid]
 
+
 def _format_tag(params: Dict[str, Any]) -> str:
-    return ",".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v}" for k, v in params.items())
+    return ",".join(
+        f"{k}={v:g}" if isinstance(v, float) else f"{k}={v}" for k, v in params.items()
+    )
+
 
 def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
     if algo == "adam":
@@ -52,28 +101,67 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
         return AdamwConfig(learning_rate=params["learning_rate"])
     elif algo == "muon":
         return MuonConfig(learning_rate=params["learning_rate"])
-    
+
     tx = AdamConfig(learning_rate=params.get("tx_lr", 1e-3))
     configs = {
-        "regrama": lambda: RegramaConfig(tx=tx, update_frequency=params["update_frequency"], score_threshold=params["score_threshold"], seed=seed, weight_init_fn=jax.nn.initializers.he_uniform()),
-        "redo": lambda: RedoConfig(tx=tx, update_frequency=params["update_frequency"], score_threshold=params["score_threshold"], seed=seed, weight_init_fn=jax.nn.initializers.he_uniform()),
-        "cbp": lambda: CbpConfig(tx=tx, decay_rate=params["decay_rate"], replacement_rate=params["replacement_rate"], maturity_threshold=params["maturity_threshold"], seed=seed, weight_init_fn=jax.nn.initializers.he_uniform()),
-        "ccbp": lambda: CcbpConfig(tx=tx, decay_rate=params["decay_rate"], replacement_rate=params["replacement_rate"], update_frequency=params["update_frequency"], seed=seed),
-        "shrink_and_perturb": lambda: ShrinkAndPerterbConfig(tx=tx, param_noise_fn=jax.nn.initializers.he_uniform(), seed=seed, shrink=params["shrink"], perturb=params["perturb"], every_n=params["every_n"]),
+        "regrama": lambda: RegramaConfig(
+            tx=tx,
+            update_frequency=params["update_frequency"],
+            score_threshold=params["score_threshold"],
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
+        "redo": lambda: RedoConfig(
+            tx=tx,
+            update_frequency=params["update_frequency"],
+            score_threshold=params["score_threshold"],
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
+        "cbp": lambda: CbpConfig(
+            tx=tx,
+            decay_rate=params["decay_rate"],
+            replacement_rate=params["replacement_rate"],
+            maturity_threshold=params["maturity_threshold"],
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.he_uniform(),
+        ),
+        "ccbp": lambda: CcbpConfig(
+            tx=tx,
+            decay_rate=params["decay_rate"],
+            replacement_rate=params["replacement_rate"],
+            update_frequency=params["update_frequency"],
+            seed=seed,
+        ),
+        "shrink_and_perturb": lambda: ShrinkAndPerterbConfig(
+            tx=tx,
+            param_noise_fn=jax.nn.initializers.he_uniform(),
+            seed=seed,
+            shrink=params["shrink"],
+            perturb=params["perturb"],
+            every_n=params["every_n"],
+        ),
     }
     return configs[algo]()
 
-def run_config(algo: str, config_id: int, seed: int = 42, wandb_entity: str = None, wandb_project: str = None):
+
+def run_config(
+    algo: str,
+    config_id: int,
+    seed: int = 42,
+    wandb_entity: str = None,
+    wandb_project: str = None,
+):
     configs = _all_configs_for(algo)  # UPDATED
     if config_id >= len(configs):
-        print(f"Config ID {config_id} out of range for {algo} (max: {len(configs)-1})")
+        print(f"Config ID {config_id} out of range for {algo} (max: {len(configs) - 1})")
         return
-    
+
     params = configs[config_id]
     tag = _format_tag(params)  # UPDATED
-    
+
     opt_config = build_optimizer(algo, params, seed)
-    
+
     trainer = HeadResetClassificationCSLTrainer(
         seed=seed,
         model_config=MLPConfig(output_size=10, hidden_size=128),
@@ -101,12 +189,14 @@ def run_config(algo: str, config_id: int, seed: int = 42, wandb_entity: str = No
     )
     trainer.train()
 
+
 def list_configs(algo: str):
     configs = _all_configs_for(algo)  # UPDATED
     for i, params in enumerate(configs):
         tag = _format_tag(params)
         print(f"{i}: {tag}")
     print(f"Total configs: {len(configs)}")
+
 
 def run_all_configs(
     algo: str,
@@ -127,7 +217,7 @@ def run_all_configs(
     print(f"Running {algo} configs {start}..{end} (total {end - start + 1} / {total})")
     for cid in range(start, end + 1):
         tag = _format_tag(cfgs[cid])
-        print(f"\n=== [{cid}/{total-1}] {algo} :: {tag} ===")
+        print(f"\n=== [{cid}/{total - 1}] {algo} :: {tag} ===")
         try:
             run_config(algo, cid, seed, wandb_entity, wandb_project)
         except KeyboardInterrupt:
@@ -145,7 +235,9 @@ def run_all_configs(
 
 @dataclass
 class Args:
-    algo: Literal["adam", "adamw", "muon", "regrama", "redo", "cbp", "ccbp", "shrink_and_perturb"]
+    algo: Literal[
+        "adam", "adamw", "muon", "regrama", "redo", "cbp", "ccbp", "shrink_and_perturb"
+    ]
     config_id: Optional[int] = None
     seed: int = 42
     wandb_entity: Optional[str] = None
@@ -155,11 +247,11 @@ class Args:
     run_all: bool = False
     config_start: Optional[int] = None
     config_end: Optional[int] = None
-    
+
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    
+
     if args.list_configs:
         list_configs(args.algo)
     else:
@@ -174,7 +266,11 @@ if __name__ == "__main__":
             )
         else:
             if args.config_id is None:
-                print("Error: config_id is required when not listing configs or running all configs")
+                print(
+                    "Error: config_id is required when not listing configs or running all configs"
+                )
                 print("Use --list-configs to see available configurations, or pass --run-all")
                 exit(1)
-            run_config(args.algo, args.config_id, args.seed, args.wandb_entity, args.wandb_project)
+            run_config(
+                args.algo, args.config_id, args.seed, args.wandb_entity, args.wandb_project
+            )

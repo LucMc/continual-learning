@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from continual_learning_2.configs.models import ResNetConfig
-from continual_learning_2.utils.nn import flatten_last
+from continual_learning.configs.models import ResNetConfig
+from continual_learning.utils.nn import flatten_last
 
 
 class ResNetBlock(nn.Module):

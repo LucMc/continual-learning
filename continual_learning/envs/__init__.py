@@ -1,4 +1,4 @@
-from continual_learning_2.configs.envs import EnvConfig
+from continual_learning.configs.envs import EnvConfig
 
 from .base import (
     ContinualLearningEnv,

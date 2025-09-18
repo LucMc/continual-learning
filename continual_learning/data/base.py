@@ -11,9 +11,9 @@ import optax
 from flax.training.train_state import TrainState
 from jaxtyping import Array, Int32
 
-from continual_learning_2.configs import DatasetConfig
-from continual_learning_2.types import DatasetItem
-from continual_learning_2.utils.monitoring import accumulate_metrics, prefix_dict
+from continual_learning.configs import DatasetConfig
+from continual_learning.types import DatasetItem
+from continual_learning.utils.monitoring import accumulate_metrics, prefix_dict
 
 
 class ContinualLearningDataset(abc.ABC):

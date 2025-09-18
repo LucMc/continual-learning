@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 
-from continual_learning_2.types import Activation
+from continual_learning.types import Activation
 
 
 @struct.dataclass(frozen=True)

@@ -7,13 +7,13 @@ import jax.numpy as jnp
 import tyro
 from chex import dataclass
 
-from continual_learning_2.configs.envs import EnvConfig
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
-from continual_learning_2.configs.training import RLTrainingConfig
-from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
-from continual_learning_2.types import Activation, StdType
+from continual_learning.configs.envs import EnvConfig
+from continual_learning.configs.logging import LoggingConfig
+from continual_learning.configs.models import MLPConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
+from continual_learning.configs.training import RLTrainingConfig
+from continual_learning.trainers.continual_rl import JittedContinualPPOTrainer
+from continual_learning.types import Activation, StdType
 
 SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},

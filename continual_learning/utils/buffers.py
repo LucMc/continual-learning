@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from continual_learning_2.types import Rollout, Value
+from continual_learning.types import Rollout, Value
 
 
 @jax.jit
