@@ -1,0 +1,40 @@
+from typing import Self
+
+import jax
+from flax import struct
+from flax.training.train_state import TrainState as FlaxTrainState
+from jaxtyping import PRNGKeyArray
+
+
+class TrainState(FlaxTrainState):
+    kernel_init: jax.nn.initializers.Initializer = struct.field(pytree_node=False)
+    bias_init: jax.nn.initializers.Initializer = struct.field(pytree_node=False)
+
+    def reset_layer(self, rng_key: PRNGKeyArray, layer: str) -> Self:
+        layer_params = self.params["params"][layer]
+        kernel, bias = layer_params["kernel"], layer_params["bias"]
+        assert isinstance(kernel, jax.Array) and isinstance(bias, jax.Array)
+        new_layer_kernel = self.kernel_init(rng_key, kernel.shape, kernel.dtype)
+        new_layer_bias = self.bias_init(rng_key, bias.shape, bias.dtype)
+
+        new_params = self.params
+        new_params["params"][layer] = {"kernel": new_layer_kernel, "bias": new_layer_bias}
+
+        return self.replace(params=new_params)
+
+    # Pass features to optimizer and set params with update
+    def apply_gradients(self, *, grads, features=None, **kwargs):
+        assert features is not None, "Features must be provided to apply_gradients()"
+
+        new_params, new_opt_state = self.tx.update(
+            grads,
+            self.opt_state,
+            self.params,
+            features=features,  # pyright: ignore[reportCallIssue]
+        )
+        return self.replace(
+            step=self.step + 1,
+            params=new_params,
+            opt_state=new_opt_state,
+            **kwargs,
+        )

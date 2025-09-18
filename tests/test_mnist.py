@@ -1,7 +1,8 @@
 import datasets
 import pytest
 
-from continual_learning_2.data.mnist import ProcessMNIST, SplitMNIST
+from continual_learning.configs.dataset import DatasetConfig
+from continual_learning.data.mnist import ProcessMNIST, SplitMNIST
 
 
 @pytest.fixture
@@ -11,7 +12,7 @@ def dataset():
 
 def test_process_mnist(dataset):
     test_element = dataset[0]
-    processed_element = ProcessMNIST().map(test_element)
+    processed_element = ProcessMNIST(flatten=False).map(test_element)
     assert isinstance(processed_element, tuple)
     assert len(processed_element) == 2
     x, y = processed_element
@@ -23,7 +24,15 @@ def test_process_mnist(dataset):
 def test_split_mnist():
     num_tasks = 5
     batch_size = 32
-    ds = SplitMNIST(num_tasks=num_tasks, seed=42, batch_size=batch_size)
+    ds = SplitMNIST(
+        DatasetConfig(
+            name="split-mnist",
+            num_tasks=num_tasks,
+            num_epochs_per_task=2,
+            seed=42,
+            batch_size=batch_size,
+        )
+    )
 
     for task in ds.tasks:
         train, test = task
