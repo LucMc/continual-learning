@@ -87,10 +87,8 @@ def regrama(
         def _regrama(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, RegramaOptimState, optax.OptState]:
-            assert isinstance(params, FrozenDict) and isinstance(updates, FrozenDict)
-
-            flat_params = flax.traverse_util.flatten_dict(params["params"])
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
+            flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
+            flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
             weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
