@@ -7,8 +7,8 @@ import tyro
 from chex import dataclass
 
 from continual_learning.configs import (
-    # AdamConfig,
-    # AdamwConfig,
+    AdamConfig,
+    AdamwConfig,
     MuonConfig,
     CbpConfig,
     CcbpConfig,
@@ -50,15 +50,15 @@ def run_all_slippery_humanoid():
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    # base_optim = AdamConfig(learning_rate=1e-3)
-    base_optim = MuonConfig(learning_rate=1e-3)
+    base_optim = AdamConfig(learning_rate=1e-3)
+    # base_optim = MuonConfig(learning_rate=1e-3)
 
     optimizers = {
         "standard": base_optim,
         "regrama": RegramaConfig(
             tx=base_optim,
             update_frequency=1000,
-            score_threshold=0.0095,
+            score_threshold=0.25,
             max_reset_frac=None,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -66,26 +66,18 @@ def run_all_slippery_humanoid():
         "ccbp": CcbpConfig(
             tx=base_optim,
             seed=args.seed,
-            decay_rate=0.9,
-            replacement_rate=0.01,
+            decay_rate=0.99,
+            replacement_rate=0.03,
             sharpness=16,
             threshold=0.95,
             update_frequency=1000,
-            transform_type="exp",
+            transform_type="sigmoid",
         ),
         "redo": RedoConfig(
             tx=base_optim,
             update_frequency=1000,
-            score_threshold=0.05,
+            score_threshold=0.65,
             max_reset_frac=None,
-            seed=args.seed,
-            weight_init_fn=jax.nn.initializers.lecun_normal(),
-        ),
-        "cbp": CbpConfig(
-            tx=base_optim,
-            decay_rate=0.99,
-            replacement_rate=0.0002,
-            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
