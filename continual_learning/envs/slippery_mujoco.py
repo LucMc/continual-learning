@@ -189,7 +189,7 @@ class SlipperyCheetah(Halfcheetah):
 
         kwargs["n_frames"] = kwargs.get("n_frames", n_frames)
 
-        super().__init__(sys=sys, backend=backend, **kwargs)
+        PipelineEnv.__init__(self, sys=sys, backend=backend, **kwargs)  # pyright: ignore[reportArgumentType]
 
         self._forward_reward_weight = forward_reward_weight
         self._ctrl_cost_weight = ctrl_cost_weight
@@ -403,7 +403,7 @@ class ContinualCheetah(JittableContinualLearningEnv):
     def _make_envs(self, friction: float, env_checkpoint: EnvState) -> JittableVectorEnv:
         return JittableVectorEnvWrapper(
             seed=self.seed,
-            env=SlipperyAnt(friction=friction, backend=self.backend),
+            env=SlipperyCheetah(friction=friction, backend=self.backend),
             num_envs=self.num_envs,
             episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,
@@ -420,10 +420,10 @@ class ContinualCheetah(JittableContinualLearningEnv):
 
     @property
     def observation_spec(self) -> jax.ShapeDtypeStruct:
-        env = SlipperyAnt(friction=self.frictions[0])
+        env = SlipperyCheetah(friction=self.frictions[0])
         return jax.ShapeDtypeStruct((1, env.observation_size), jnp.float32)
 
     @property
     def action_dim(self) -> int:
-        env = SlipperyAnt(friction=self.frictions[0])
+        env = SlipperyCheetah(friction=self.frictions[0])
         return env.action_size
