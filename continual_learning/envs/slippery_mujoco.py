@@ -271,7 +271,7 @@ class ContinualHumanoid(JittableContinualLearningEnv):
         self.frictions = np.pow(10, rng.uniform(low=low, high=high, size=config.num_tasks))
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
-        self.reward_gain = 1.0
+        self.reward_gain = 0.1
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:

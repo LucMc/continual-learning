@@ -23,11 +23,6 @@ NETWORK_METRIC_COMBINATIONS = {
         "actor": "nn/actor_linearised_neurons/total_ratio",
         "total": "nn/total_linearised_neurons/total_ratio",
     },
-    "srank_hidden": {
-        "value": "value_srank_hidden",
-        "actor": "actor_srank_hidden",
-        "total": "total_srank_hidden",
-    },
 }
 
 
@@ -41,10 +36,10 @@ SRANK_LAYER_COMBINATIONS = {
         "label": "Value Network: Hidden Layer S-Rank (Mean)",
         "reducer": np.mean,
     },
-    "actor_srank_hidden": {
+    "policy_srank_hidden": {
         "components": [f"nn/actor_srank/main/{suffix}" for suffix in [f"layer_{idx}_act" for idx in range(4)]],
-        "output_metric": "actor_srank_hidden",
-        "label": "Actor Network: Hidden Layer S-Rank (Mean)",
+        "output_metric": "policy_srank_hidden",
+        "label": "Policy Network: Hidden Layer S-Rank (Mean)",
         "reducer": np.mean,
     },
 }
@@ -54,43 +49,13 @@ CUSTOM_METRIC_TITLES = {
     combo["output_metric"]: combo["label"]
     for combo in SRANK_LAYER_COMBINATIONS.values()
 }
-CUSTOM_METRIC_TITLES["total_srank_hidden"] = "Combined Networks: Hidden Layer S-Rank (Mean)"
-CUSTOM_METRIC_TITLES["nn/total_dormant_neurons/total_ratio_normalized"] = (
-    "Combined Networks: Dormant Neuron Ratio (Balanced)"
-)
-CUSTOM_METRIC_TITLES["nn/total_linearised_neurons/total_ratio_normalized"] = (
-    "Combined Networks: Linearized Neuron Ratio (Balanced)"
-)
-CUSTOM_METRIC_TITLES["total_srank_hidden_normalized"] = (
-    "Combined Networks: Hidden Layer S-Rank (Balanced)"
-)
-
-
-METRIC_ALIASES = {
-    "policy_srank_hidden": "actor_srank_hidden",
-}
-
-
-def canonicalize_metric_name(metric: str) -> str:
-    stripped = metric.strip()
-    canonical = METRIC_ALIASES.get(stripped.lower())
-    return canonical if canonical is not None else stripped
-
-
-def combined_total_metric_key(base_metric: str, normalized: bool) -> str:
-    combo = NETWORK_METRIC_COMBINATIONS.get(base_metric)
-    if not combo:
-        return base_metric
-    total_key = combo["total"]
-    return f"{total_key}_normalized" if normalized else total_key
 
 
 def normalize_combined_metric_name(metric: str) -> str:
     """Canonicalize user-provided aliases for combined network metrics."""
 
     candidate = metric.strip()
-    canonical = canonicalize_metric_name(candidate)
-    lowered = canonical.lower()
+    lowered = candidate.lower()
     if lowered in {"dormant", "dormant_neurons"}:
         return "dormant_neurons"
     if lowered in {
@@ -100,33 +65,24 @@ def normalize_combined_metric_name(metric: str) -> str:
         "linearized_neurons",
     }:
         return "linearised_neurons"
-    if lowered in {
-        "srank_hidden",
-        "actor_srank_hidden",
-        "value_srank_hidden",
-    }:
-        return "srank_hidden"
-    return canonical
+    return candidate
 
 
-def build_combined_metric_suffix(metric: str, balanced: bool = False) -> str:
+def build_combined_metric_suffix(metric: str) -> str:
     """Return a descriptive filename stem for combined network plots."""
 
-    normalized_metric = normalize_combined_metric_name(metric).lower()
-    if normalized_metric == "dormant_neurons":
+    normalized = normalize_combined_metric_name(metric).lower()
+    if normalized == "dormant_neurons":
         base = "dormant"
-    elif normalized_metric == "linearised_neurons":
+    elif normalized == "linearised_neurons":
         base = "linearised"
     else:
-        base = re.sub(r"[^a-z0-9]+", "_", normalized_metric).strip("_") or "metric"
-    suffix = "balanced_combined" if balanced else "combined"
-    return f"{base}_{suffix}"
+        base = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_") or "metric"
+    return f"{base}_combined"
 
 
 def resolve_metric_labels(metric: str) -> Tuple[str, str]:
     """Return a human-readable title and y-axis label for a metric key."""
-
-    normalized_variant = metric.endswith("_normalized")
 
     if metric in CUSTOM_METRIC_TITLES:
         metric_name = CUSTOM_METRIC_TITLES[metric]
@@ -152,16 +108,13 @@ def resolve_metric_labels(metric: str) -> Tuple[str, str]:
         )
 
     if "dormant_neurons" in metric or "linearised_neurons" in metric:
-        if normalized_variant:
-            y_label = "Balanced Ratio (Z-Score)"
-        else:
-            y_label = "Ratio (0-1)"
+        y_label = "Ratio (0-1)"
     elif "srank" in metric:
-        y_label = "Balanced S-Rank (Z-Score)" if normalized_variant else "S-Rank"
+        y_label = "S-Rank"
     elif "mean_episodic_return" in metric:
         y_label = "Episode Return"
     else:
-        y_label = "Balanced Score (Z-Score)" if normalized_variant else metric_name
+        y_label = metric_name
 
     return metric_name, y_label
 
@@ -302,11 +255,7 @@ def fetch_runs(entity: str, project: str, group: str):
     return finished
 
 
-def combine_network_metrics(
-    df: pd.DataFrame,
-    base_metric: str,
-    normalize_networks: bool = False,
-) -> pd.DataFrame:
+def combine_network_metrics(df: pd.DataFrame, base_metric: str) -> pd.DataFrame:
     if base_metric not in NETWORK_METRIC_COMBINATIONS:
         return df
     metrics = NETWORK_METRIC_COMBINATIONS[base_metric]
@@ -327,56 +276,13 @@ def combine_network_metrics(
     if merged.empty:
         return df
 
-    total_metric_key = combined_total_metric_key(base_metric, normalize_networks)
-
     total_data = merged[["algorithm", "step", "n_seeds", "n_values"]].copy()
+    total_data["iqm"] = (merged["iqm_value"] + merged["iqm_actor"]) / 2
+    total_data["q25"] = (merged["q25_value"] + merged["q25_actor"]) / 2
+    total_data["q75"] = (merged["q75_value"] + merged["q75_actor"]) / 2
+    total_data["metric"] = metrics["total"]
 
-    if not normalize_networks:
-        total_data["iqm"] = (merged["iqm_value"] + merged["iqm_actor"]) / 2
-        total_data["q25"] = (merged["q25_value"] + merged["q25_actor"]) / 2
-        total_data["q75"] = (merged["q75_value"] + merged["q75_actor"]) / 2
-    else:
-        def _norm_stats(series: pd.Series) -> Tuple[float, float]:
-            numeric = pd.to_numeric(series, errors="coerce").dropna()
-            if numeric.empty:
-                return 0.0, 1.0
-            mean = float(numeric.mean())
-            std = float(numeric.std(ddof=0))
-            if not np.isfinite(std) or std < 1e-8:
-                std = 1.0
-            return mean, std
-
-        value_mean, value_std = _norm_stats(value_data["iqm"])
-        actor_mean, actor_std = _norm_stats(actor_data["iqm"])
-
-        for prefix, mean, std in (
-            ("value", value_mean, value_std),
-            ("actor", actor_mean, actor_std),
-        ):
-            merged[f"iqm_{prefix}_scaled"] = (merged[f"iqm_{prefix}"] - mean) / std
-            merged[f"q25_{prefix}_scaled"] = (merged[f"q25_{prefix}"] - mean) / std
-            merged[f"q75_{prefix}_scaled"] = (merged[f"q75_{prefix}"] - mean) / std
-
-        total_data["iqm"] = (
-            merged["iqm_value_scaled"] + merged["iqm_actor_scaled"]
-        ) / 2
-        total_data["q25"] = (
-            merged["q25_value_scaled"] + merged["q25_actor_scaled"]
-        ) / 2
-        total_data["q75"] = (
-            merged["q75_value_scaled"] + merged["q75_actor_scaled"]
-        ) / 2
-
-    total_data["metric"] = total_metric_key
-
-    combined_df = pd.concat([df, total_data], ignore_index=True)
-    if df.attrs:
-        combined_df.attrs.update(df.attrs)
-    if normalize_networks:
-        normalized_metrics = set(df.attrs.get("normalized_metrics", []))
-        normalized_metrics.add(total_metric_key)
-        combined_df.attrs["normalized_metrics"] = sorted(normalized_metrics)
-    return combined_df
+    return pd.concat([df, total_data], ignore_index=True)
 
 
 def fetch_and_process_data(
@@ -385,7 +291,6 @@ def fetch_and_process_data(
     group: str,
     metrics: Union[str, List[str]],
     combine_networks: bool = False,
-    normalize_networks: bool = False,
     split_by: Optional[str] = None,
 ) -> pd.DataFrame:
     runs = fetch_runs(entity, project, group)
@@ -403,45 +308,26 @@ def fetch_and_process_data(
     layer_combinations: List[dict] = []
     seen_layer_aliases = set()
 
-    def register_layer_combination(metric_name: str) -> Optional[str]:
-        alias_info = SRANK_LAYER_COMBINATIONS.get(metric_name)
-        if alias_info is None:
-            return None
-
-        output_metric = alias_info.get("output_metric", metric_name)
-        if metric_name in seen_layer_aliases:
-            return output_metric
-
-        alias_record = dict(alias_info)
-        components = list(alias_record.get("components", []))
-        alias_record["alias"] = metric_name
-        alias_record["components"] = components
-        layer_combinations.append(alias_record)
-        seen_layer_aliases.add(metric_name)
-
-        for component_metric in components:
-            append_unique(metrics_to_track, component_metric)
-
-        return output_metric
-
     for metric in metrics:
-        alias_output_metric = register_layer_combination(metric)
-        if alias_output_metric is not None:
-            append_unique(requested_metrics, alias_output_metric)
+        alias_info = SRANK_LAYER_COMBINATIONS.get(metric)
+        if alias_info is not None:
+            if metric not in seen_layer_aliases:
+                alias_record = dict(alias_info)
+                components = list(alias_record.get("components", []))
+                alias_record["alias"] = metric
+                alias_record["components"] = components
+                layer_combinations.append(alias_record)
+                seen_layer_aliases.add(metric)
+                for component_metric in components:
+                    append_unique(metrics_to_track, component_metric)
+            append_unique(requested_metrics, alias_info.get("output_metric", metric))
             continue
 
         if combine_networks and metric in NETWORK_METRIC_COMBINATIONS:
             combo = NETWORK_METRIC_COMBINATIONS[metric]
-            value_alias_output = register_layer_combination(combo["value"])
-            actor_alias_output = register_layer_combination(combo["actor"])
-            if value_alias_output is None:
-                append_unique(metrics_to_track, combo["value"])
-            if actor_alias_output is None:
-                append_unique(metrics_to_track, combo["actor"])
-            append_unique(
-                requested_metrics,
-                combined_total_metric_key(metric, normalize_networks),
-            )
+            append_unique(metrics_to_track, combo["value"])
+            append_unique(metrics_to_track, combo["actor"])
+            append_unique(requested_metrics, combo["total"])
             continue
 
         append_unique(metrics_to_track, metric)
@@ -581,8 +467,8 @@ def fetch_and_process_data(
 
     # Apply network combination if requested
     if combine_networks:
-        for base_metric in NETWORK_METRIC_COMBINATIONS.keys():
-            df = combine_network_metrics(df, base_metric, normalize_networks)
+        for base_metric in ["dormant_neurons", "linearised_neurons"]:
+            df = combine_network_metrics(df, base_metric)
 
     if requested_metrics:
         requested_metric_set = set(requested_metrics)
@@ -594,7 +480,6 @@ def fetch_and_process_data(
 
     # Print more detailed summary
     print("\nData summary:")
-    performance_summary = []
     for metric in df["metric"].unique():
         print(f"\nMetric: {metric}")
         metric_df = df[df["metric"] == metric]
@@ -674,28 +559,6 @@ def fetch_and_process_data(
                 f"{algo}: avg={avg_interval}, final={final_interval} at {final_step:.1f}M steps, "
                 f"peak={peak_interval} at {peak_step:.1f}M steps"
             )
-
-            performance_summary.append(
-                {
-                    "metric": metric,
-                    "algorithm": algo,
-                    "avg_iqm": avg_iqm,
-                    "avg_q25": avg_q25,
-                    "avg_q75": avg_q75,
-                    "peak_iqm": peak_iqm,
-                    "peak_step": peak_step,
-                    "peak_q25": peak_q25,
-                    "peak_q75": peak_q75,
-                    "final_iqm": final_iqm,
-                    "final_step": final_step,
-                    "final_q25": final_q25,
-                    "final_q75": final_q75,
-                    "n_points": len(algo_df),
-                }
-            )
-
-    if performance_summary:
-        df.attrs["performance_summary"] = performance_summary
 
     return df
 
@@ -875,186 +738,6 @@ def create_chart(
     )
 
 
-def create_peak_final_bar_chart(
-    summary_df: pd.DataFrame,
-    overall_title: str,
-    metric_label: str,
-) -> alt.Chart:
-    """
-    Grouped bar chart (Final vs Peak IQM) with robust y-axis:
-    - Do NOT set axis=None on y in any layer (prevents merged-axis removal).
-    - Robust y-domain (includes error bars and handles min==max).
-    - Left padding + autosize to avoid PNG/SVG clipping.
-    - Independent y-scale per facet if multiple metrics.
-    """
-    import numpy as np
-    import pandas as pd
-    import altair as alt
-
-    if summary_df.empty:
-        raise ValueError("Performance summary is empty; cannot build bar chart.")
-
-    df = summary_df.copy()
-    if "metric" not in df.columns:
-        df["metric"] = metric_label
-
-    # ---- reshape to long format
-    rows = []
-    for r in df.itertuples():
-        final_iqm = getattr(r, "final_iqm", np.nan)
-        peak_iqm  = getattr(r, "peak_iqm",  np.nan)
-        sort_key  = final_iqm if pd.notna(final_iqm) else peak_iqm
-
-        def add(stage, iqm, q25, q75, step, order):
-            if pd.isna(iqm):
-                return
-            lo = q25 if pd.notna(q25) else iqm
-            hi = q75 if pd.notna(q75) else iqm
-            rows.append({
-                "metric":    getattr(r, "metric"),
-                "algorithm": getattr(r, "algorithm"),
-                "stage":     stage,
-                "iqm":       float(iqm),
-                "lower":     float(lo),
-                "upper":     float(hi),
-                "step":      float(step) if pd.notna(step) else np.nan,
-                "stage_order": order,
-                "sort_key":  float(sort_key) if pd.notna(sort_key) else float(iqm),
-            })
-
-        add("Final", final_iqm,
-            getattr(r, "final_q25", np.nan),
-            getattr(r, "final_q75", np.nan),
-            getattr(r, "final_step", np.nan), 0)
-
-        add("Peak", peak_iqm,
-            getattr(r, "peak_q25", np.nan),
-            getattr(r, "peak_q75", np.nan),
-            getattr(r, "peak_step", np.nan), 1)
-
-    if not rows:
-        raise ValueError("Unable to build bar chart; no valid peak/final IQM values found.")
-
-    chart_df = pd.DataFrame(rows)
-
-    # ---- robust y-domain (single metric gets a global domain)
-    metric_count = chart_df["metric"].nunique()
-    y_domain = None
-    if metric_count == 1:
-        ymin = np.nanmin([chart_df["iqm"].min(), chart_df["lower"].min()])
-        ymax = np.nanmax([chart_df["iqm"].max(), chart_df["upper"].max()])
-        if not np.isfinite(ymin) or not np.isfinite(ymax):
-            ymin, ymax = 0.0, 1.0
-        if ymin == ymax:
-            pad = 0.05 if ymax == 0 else 0.05 * abs(ymax)
-            ymin, ymax = ymin - pad, ymax + pad
-        span = ymax - ymin
-        pad = max(1e-6, 0.05 * span)
-        y_domain = [float(ymin - pad), float(ymax + pad)]
-
-    # ---- encodings
-    algorithm_count = chart_df["algorithm"].nunique()
-    base_width = max(320, algorithm_count * 85)
-
-    axis_label = (metric_label or "").strip() or "IQM"
-    if "IQM" not in axis_label.upper():
-        axis_label = f"{axis_label} (IQM)"
-
-    color_scale = alt.Scale(domain=["Final", "Peak"], range=["#1f77b4", "#ff7f0e"])
-    legend = alt.Legend(
-        title="Stage", orient="top", direction="horizontal",
-        padding=10, labelFontSize=14, titleFontSize=16, symbolSize=150,
-        values=["Final", "Peak"],
-    )
-
-    x = alt.X(
-        "algorithm:N",
-        sort=alt.SortField(field="sort_key", order="descending"),
-        title="Algorithm",
-        axis=alt.Axis(labelAngle=-30, labelPadding=4, labelLimit=360),
-    )
-    x_off = alt.XOffset("stage:N", sort=["Final", "Peak"])
-    color = alt.Color("stage:N", title="Stage", scale=color_scale, legend=legend)
-    order = alt.Order("stage_order:Q")
-
-    # Shared y-scale
-    y_scale = alt.Scale(zero=False, nice=False, domain=y_domain) if y_domain \
-              else alt.Scale(zero=False, nice=True)
-
-    y = alt.Y(
-        "iqm:Q",
-        scale=y_scale,
-        axis=alt.Axis(
-            title=axis_label, format=".2f",
-            titlePadding=10, titleFontSize=16, labelFontSize=14, tickCount=6,
-        ),
-    )
-
-    base = alt.Chart(chart_df)
-
-    # ---- IMPORTANT: bars define the axis; other layers DO NOT set axis at all
-    bars = base.mark_bar(size=28).encode(
-        x=x, xOffset=x_off, y=y, color=color, order=order,
-        tooltip=[
-            alt.Tooltip("algorithm:N", title="Algorithm"),
-            alt.Tooltip("stage:N",     title="Stage"),
-            alt.Tooltip("iqm:Q",       title="IQM",       format=".3f"),
-            alt.Tooltip("lower:Q",     title="IQR Lower", format=".3f"),
-            alt.Tooltip("upper:Q",     title="IQR Upper", format=".3f"),
-            alt.Tooltip("step:Q",      title="Step (M)",  format=".1f"),
-        ],
-    )
-
-    # Error bars / caps share the scale; DO NOT set axis=None
-    rules = base.mark_rule().encode(
-        x=x, xOffset=x_off,
-        y=alt.Y("lower:Q", scale=y_scale),
-        y2=alt.Y2("upper:Q"),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
-        order=order,
-    )
-
-    lower_caps = base.mark_tick(thickness=2, size=18).encode(
-        x=x, xOffset=x_off,
-        y=alt.Y("lower:Q", scale=y_scale),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
-        order=order,
-    )
-
-    upper_caps = base.mark_tick(thickness=2, size=18).encode(
-        x=x, xOffset=x_off,
-        y=alt.Y("upper:Q", scale=y_scale),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
-        order=order,
-    )
-
-    chart = bars + rules + lower_caps + upper_caps
-
-    # facet if multiple metrics; keep an axis per facet
-    if metric_count > 1:
-        chart = chart.encode(
-            column=alt.Column(
-                "metric:N",
-                title=None,
-                header=alt.Header(labelFontSize=14, titleFontSize=14),
-            )
-        ).resolve_scale(y="independent")
-
-    return (
-        chart.properties(
-            width=base_width,
-            height=420,
-            padding={"left": 76, "right": 12, "top": 10, "bottom": 44},
-            autosize=alt.AutoSizeParams(type="pad", contains="padding"),
-            title=alt.TitleParams(
-                text=overall_title or f"{metric_label}: Peak vs Final IQM",
-                fontSize=18, fontWeight="bold",
-            ),
-        )
-        .configure_axis(grid=True, gridOpacity=0.2)
-        .configure_legend()
-    )
-
 def main(
     wandb_entity: str,
     wandb_project: str = "crl_experiments",
@@ -1062,12 +745,10 @@ def main(
     metric: Optional[str] = None,
     metrics: Optional[List[str]] = None,
     combine_networks: bool = False,
-    normalize_networks: bool = False,
     split_by: Optional[str] = None,
     output_dir: str = "./plots",
     ext: str = "png",
     debug: bool = False,
-    bar_chart: bool = False,
 ):
     if not metrics:
         metrics = [metric] if metric else ["eval_loss"]
@@ -1076,8 +757,6 @@ def main(
         metrics = [m.strip() for m in metrics[0].split(",") if m.strip()]
     else:
         metrics = [m.strip() for m in metrics if m and m.strip()]
-
-    metrics = [canonicalize_metric_name(m) for m in metrics]
 
     if not metrics:
         raise ValueError("No metric provided; supply --metric or --metrics with a single value.")
@@ -1091,9 +770,6 @@ def main(
     selected_metric = metrics[0]
     combined_total_metric: Optional[str] = None
 
-    if normalize_networks and not combine_networks:
-        raise ValueError("--normalize-networks requires --combine-networks.")
-
     if combine_networks:
         normalized_metric = normalize_combined_metric_name(selected_metric)
         combo = NETWORK_METRIC_COMBINATIONS.get(normalized_metric)
@@ -1104,9 +780,7 @@ def main(
                 f"[{available}]; received '{selected_metric}'."
             )
         metrics = [normalized_metric]
-        combined_total_metric = combined_total_metric_key(
-            normalized_metric, normalize_networks
-        )
+        combined_total_metric = combo["total"]
     else:
         metrics = [selected_metric]
 
@@ -1116,14 +790,10 @@ def main(
         group,
         metrics,
         combine_networks,
-        normalize_networks,
         split_by,
     )
     if df.empty:
         return print(f"No data found for group: '{group}'")
-
-    summary_records = df.attrs.get("performance_summary")
-    summary_df = pd.DataFrame(summary_records) if summary_records else pd.DataFrame()
 
     if combine_networks:
         metric_label = (
@@ -1134,7 +804,6 @@ def main(
         title_suffix = metric_label
     else:
         readable_metrics = [resolve_metric_labels(m)[0] for m in metrics]
-        metric_label = readable_metrics[0] if readable_metrics else metrics[0]
         title_suffix = ", ".join(readable_metrics)
 
     title = f"{group.replace('_', ' ').title()}: {title_suffix} (IQM)"
@@ -1142,7 +811,7 @@ def main(
         pretty_split = split_by.replace("_", " ")
         title += f" • Split by {pretty_split.title()}"
     save_suffix = (
-        build_combined_metric_suffix(metrics[0], normalize_networks)
+        build_combined_metric_suffix(metrics[0])
         if combine_networks
         else "_".join([m.replace("/", "_") for m in metrics])
     )
@@ -1154,24 +823,6 @@ def main(
     save_path.parent.mkdir(exist_ok=True, parents=True)
     chart.save(str(save_path))
     print(f"Chart saved to: {save_path}")
-
-    if bar_chart:
-        if summary_df.empty:
-            print("Warning: unable to generate peak vs. final bar chart (no summary data).")
-        else:
-            bar_title = f"{group.replace('_', ' ').title()}: Peak vs Final IQM"
-            bar_chart_obj = create_peak_final_bar_chart(
-                summary_df, bar_title, metric_label
-            )
-            bar_save_path = (
-                Path(output_dir)
-                / ext
-                / f"{group}_{save_suffix}_peak_vs_final_bar.{ext}"
-            )
-            bar_save_path.parent.mkdir(exist_ok=True, parents=True)
-            bar_chart_obj.save(str(bar_save_path))
-            print(f"Summary bar chart saved to: {bar_save_path}")
-
     return chart
 
 

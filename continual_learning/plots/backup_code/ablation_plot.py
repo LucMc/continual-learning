@@ -238,7 +238,7 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
          metric: str = "charts/mean_episodic_return", split_by: Optional[str] = None,
          grouping_mode: Literal["parameter", "seed", "config"] = "parameter", top_k: Optional[int] = None,
          ranking_criteria: Literal["final", "peak", "average", "auc"] = "final", short_labels: bool = True,
-         output_dir: str = "./plots/ablations", ext: str = "png", debug: bool = False):
+         output_dir: str = "./plots/ablation", ext: str = "svg", debug: bool = False):
     df = fetch_ablation_data(wandb_entity, wandb_project, group, metric, split_by)
     if df.empty: return print(f"No data found for group: '{group}'")
 

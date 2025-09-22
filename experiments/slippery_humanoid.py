@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import tyro
 from chex import dataclass
 
-from continual_learning_2.configs import (
+from continual_learning.configs import (
     AdamConfig,
     AdamwConfig,
     MuonConfig,
@@ -17,13 +17,13 @@ from continual_learning_2.configs import (
     RedoConfig,
     ShrinkAndPerterbConfig,
 )
-from continual_learning_2.configs.envs import EnvConfig
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
-from continual_learning_2.configs.training import RLTrainingConfig
-from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
-from continual_learning_2.types import (
+from continual_learning.configs.envs import EnvConfig
+from continual_learning.configs.logging import LoggingConfig
+from continual_learning.configs.models import MLPConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
+from continual_learning.configs.training import RLTrainingConfig
+from continual_learning.trainers.continual_rl import JittedContinualPPOTrainer
+from continual_learning.types import (
     Activation,
     StdType,
 )
@@ -52,7 +52,7 @@ def run_all_slippery_humanoid():
         assert args.wandb_entity is not None
 
     # base_optim = AdamConfig(learning_rate=1e-3)
-    base_optim = MuonConfig(learning_rate=1e-3)
+    base_optim = MuonConfig(learning_rate=3e-4)
 
     optimizers = {
         "standard": base_optim,
@@ -133,15 +133,15 @@ def run_all_slippery_humanoid():
                     optimizer=opt_conf,
                     network=MLPConfig(
                         num_layers=5,
-                        hidden_size=512,
+                        hidden_size=256,
                         output_size=1,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 6,
-                num_epochs=4,
+                num_rollout_steps=2048 * 32 * 5,
+                num_epochs=8,
                 num_gradient_steps=32,
                 gamma=0.97,
                 gae_lambda=0.95,

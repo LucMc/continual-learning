@@ -68,6 +68,7 @@ def run_all_perm_mnist():
             decay_rate=0.99,
             replacement_rate=0.01,
             update_frequency=100,
+            transformaition_type="sigmoid"
         ),
         "redo": RedoConfig(
             tx=base_optim,

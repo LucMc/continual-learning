@@ -2,7 +2,7 @@
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/main # Maybe make yaml files for each experiment or something?
  
  # Slippery Ant Rseults
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/main --ext png --bar-chart
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_dormant_neurons/total_ratio --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_dormant_neurons/total_ratio --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_linearised_neurons/total_ratio --output-dir plots/main --ext png
@@ -13,13 +13,15 @@
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/policy_gradient_norm --output-dir plots/main --ext png
 
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_srank/layer_0_act --output-dir plots/main --ext png
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/policy_srank/layer_0_act --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_srank/main/layer_0_act --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_srank/layer_1_act --output-dir plots/main --ext png
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/policy_srank/layer_1_act --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_srank/main/layer_1_act --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_srank/layer_2_act --output-dir plots/main --ext png
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/policy_srank/layer_2_act --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_srank/main/layer_2_act --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_srank/layer_3_act --output-dir plots/main --ext png
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/policy_srank/layer_3_act --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_srank/main/layer_3_act --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics value_srank_hidden --output-dir plots/main --ext png
+ # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics actor_srank_hidden --output-dir plots/main --ext png
 
  # Large batch size adam experiment
  # python analyze.py $WANDB_CFG --group standard_large_batchsize --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/bigbatch
@@ -40,7 +42,18 @@
 
  # Ablations
      # CCBP
-     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep_backup --metric charts/mean_episodic_return --grouping-mode parameter --split-by transform_type --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_transforms --metric charts/mean_episodic_return --grouping-mode parameter --split-by transform_type --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/value_dormant_neurons/total_ratio --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/actor_dormant_neurons/total_ratio --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/value_linearised_neurons/total_ratio --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/actor_linearised_neurons/total_ratio --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/vf_gradient_norm --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric nn/policy_gradient_norm --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
+
+     # python analyze.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metrics dormant,linearized --combine-networks --ext png --output-dir plots/ablations/ccbp
+
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by decay_rate --ext png --output-dir plots/ablations/ccbp
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by sharpness --ext png --output-dir plots/ablations/ccbp
@@ -61,13 +74,16 @@
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_regrama_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by update_frequency --ext png --output-dir plots/ablations/regrama
 
      # shrink_pertub
-     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_shrink_perturb_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by shrink --ext png --output-dir plots/ablations/sp
-     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_shrink_perturb_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by pertub --ext png --output-dir plots/ablations/sp
+     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_shrink_and_perturb_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by shrink --ext png --output-dir plots/ablations/sp
+     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_shrink_and_perturb_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by pertub --ext png --output-dir plots/ablations/sp
+     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_shrink_and_perturb_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by every_n --ext png --output-dir plots/ablations/sp
      
      # Just for which runs are best
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_cbp_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_redo_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_regrama_sweep --metric charts/mean_episodic_return --grouping-mode config --ext png --output-dir plots/ablations/all --short-labels --ranking-criteria average --top-k 5
+     
      # Combined
-     # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics dormant,linearized --combine-networks --output-dir plots/main --ext png
-
+     # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric dormant --combine-networks --output-dir plots/main/combined --ext png --normalize-networks
+     # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric linearized --combine-networks --output-dir plots/main/combined --ext png --normalize-networks
+     # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics actor_srank_hidden --combine-networks --output-dir plots/main/combined --ext png --normalize-networks
