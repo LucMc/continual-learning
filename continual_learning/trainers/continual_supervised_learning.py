@@ -43,6 +43,34 @@ os.environ["XLA_FLAGS"] = (
 )
 
 
+NEURON_LOG_BATCH_SIZE = 512
+
+
+def _unwrap_intermediate_leaf(value):
+    while isinstance(value, (tuple, list)) and value:
+        value = value[0]
+    return value
+
+
+def _flatten_intermediate_collection(collection) -> dict[str, jax.Array]:
+    flat = {}
+    for key, value in flax.traverse_util.flatten_dict(collection, sep="/").items():
+        array = _unwrap_intermediate_leaf(value)
+        if isinstance(array, jax.Array):
+            flat[key] = array
+    return flat
+
+
+def _sample_indices_for_logging(
+    key: PRNGKeyArray, batch_size: int, sample_size: int
+) -> tuple[PRNGKeyArray, jax.Array]:
+    if sample_size >= batch_size:
+        return key, jnp.arange(batch_size, dtype=jnp.int32)
+    key, subkey = jax.random.split(key)
+    indices = jax.random.choice(subkey, batch_size, (sample_size,), replace=False)
+    return key, indices
+
+
 class CSLTrainerBase(abc.ABC):
     network: TrainState
     key: PRNGKeyArray
@@ -120,6 +148,48 @@ class CSLTrainerBase(abc.ABC):
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         del network_state, key, x, y
         raise NotImplementedError
+
+    @staticmethod
+    def get_neuron_logs(
+        key: PRNGKeyArray,
+        activations: flax.core.FrozenDict,
+        preactivations: flax.core.FrozenDict,
+        log_batch_size: int = NEURON_LOG_BATCH_SIZE,
+    ) -> tuple[PRNGKeyArray, LogDict]:
+        activations_flat = _flatten_intermediate_collection(
+            jax.tree.map(flatten_last, activations)
+        )
+        if not activations_flat:
+            return key, {}
+
+        preactivations_flat = _flatten_intermediate_collection(preactivations)
+
+        batch_size = next(iter(activations_flat.values())).shape[0]
+        sample_size = min(log_batch_size, batch_size)
+        key, indices = _sample_indices_for_logging(key, batch_size, sample_size)
+
+        activations_sampled = {k: v[indices] for k, v in activations_flat.items()}
+        preactivations_sampled = (
+            {k: v[indices] for k, v in preactivations_flat.items()}
+            if preactivations_flat
+            else {}
+        )
+
+        activations_hist_dict = pytree_histogram(activations_sampled)
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_sampled)
+        srank_logs = jax.tree.map(compute_srank, activations_sampled)
+
+        logs: LogDict = {
+            **prefix_dict("nn/activations", activations_hist_dict),
+            **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
+            **prefix_dict("nn/srank", srank_logs),
+        }
+
+        if preactivations_sampled:
+            linearised_neuron_logs = get_linearised_neuron_logs(preactivations_sampled)
+            logs.update(prefix_dict("nn/linearised_neurons", linearised_neuron_logs))
+
+        return key, logs
 
     def save(self, dataloader: grain.DataLoader, metrics: dict[str, float] | None):
         del dataloader, metrics
@@ -223,22 +293,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
         accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y.argmax(axis=-1))
 
         activations_full = intermediates["activations"]
-        activations = jax.tree.map(flatten_last, activations_full)
-
-        activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
-        srank_logs = jax.tree.map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
+        preactivations_full = intermediates["preactivations"]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -249,6 +304,10 @@ class ClassificationCSLTrainer(CSLTrainerBase):
 
         optim_logs = network_state.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
 
+        key, neuron_logs = CSLTrainerBase.get_neuron_logs(
+            key, activations_full, preactivations_full
+        )
+
         return (
             network_state,
             key,
@@ -257,10 +316,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 "metrics/train_loss": loss,
                 "nn/gradient_norm": jnp.linalg.norm(grads_flat),
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
-                **prefix_dict("nn/activations", activations_hist_dict),
-                **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/srank", srank_logs),
+                **neuron_logs,
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
                 **prefix_dict("optimizer", optim_logs),
@@ -310,22 +366,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 
         # ----- logging -----
         activations_full = intermediates["activations"]
-        activations = jax.tree_util.tree_map(flatten_last, activations_full)
-
-        activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue], first sample's flattened features,
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)
-        srank_logs = jax.tree_util.tree_map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)
+        preactivations_full = intermediates["preactivations"]
 
         # Flatten only the parameter grads for norms/histograms.
         grads_params = grads["params"]
@@ -337,6 +378,10 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         network_params_flat, _ = jax.flatten_util.ravel_pytree(network_state.params["params"])
         network_param_hist_dict = pytree_histogram(network_state.params["params"])
 
+        key, neuron_logs = CSLTrainerBase.get_neuron_logs(
+            key, activations_full, preactivations_full
+        )
+
         return (
             network_state,
             key,
@@ -345,10 +390,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
                 "metrics/train_loss": loss,
                 "nn/gradient_norm": jnp.linalg.norm(grads_flat),
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
-                **prefix_dict("nn/activations", activations_hist_dict),
-                **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/srank", srank_logs),
+                **neuron_logs,
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
             },

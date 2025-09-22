@@ -57,7 +57,7 @@ def run_all_slippery_humanoid():
         "standard": base_optim,
         "regrama": RegramaConfig(
             tx=base_optim,
-            update_frequency=1000,
+            update_frequency=100,
             score_threshold=0.25,
             max_reset_frac=None,
             seed=args.seed,
@@ -66,8 +66,8 @@ def run_all_slippery_humanoid():
         "ccbp": CcbpConfig(
             tx=base_optim,
             seed=args.seed,
+            replacement_rate=0.015,
             decay_rate=0.99,
-            replacement_rate=0.03,
             sharpness=16,
             threshold=0.95,
             update_frequency=1000,
@@ -75,9 +75,17 @@ def run_all_slippery_humanoid():
         ),
         "redo": RedoConfig(
             tx=base_optim,
-            update_frequency=1000,
+            update_frequency=100,
             score_threshold=0.65,
             max_reset_frac=None,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        "cbp": CbpConfig(
+            tx=base_optim,
+            decay_rate=0.99,
+            replacement_rate=0.0025,
+            maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -181,3 +189,4 @@ if __name__ == "__main__":
 # env_cfg=EnvConfig(
 #     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
 # ),
+
