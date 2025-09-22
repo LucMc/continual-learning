@@ -258,7 +258,7 @@ class ContinualAnt(JittableContinualLearningEnv):
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
         self.reward_gain = 1.0
-        self.backend = "mjx"
+        self.backend = "generalized"
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:
