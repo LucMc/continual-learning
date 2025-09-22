@@ -2310,7 +2310,7 @@ wheels = [
 
 [[package]]
 name = "tfp-nightly"
-version = "0.26.0.dev20250921"
+version = "0.26.0.dev20250922"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda13') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-cuda13') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda13' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda13' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
@@ -2322,7 +2322,7 @@ dependencies = [
     { name = "six", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda12') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-cuda13') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cpu' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-cuda13') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda12' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-cuda13' and extra == 'extra-18-continual-learning-metal') or (extra == 'extra-18-continual-learning-cuda13' and extra == 'extra-18-continual-learning-tpu') or (extra == 'extra-18-continual-learning-metal' and extra == 'extra-18-continual-learning-tpu')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/e1/3f93d6a668851aa19f94390e861156cd3ed596e2a4616fa7768a400df182/tfp_nightly-0.26.0.dev20250921-py2.py3-none-any.whl", hash = "sha256:c2ad90ee807c6130ccd15828a5b764a26e2b1b1268a1778a27299c8a2c4ac087", size = 6975549, upload-time = "2025-09-21T08:43:47.768Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/36/5b329fefd06f4f75f5b248cb5a1998d4256170ed7e70bdd2e51be2ca9204/tfp_nightly-0.26.0.dev20250922-py2.py3-none-any.whl", hash = "sha256:6ef69bb6dee2cbfffe77b29ce95cee8a86ce8adbb1d01a05f9db69b8186dd9e2", size = 6975546, upload-time = "2025-09-22T08:46:59.944Z" },
 ]
 
 [[package]]
