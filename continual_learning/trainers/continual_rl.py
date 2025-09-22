@@ -42,6 +42,7 @@ from continual_learning.utils.monitoring import (
     prefix_dict,
 )
 from continual_learning.utils.training import TrainState
+from brax.training.acme import running_statistics
 
 
 class PPO:
@@ -287,6 +288,7 @@ class PPO:
 class TrainerState(NamedTuple):
     policy: TrainState
     vf: TrainState
+    normalizer: running_statistics.RunningStatisticsState | None
     key: PRNGKeyArray
     total_steps: int
 
@@ -297,6 +299,7 @@ State = tuple[TrainerState, Observation, EnvState]
 class JittedContinualPPOTrainer(PPO):
     policy: TrainState
     vf: TrainState
+    normalizer: running_statistics.RunningStatisticsState | None
     key: PRNGKeyArray
     cfg: PPOConfig
 
@@ -360,21 +363,35 @@ class JittedContinualPPOTrainer(PPO):
             bias_init=ppo_config.vf_config.network.bias_init,
         )
 
+        normalizer = None
+        if ppo_config.normalize_observations:
+            normalizer = running_statistics.init_state(
+                jnp.zeros(
+                    self.benchmark.observation_spec.shape[1:],
+                    self.benchmark.observation_spec.dtype,
+                )
+            )
+        self.normalizer = normalizer
+
         self.start_step = self.total_steps = 0
         self.steps_per_task = train_cfg.steps_per_task
 
     def train(self):
         def rollout(envs: JittableVectorEnv, state: State) -> tuple[State, Rollout]:
             def step(state: State, _) -> tuple[State, Rollout]:
-                (policy, vf, key, total_steps), observation, env_states = state
+                (policy, vf, normalizer, key, total_steps), observation, env_states = state
+
+                fwd_observation = observation
+                if self.cfg.normalize_observations:
+                    assert normalizer is not None
+                    fwd_observation = running_statistics.normalize(observation, normalizer)  # pyright: ignore[reportArgumentType]
 
                 key, action_key = jax.random.split(key)
                 actions, log_probs = policy.apply_fn(
-                    policy.params, observation
+                    policy.params, fwd_observation
                 ).sample_and_log_prob(seed=action_key)
-                values = vf.apply_fn(vf.params, observation).squeeze(-1)
+                values = vf.apply_fn(vf.params, fwd_observation).squeeze(-1)
 
-                actions = jnp.clip(actions, -5, 5)
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
@@ -386,7 +403,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=jnp.clip(data.reward, -5, 10),
+                    rewards=data.reward,
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
@@ -396,7 +413,9 @@ class JittedContinualPPOTrainer(PPO):
                 )
 
                 return (
-                    TrainerState(policy, vf, key, total_steps + self.benchmark.num_envs),
+                    TrainerState(
+                        policy, vf, normalizer, key, total_steps + self.benchmark.num_envs
+                    ),
                     data.next_observation,
                     env_states,
                 ), rollout
@@ -413,17 +432,30 @@ class JittedContinualPPOTrainer(PPO):
             state, data = rollout(envs, state)
             agent_state, observation, env_states = state
 
+            normalizer = agent_state.normalizer
+            if self.cfg.normalize_observations:
+                assert normalizer is not None
+                normalizer = running_statistics.update(normalizer, data.observations)
+                data = data._replace(
+                    observations=running_statistics.normalize(data.observations, normalizer),  # pyright: ignore[reportArgumentType]
+                    next_observations=running_statistics.normalize(
+                        data.next_observations,  # pyright: ignore[reportArgumentType]
+                        normalizer,
+                    ),
+                )
+                agent_state = agent_state._replace(normalizer=normalizer)
+
             key, policy, vf, logs = self.update(
                 agent_state.key,
                 agent_state.policy,
                 agent_state.vf,
-                data,
+                data._replace(infos={}),
                 next_obs=observation,
                 cfg=self.cfg,
             )
 
             state = (
-                TrainerState(policy, vf, key, agent_state.total_steps),
+                TrainerState(policy, vf, normalizer, key, agent_state.total_steps),
                 observation,
                 env_states,
             )
@@ -437,6 +469,15 @@ class JittedContinualPPOTrainer(PPO):
         for _, envs in enumerate(self.benchmark.tasks):
             env_state, obs = envs.init()
 
+            if self.cfg.reset_normalizer_on_task_change and self.normalizer is not None:
+                # This should not normally happen and is added in as a fallback
+                self.normalizer = running_statistics.init_state(
+                    jnp.zeros(
+                        self.benchmark.observation_spec.shape[1:],
+                        self.benchmark.observation_spec.dtype,
+                    )
+                )
+
             for _ in range(
                 self.total_steps % self.steps_per_task,
                 self.steps_per_task,
@@ -445,12 +486,18 @@ class JittedContinualPPOTrainer(PPO):
                 state, logs, infos = train_step(
                     envs,
                     (
-                        TrainerState(self.policy, self.vf, self.key, self.total_steps),
+                        TrainerState(
+                            self.policy, self.vf, self.normalizer, self.key, self.total_steps
+                        ),
                         obs,
                         env_state,
                     ),
                 )
-                (self.policy, self.vf, self.key, self.total_steps), obs, env_state = state
+                (
+                    (self.policy, self.vf, self.normalizer, self.key, self.total_steps),
+                    obs,
+                    env_state,
+                ) = state
 
                 episode_infos = infos["episode_metrics"]
                 dones = infos["episode_done"].astype(bool)

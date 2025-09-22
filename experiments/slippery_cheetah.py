@@ -7,8 +7,8 @@ import tyro
 from chex import dataclass
 
 from continual_learning.configs import (
-    AdamConfig,
-    AdamwConfig,
+    # AdamConfig,
+    # AdamwConfig,
     MuonConfig,
     CbpConfig,
     CcbpConfig,
@@ -18,7 +18,6 @@ from continual_learning.configs import (
     ShrinkAndPerterbConfig,
 )
 from continual_learning.configs.envs import EnvConfig
-from continual_learning.configs.logging import LoggingConfig
 from continual_learning.configs.models import MLPConfig
 from continual_learning.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
 from continual_learning.configs.training import RLTrainingConfig
@@ -44,7 +43,7 @@ class Args:
     include: list[str] = field(default_factory=list)
 
 
-def run_all_slippery_humanoid():
+def run_all_slippery_cheetah():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -122,7 +121,7 @@ def run_all_slippery_humanoid():
                     network=MLPConfig(
                         num_layers=4,
                         hidden_size=128,
-                        output_size=17,
+                        output_size=6,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
@@ -133,36 +132,36 @@ def run_all_slippery_humanoid():
                     optimizer=opt_conf,
                     network=MLPConfig(
                         num_layers=5,
-                        hidden_size=256,
+                        hidden_size=512,
                         output_size=1,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 5,
+                num_rollout_steps=512 * 32 * 20,
                 num_epochs=8,
                 num_gradient_steps=32,
-                gamma=0.97,
+                gamma=0.95,
                 gae_lambda=0.95,
                 entropy_coefficient=1e-3,
-                clip_eps=0.2,
+                clip_eps=0.3,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
                 normalize_observations=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
+                "slippery_cheetah", num_envs=2048, num_tasks=1, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
-                steps_per_task=20_000_000,
+                steps_per_task=50_000_000,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_humanoid_full6",
+                group="slippery_cheetah_1",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
@@ -175,7 +174,7 @@ def run_all_slippery_humanoid():
 
 
 if __name__ == "__main__":
-    run_all_slippery_humanoid()
+    run_all_slippery_cheetah()
 
 #     num_rollout_steps=2048 * 32 * 5,
 #     num_epochs=4,
