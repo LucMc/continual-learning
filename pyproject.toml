@@ -5,7 +5,7 @@ description = "Codebase for continual learning"
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
-    "distrax>=0.1.5",
+    "distrax>=0.1.7",
     "flax>=0.9.0",
     "gymnasium[mujoco]>=1.0.0",
     "jaxtyping>=0.2.34",
@@ -22,7 +22,7 @@ dependencies = [
     "orbax-checkpoint>=0.11.16",
     "tyro>=0.8.11",
     "wandb>=0.18.5",
-    "optax @ git+https://github.com/google-deepmind/optax.git",
+    "optax>=0.2.6",
     "datasets>=3.6.0",
     "grain>=0.2.10b1",
     "dm-pix>=0.4.4",
@@ -30,12 +30,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cpu = ["jax>=0.5.0,<0.7.0"]
+cpu = ["jax>=0.7.0,<0.8.0"]
 # https://github.com/jax-ml/jax/issues/27062
-metal = ["jax<=0.5.0", "jax-metal>=0.1.0; sys_platform == 'darwin'"]
-cuda12 = ["jax[cuda12]>=0.5.0,<0.7.0"]
-cuda13 = ["jax[cuda13]>=0.5.0,<0.7.0"]
-tpu = ["jax[tpu]>=0.5.0,<0.7.0"]
+cuda12 = ["jax[cuda12]>=0.7.0,<0.8.0"]
+cuda13 = ["jax[cuda13]>=0.7.0,<0.8.0"]
+tpu = ["jax[tpu]>=0.7.0,<0.8.0"]
 testing = ["chex>=0.1.89", "pytest>=8.3.5"]
 profile = ["tensorflow-cpu>=2.19.0", "tensorboard>=2.19.0"]
 

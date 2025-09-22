@@ -44,14 +44,23 @@ class SlipperyHumanoid(Humanoid):
 
         #### We set the friction programmatically
         model = sys.mj_model
-        model.geom_friction[:] = np.array([friction, 0.1, 0.1])
+        floor_geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        if floor_geom_id == -1:
+            raise ValueError("Humanoid MJCF missing geom named 'floor'.")
+        model.geom_friction[floor_geom_id] = np.array([friction, 0.1, 0.1])
         sys = sys.replace(mj_model=model)
 
         n_frames = 5
 
         if backend in ["spring", "positional"]:
-            sys = sys.tree_replace({"opt.timestep": 0.005})
+            sys = sys.tree_replace({"opt.timestep": 0.0015})
             n_frames = 10
+            # fmt: off
+            gear = jnp.array([
+                350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0,
+                350.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0])  # pyformat: disable
+            sys = sys.replace(actuator=sys.actuator.replace(gear=gear))
+            # fmt: on
 
         if backend == "mjx":
             sys = sys.tree_replace(
@@ -61,12 +70,6 @@ class SlipperyHumanoid(Humanoid):
                     "opt.iterations": 1,
                     "opt.ls_iterations": 4,
                 }
-            )
-
-        if backend == "positional":
-            # TODO: does the same actuator strength work as in spring
-            sys = sys.replace(
-                actuator=sys.actuator.replace(gear=200 * jnp.ones_like(sys.actuator.gear))
             )
 
         kwargs["n_frames"] = kwargs.get("n_frames", n_frames)
@@ -212,6 +215,7 @@ class ContinualAnt(JittableContinualLearningEnv):
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
         self.reward_gain = 1.0
+        self.backend = "mjx"
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:
@@ -234,7 +238,7 @@ class ContinualAnt(JittableContinualLearningEnv):
     def _make_envs(self, friction: float, env_checkpoint: EnvState) -> JittableVectorEnv:
         return JittableVectorEnvWrapper(
             seed=self.seed,
-            env=SlipperyAnt(friction=friction),
+            env=SlipperyAnt(friction=friction, backend=self.backend),
             num_envs=self.num_envs,
             episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,
@@ -271,7 +275,8 @@ class ContinualHumanoid(JittableContinualLearningEnv):
         self.frictions = np.pow(10, rng.uniform(low=low, high=high, size=config.num_tasks))
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
-        self.reward_gain = 1.0
+        self.reward_gain = 0.1
+        self.backend = "mjx"
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:
@@ -294,7 +299,7 @@ class ContinualHumanoid(JittableContinualLearningEnv):
     def _make_envs(self, friction: float, env_checkpoint: EnvState) -> JittableVectorEnv:
         return JittableVectorEnvWrapper(
             seed=self.seed,
-            env=SlipperyHumanoid(friction=friction),
+            env=SlipperyHumanoid(friction=friction, backend=self.backend),
             num_envs=self.num_envs,
             episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,

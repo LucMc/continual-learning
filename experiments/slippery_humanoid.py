@@ -6,9 +6,9 @@ import jax.numpy as jnp
 import tyro
 from chex import dataclass
 
-from continual_learning_2.configs import (
-    AdamConfig,
-    AdamwConfig,
+from continual_learning.configs import (
+    # AdamConfig,
+    # AdamwConfig,
     MuonConfig,
     CbpConfig,
     CcbpConfig,
@@ -17,13 +17,12 @@ from continual_learning_2.configs import (
     RedoConfig,
     ShrinkAndPerterbConfig,
 )
-from continual_learning_2.configs.envs import EnvConfig
-from continual_learning_2.configs.logging import LoggingConfig
-from continual_learning_2.configs.models import MLPConfig
-from continual_learning_2.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
-from continual_learning_2.configs.training import RLTrainingConfig
-from continual_learning_2.trainers.continual_rl import JittedContinualPPOTrainer
-from continual_learning_2.types import (
+from continual_learning.configs.envs import EnvConfig
+from continual_learning.configs.models import MLPConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, PPOConfig, ValueFunctionConfig
+from continual_learning.configs.training import RLTrainingConfig
+from continual_learning.trainers.continual_rl import JittedContinualPPOTrainer
+from continual_learning.types import (
     Activation,
     StdType,
 )
@@ -36,8 +35,8 @@ from dataclasses import field
 class Args:
     seed: int = 42
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
-    wandb_project: str | None = None
-    wandb_entity: str | None = None
+    wandb_project: str = ""
+    wandb_entity: str = ""
     # data_dir: Path = Path("./experiment_results")
     resume: bool = False
     exclude: list[str] = field(default_factory=list)
@@ -72,7 +71,7 @@ def run_all_slippery_humanoid():
             sharpness=16,
             threshold=0.95,
             update_frequency=1000,
-            transform_type="exp"
+            transform_type="exp",
         ),
         "redo": RedoConfig(
             tx=base_optim,
@@ -94,7 +93,7 @@ def run_all_slippery_humanoid():
             param_noise_fn=jax.nn.initializers.lecun_normal(),
             tx=base_optim,
             seed=args.seed,
-            shrink=1-0.001,
+            shrink=1 - 0.001,
             perturb=0.005,
             every_n=1000,
         ),
@@ -140,7 +139,7 @@ def run_all_slippery_humanoid():
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 6,
+                num_rollout_steps=2048 * 32 * 3,
                 num_epochs=4,
                 num_gradient_steps=32,
                 gamma=0.97,
@@ -149,19 +148,20 @@ def run_all_slippery_humanoid():
                 clip_eps=0.2,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
+                normalize_observations=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_humanoid", num_envs=4096, num_tasks=1, episode_length=1000
+                "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
-                steps_per_task=400_000_000,
+                steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
                 run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_humanoid_full2",
+                group="slippery_humanoid_full6",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
