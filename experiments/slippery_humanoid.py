@@ -84,7 +84,7 @@ def run_all_slippery_humanoid():
         "cbp": CbpConfig(
             tx=base_optim,
             decay_rate=0.99,
-            replacement_rate=0.002,
+            replacement_rate=0.0025,
             maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),

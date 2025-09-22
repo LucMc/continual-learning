@@ -882,10 +882,11 @@ def create_peak_final_bar_chart(
 ) -> alt.Chart:
     """
     Grouped bar chart (Final vs Peak IQM) with robust y-axis:
-    - Do NOT set axis=None on y in any layer (prevents merged-axis removal).
-    - Robust y-domain (includes error bars and handles min==max).
-    - Left padding + autosize to avoid PNG/SVG clipping.
-    - Independent y-scale per facet if multiple metrics.
+    - Explicit y-domain that includes bars and error bars (no 'nice' rounding).
+    - Single shared y-scale applied to all layers (bars + rules + caps).
+    - Do NOT set axis=None on any layer sharing the y-scale.
+    - Extra padding + autosize(type='pad', contains='padding') to prevent clipping.
+    - clip=True applied on each mark (not the LayerChart).
     """
     import numpy as np
     import pandas as pd
@@ -898,7 +899,7 @@ def create_peak_final_bar_chart(
     if "metric" not in df.columns:
         df["metric"] = metric_label
 
-    # ---- reshape to long format
+    # --- reshape to long format (Final / Peak rows)
     rows = []
     for r in df.itertuples():
         final_iqm = getattr(r, "final_iqm", np.nan)
@@ -937,7 +938,7 @@ def create_peak_final_bar_chart(
 
     chart_df = pd.DataFrame(rows)
 
-    # ---- robust y-domain (single metric gets a global domain)
+    # --- explicit, robust y-domain (single metric => global domain)
     metric_count = chart_df["metric"].nunique()
     y_domain = None
     if metric_count == 1:
@@ -952,7 +953,7 @@ def create_peak_final_bar_chart(
         pad = max(1e-6, 0.05 * span)
         y_domain = [float(ymin - pad), float(ymax + pad)]
 
-    # ---- encodings
+    # --- encodings
     algorithm_count = chart_df["algorithm"].nunique()
     base_width = max(320, algorithm_count * 85)
 
@@ -971,13 +972,16 @@ def create_peak_final_bar_chart(
         "algorithm:N",
         sort=alt.SortField(field="sort_key", order="descending"),
         title="Algorithm",
-        axis=alt.Axis(labelAngle=-30, labelPadding=4, labelLimit=360),
+        axis=alt.Axis(
+            offset=12, labelAngle=-30, labelPadding=8,
+            labelBaseline="top", labelAlign="right", labelLimit=360,
+        ),
     )
-    x_off = alt.XOffset("stage:N", sort=["Final", "Peak"])
-    color = alt.Color("stage:N", title="Stage", scale=color_scale, legend=legend)
-    order = alt.Order("stage_order:Q")
+    x_off  = alt.XOffset("stage:N", sort=["Final", "Peak"])
+    color  = alt.Color("stage:N", title="Stage", scale=color_scale, legend=legend)
+    order  = alt.Order("stage_order:Q")
 
-    # Shared y-scale
+    # Shared y-scale with explicit domain (no 'nice', no zero)
     y_scale = alt.Scale(zero=False, nice=False, domain=y_domain) if y_domain \
               else alt.Scale(zero=False, nice=True)
 
@@ -990,10 +994,10 @@ def create_peak_final_bar_chart(
         ),
     )
 
-    base = alt.Chart(chart_df)
+    base = alt.Chart(chart_df)  # no clip here
 
-    # ---- IMPORTANT: bars define the axis; other layers DO NOT set axis at all
-    bars = base.mark_bar(size=28).encode(
+    # Bars define the axis; other layers reuse the scale
+    bars = base.mark_bar(size=28, clip=True).encode(
         x=x, xOffset=x_off, y=y, color=color, order=order,
         tooltip=[
             alt.Tooltip("algorithm:N", title="Algorithm"),
@@ -1005,8 +1009,7 @@ def create_peak_final_bar_chart(
         ],
     )
 
-    # Error bars / caps share the scale; DO NOT set axis=None
-    rules = base.mark_rule().encode(
+    rules = base.mark_rule(clip=True).encode(
         x=x, xOffset=x_off,
         y=alt.Y("lower:Q", scale=y_scale),
         y2=alt.Y2("upper:Q"),
@@ -1014,14 +1017,14 @@ def create_peak_final_bar_chart(
         order=order,
     )
 
-    lower_caps = base.mark_tick(thickness=2, size=18).encode(
+    lower_caps = base.mark_tick(thickness=2, size=18, clip=True).encode(
         x=x, xOffset=x_off,
         y=alt.Y("lower:Q", scale=y_scale),
         color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    upper_caps = base.mark_tick(thickness=2, size=18).encode(
+    upper_caps = base.mark_tick(thickness=2, size=18, clip=True).encode(
         x=x, xOffset=x_off,
         y=alt.Y("upper:Q", scale=y_scale),
         color=alt.Color("stage:N", scale=color_scale, legend=None),
@@ -1030,7 +1033,7 @@ def create_peak_final_bar_chart(
 
     chart = bars + rules + lower_caps + upper_caps
 
-    # facet if multiple metrics; keep an axis per facet
+    # Facet if multiple metrics; keep independent y per facet
     if metric_count > 1:
         chart = chart.encode(
             column=alt.Column(
