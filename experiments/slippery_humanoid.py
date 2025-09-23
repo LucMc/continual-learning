@@ -77,7 +77,7 @@ def run_all_slippery_humanoid():
         "redo": RedoConfig(
             tx=base_optim,
             update_frequency=100,
-            score_threshold=0.65,
+            score_threshold=0.5,
             max_reset_frac=None,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -159,7 +159,7 @@ def run_all_slippery_humanoid():
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_adam_bg_lr_smaller_net_{args.seed}",
+                run_name=f"{opt_name}_larger_rollout_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
                 group="slippery_humanoid_full6",
