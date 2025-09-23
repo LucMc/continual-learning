@@ -403,7 +403,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=data.reward,
+                    rewards=jnp.maximum(data.reward, -5),
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
