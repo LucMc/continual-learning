@@ -1,23 +1,16 @@
 # Continual Learning
-This project aims to investigate how normalisation and continual backpropergation affect the plasticity of a neural network. 
+In this project we introduce a new reset method CCBP, where continual transformations are used to partially reset low gradient neurons. All baselines reset methods and ccbp can be found `continual_learning/optim/` as one file Optax implementations. Note, that although implemented in Optax our reset methods operate over parameters, with some baselines also taking in additional unconventional inputs such as activation features and base optimizer state. Because of this, we recommend using our custom optax chain to attach reset methods (`continual_learning/utils/optim.py`). Furthermore we also have a custom trainstate to handle passing the extra parameters needed in the baselines (`continual_learning/utils/training.py`).
 
 ## Installation
-### Baselines
- * Weight decay (sgd/adam) 
- * Continual backpropergation
- * Layer norm
-
-### Experiments
- * Slippery Ant v5
- * Sine regression
- * Continual time-delays
-
-### Notes
  * Clone repository: `git clone https://github.com/LucMc/continual-learning.git`
- * Install with: `pip install -e .`
- * The todo list is currently at the top of `optim/continual_backprop.py`
+ * Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+ * Install with: `uv pip install -e .`
 
-### Example Usage
+## Example Usage
+```bash
+python continual_learning/experiments/slippery_ant.py --include ccbp
 ```
-python sine_exp.py --no-debug --methods "adam" "cbp"`
+With W&B logging
+```bash
+python continual_learning/experiments/slippery_ant.py --include ccbp --wandb_entity XXX --wandb_project XXX
 ```
