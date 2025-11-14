@@ -39,56 +39,52 @@ class Args:
     include: list[str] = field(default_factory=list)
 
 
-def run_all_slippery_humanoid():
+def run_all_slippery_ant():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
         assert args.wandb_project is not None
         assert args.wandb_entity is not None
 
-    # base_optim = AdamConfig(learning_rate=1e-3)
-    base_optim = AdamConfig(learning_rate=3e-4)
-    # base_optim = MuonConfig(learning_rate=1e-3)
-
     optimizers = {
-        "standard": base_optim,
+        "adam": AdamConfig(learning_rate=1e-3),
         "regrama": RegramaConfig(
-            tx=base_optim,
-            update_frequency=100,
-            score_threshold=0.25,
-            max_reset_frac=None,
+            tx=AdamConfig(learning_rate=1e-3),
+            update_frequency=1000,
+            score_threshold=0.0095,
+            max_reset_frac=0.05,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "ccbp": CcbpConfig(
-            tx=base_optim,
+            tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            replacement_rate=0.015,
             decay_rate=0.99,
+            replacement_rate=0.015,
             sharpness=16,
-            threshold=0.95,
+            threshold=1,
             update_frequency=1000,
             transform_type="sigmoid",
         ),
         "redo": RedoConfig(
-            tx=base_optim,
-            update_frequency=100,
-            score_threshold=0.5,
-            max_reset_frac=None,
+            tx=AdamConfig(learning_rate=1e-3),
+            update_frequency=1000,
+            score_threshold=0.055,
+            max_reset_frac=0.05,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "cbp": CbpConfig(
-            tx=base_optim,
+            tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.99,
-            replacement_rate=0.0025,
+            replacement_rate=0.0002,
             maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             param_noise_fn=jax.nn.initializers.lecun_normal(),
-            tx=base_optim,
+            tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             shrink=1 - 0.001,
             perturb=0.005,
@@ -118,7 +114,7 @@ def run_all_slippery_humanoid():
                     network=MLPConfig(
                         num_layers=4,
                         hidden_size=32,
-                        output_size=17,
+                        output_size=8,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
@@ -136,7 +132,7 @@ def run_all_slippery_humanoid():
                         dtype=jnp.float32,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 5,
+                num_rollout_steps=2048 * 32 * 3,
                 num_epochs=4,
                 num_gradient_steps=32,
                 gamma=0.97,
@@ -145,20 +141,19 @@ def run_all_slippery_humanoid():
                 clip_eps=0.2,
                 vf_coefficient=0.5,
                 normalize_advantages=True,
-                normalize_observations=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_humanoid", num_envs=2048, num_tasks=20, episode_length=1000
+                "slippery_ant", num_envs=2048, num_tasks=20, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_larger_rollout_{args.seed}",
+                run_name=f"{opt_name}_new_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_humanoid_full6",
+                group="slippery_ant_full2",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
@@ -171,7 +166,7 @@ def run_all_slippery_humanoid():
 
 
 if __name__ == "__main__":
-    run_all_slippery_humanoid()
+    run_all_slippery_ant()
 
 #     num_rollout_steps=2048 * 32 * 5,
 #     num_epochs=4,
