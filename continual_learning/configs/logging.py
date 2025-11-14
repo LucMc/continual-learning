@@ -20,3 +20,5 @@ class LoggingConfig:
     eval_interval: int = 1000
     eval_during_training: bool = False
     catastrophic_forgetting: bool = False
+    sl_slow_metrics_batch_size: int | None = None
+    """None in supervised learning means disabled."""

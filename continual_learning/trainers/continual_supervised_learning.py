@@ -1,6 +1,7 @@
 # pyright: reportCallIssue=false
 import abc
 import os
+from collections import deque
 from functools import partial
 from typing import override
 
@@ -125,18 +126,19 @@ class CSLTrainerBase(abc.ABC):
     @jax.jit
     def get_neuron_logs(
         network_state: TrainState,
-        x: jax.Array,
+        x: tuple[jax.Array, ...],
     ) -> LogDict:
+        big_batch = jnp.concatenate(x, axis=0)
+
         _, intermediates = network_state.apply_fn(
             network_state.params,
-            x,
+            big_batch,
             training=False,
             mutable=("activations", "preactivations"),
         )
         activations_full = intermediates["activations"]
         activations = jax.tree.map(flatten_last, activations_full)
 
-        activations_hist_dict = pytree_histogram(activations)
         activations_flat = {
             k: v[0]  # pyright: ignore[reportIndexIssue]
             for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
@@ -199,8 +201,14 @@ class CSLTrainerBase(abc.ABC):
             self.load(step=self.train_cfg.resume_from_step)
 
         for _, task in enumerate(self.dataset.tasks):
+            current_slow_logs_batchsize, slow_logs_queue = 0, deque()
             for step, batch in enumerate(task):
                 x, y = batch
+
+                if self.logger.cfg.sl_slow_metrics_batch_size is not None:
+                    slow_logs_queue.append(x)
+                    current_slow_logs_batchsize += x.shape[0]
+
                 self.network, self.key, logs = self.update_network(
                     self.network, self.key, x, y
                 )
@@ -214,6 +222,19 @@ class CSLTrainerBase(abc.ABC):
                     metrics = self.dataset.evaluate(self.network, forgetting=False)
                     self.logger.log(metrics, step=self.total_steps)
 
+                if (
+                    self.logger.cfg.sl_slow_metrics_batch_size is not None
+                    and current_slow_logs_batchsize
+                    >= self.logger.cfg.sl_slow_metrics_batch_size
+                ):
+                    self.logger.log(
+                        self.get_neuron_logs(self.network, tuple(slow_logs_queue)),
+                        self.total_steps,
+                    )
+
+                    slow_logs_queue.clear()
+                    current_slow_logs_batchsize = 0
+
                 if step % self.logger.cfg.interval == 0:
                     self.logger.push(self.total_steps)
 
@@ -222,6 +243,14 @@ class CSLTrainerBase(abc.ABC):
                 self.total_steps += 1
 
             self.logger.push(self.total_steps)  # Flush logger
+            if (
+                self.logger.cfg.sl_slow_metrics_batch_size is not None
+                and len(slow_logs_queue) > 0
+            ):
+                self.logger.log(
+                    self.get_neuron_logs(self.network, tuple(slow_logs_queue)),
+                    self.total_steps,
+                )
 
             logs = self.dataset.evaluate(
                 self.network, forgetting=self.logger.cfg.catastrophic_forgetting
@@ -365,12 +394,31 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
             self.load(step=self.train_cfg.resume_from_step)
 
         for _, task in enumerate(self.dataset.tasks):
+            current_slow_logs_batchsize, slow_logs_queue = 0, deque()
             for step, batch in enumerate(task):
                 x, y = batch
+
+                if self.logger.cfg.sl_slow_metrics_batch_size is not None:
+                    slow_logs_queue.append(x)
+                    current_slow_logs_batchsize += x.shape[0]
+
                 self.network, self.key, logs = self.update_network(
                     self.network, self.key, x, y
                 )
                 self.logger.accumulate(logs)
+
+                if (
+                    self.logger.cfg.sl_slow_metrics_batch_size is not None
+                    and current_slow_logs_batchsize
+                    >= self.logger.cfg.sl_slow_metrics_batch_size
+                ):
+                    self.logger.log(
+                        self.get_neuron_logs(self.network, tuple(slow_logs_queue)),
+                        self.total_steps,
+                    )
+
+                    slow_logs_queue.clear()
+                    current_slow_logs_batchsize = 0
 
                 if step % self.logger.cfg.interval == 0:
                     self.logger.push(self.total_steps)
@@ -387,6 +435,14 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
                 self.total_steps += 1
 
             self.logger.push(self.total_steps)  # Flush logger
+            if (
+                self.logger.cfg.sl_slow_metrics_batch_size is not None
+                and len(slow_logs_queue) > 0
+            ):
+                self.logger.log(
+                    self.get_neuron_logs(self.network, tuple(slow_logs_queue)),
+                    self.total_steps,
+                )
 
             logs = self.dataset.evaluate(
                 self.network, forgetting=self.logger.cfg.catastrophic_forgetting
