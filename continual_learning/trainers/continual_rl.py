@@ -2,12 +2,13 @@ import time
 from functools import partial
 from typing import NamedTuple
 
+import flax
+import flax.traverse_util
 import jax
 import jax.experimental
 import jax.flatten_util
 import jax.numpy as jnp
-import flax
-import flax.traverse_util
+from brax.training.acme import running_statistics
 from flax.core.scope import DenyList
 from jaxtyping import PRNGKeyArray
 
@@ -33,16 +34,15 @@ from continual_learning.types import (
 from continual_learning.utils.buffers import compute_gae_scan
 from continual_learning.utils.monitoring import (
     Logger,
+    accumulate_concatenated_metrics,
     compute_srank,
+    explained_variance,
     get_dormant_neuron_logs,
     get_linearised_neuron_logs,
-    accumulate_concatenated_metrics,
-    explained_variance,
     get_logs,
     prefix_dict,
 )
 from continual_learning.utils.training import TrainState
-from brax.training.acme import running_statistics
 
 
 class PPO:
@@ -109,10 +109,6 @@ class PPO:
         return key, {
             **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
             **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-            **prefix_dict("nn/actor_dormant_neurons", actor_dormant_neuron_logs),
-            **prefix_dict("nn/actor_linearised_neurons", actor_linearised_neuron_logs),
-            **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
-            **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
             **prefix_dict("nn/value_dormant_neurons", value_dormant_neuron_logs),
             **prefix_dict("nn/value_linearised_neurons", value_linearised_neuron_logs),
             **prefix_dict("nn/actor_srank", actor_srank_logs),

@@ -35,8 +35,8 @@ from continual_learning.utils.monitoring import (
     prefix_dict,
     pytree_histogram,
 )
-from continual_learning.utils.training import TrainState
 from continual_learning.utils.nn import flatten_last
+from continual_learning.utils.training import TrainState
 
 os.environ["XLA_FLAGS"] = (
     " --xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true "
@@ -120,6 +120,42 @@ class CSLTrainerBase(abc.ABC):
     ) -> tuple[TrainState, PRNGKeyArray, LogDict]:
         del network_state, key, x, y
         raise NotImplementedError
+
+    @staticmethod
+    @jax.jit
+    def get_neuron_logs(
+        network_state: TrainState,
+        x: jax.Array,
+    ) -> LogDict:
+        _, intermediates = network_state.apply_fn(
+            network_state.params,
+            x,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+        activations_full = intermediates["activations"]
+        activations = jax.tree.map(flatten_last, activations_full)
+
+        activations_hist_dict = pytree_histogram(activations)
+        activations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+        }
+        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
+        srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+        preactivations = intermediates["preactivations"]
+        preactivations_flat = {
+            k: v[0]  # pyright: ignore[reportIndexIssue]
+            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+        }
+        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
+
+        return {
+            **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
+            **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
+            **prefix_dict("nn/srank", srank_logs),
+        }
 
     def save(self, dataloader: grain.DataLoader, metrics: dict[str, float] | None):
         del dataloader, metrics
@@ -213,7 +249,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 x,
                 training=True,
                 rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations"),
+                mutable=("activations"),
             )
             return optax.softmax_cross_entropy(logits, y).mean(), (logits, intermediates)
 
@@ -224,21 +260,7 @@ class ClassificationCSLTrainer(CSLTrainerBase):
 
         activations_full = intermediates["activations"]
         activations = jax.tree.map(flatten_last, activations_full)
-
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)  # pyright: ignore[reportArgumentType]
-        srank_logs = jax.tree.map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)  # pyright: ignore[reportArgumentType]
 
         grads_flat, _ = jax.flatten_util.ravel_pytree(grads)
         grads_hist_dict = pytree_histogram(grads["params"])
@@ -258,9 +280,6 @@ class ClassificationCSLTrainer(CSLTrainerBase):
                 "nn/gradient_norm": jnp.linalg.norm(grads_flat),
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
                 **prefix_dict("nn/activations", activations_hist_dict),
-                **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
                 **prefix_dict("optimizer", optim_logs),
@@ -290,7 +309,7 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
                 x,
                 training=True,
                 rngs={"dropout": dropout_key},
-                mutable=("activations", "preactivations"),
+                mutable=("activations"),
             )
             # Mask the denominator by setting inactive logits to -inf.
             masked_logits = jnp.where(loss_mask, logits, -jnp.inf)
@@ -313,19 +332,6 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
         activations = jax.tree_util.tree_map(flatten_last, activations_full)
 
         activations_hist_dict = pytree_histogram(activations)
-        activations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue], first sample's flattened features,
-            for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
-        }
-        dormant_neuron_logs = get_dormant_neuron_logs(activations_flat)
-        srank_logs = jax.tree_util.tree_map(compute_srank, activations_flat)
-
-        preactivations = intermediates["preactivations"]
-        preactivations_flat = {
-            k: v[0]  # pyright: ignore[reportIndexIssue]
-            for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
-        }
-        linearised_neuron_logs = get_linearised_neuron_logs(preactivations_flat)
 
         # Flatten only the parameter grads for norms/histograms.
         grads_params = grads["params"]
@@ -346,9 +352,6 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
                 "nn/gradient_norm": jnp.linalg.norm(grads_flat),
                 "nn/parameter_norm": jnp.linalg.norm(network_params_flat),
                 **prefix_dict("nn/activations", activations_hist_dict),
-                **prefix_dict("nn/dormant_neurons", dormant_neuron_logs),
-                **prefix_dict("nn/linearised_neurons", linearised_neuron_logs),
-                **prefix_dict("nn/srank", srank_logs),
                 **prefix_dict("nn/gradients", grads_hist_dict),
                 **prefix_dict("nn/parameters", network_param_hist_dict),
             },
