@@ -1,28 +1,29 @@
+import time
+from dataclasses import field
+from typing import Literal
+
 import jax
 import tyro
-import time
 from chex import dataclass
-from typing import Literal
+
+from continual_learning.configs import (
+    AdamConfig,
+    AdamwConfig,
+    CbpConfig,
+    CcbpConfig,
+    DatasetConfig,
+    LoggingConfig,
+    MuonConfig,
+    RedoConfig,
+    RegramaConfig,
+    ShrinkAndPerterbConfig,
+    TrainingConfig,
+)
+from continual_learning.configs.models import CNNConfig
 from continual_learning.trainers.continual_supervised_learning import (
     HeadResetClassificationCSLTrainer,
     MaskedClassificationCSLTrainer,
 )
-from continual_learning.configs.models import CNNConfig
-from continual_learning.configs import (
-    AdamConfig,
-    AdamwConfig,
-    MuonConfig,
-    CbpConfig,
-    RedoConfig,
-    RegramaConfig,
-    CcbpConfig,
-    ShrinkAndPerterbConfig,
-    DatasetConfig,
-    LoggingConfig,
-    TrainingConfig,
-)
-
-from dataclasses import field
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,7 @@ def run_all_cifar100():
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
+                sl_slow_metrics_batch_size=args.batch_size * 100,
             ),
         )
 

@@ -1,27 +1,28 @@
+import time
+from dataclasses import field
+from typing import Literal
+
 import jax
 import tyro
-import time
 from chex import dataclass
-from typing import Literal
-from continual_learning.trainers.continual_supervised_learning import (
-    HeadResetClassificationCSLTrainer,
-)
-from continual_learning.configs.models import MLPConfig
+
 from continual_learning.configs import (
     AdamConfig,
     AdamwConfig,
-    MuonConfig,
     CbpConfig,
-    RedoConfig,
-    RegramaConfig,
     CcbpConfig,
-    ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
+    MuonConfig,
+    RedoConfig,
+    RegramaConfig,
+    ShrinkAndPerterbConfig,
     TrainingConfig,
 )
-
-from dataclasses import field
+from continual_learning.configs.models import MLPConfig
+from continual_learning.trainers.continual_supervised_learning import (
+    HeadResetClassificationCSLTrainer,
+)
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,9 @@ def run_all_inc_mnist():
     exp_start = time.time()
     for opt_name, opt_conf in optimizers.items():
         start = time.time()
+
+        batch_size = 1
+
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
             model_config=MLPConfig(output_size=10),
@@ -114,7 +118,7 @@ def run_all_inc_mnist():
             data_cfg=DatasetConfig(
                 name="classinc_mnist",
                 seed=args.seed,
-                batch_size=1,
+                batch_size=batch_size,
                 num_tasks=10,
                 num_epochs_per_task=100,
                 num_workers=0,  # (os.cpu_count() or 0) // 2,
@@ -131,6 +135,7 @@ def run_all_inc_mnist():
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
+                sl_slow_metrics_batch_size=batch_size * 100,
             ),
         )
 
