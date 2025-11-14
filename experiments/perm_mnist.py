@@ -1,3 +1,4 @@
+import os
 import time
 from dataclasses import field
 from typing import Literal
@@ -113,7 +114,8 @@ def run_all_perm_mnist():
         if args.postfix:
             run_name += f"_{args.postfix}"
 
-        batch_size = 8
+        batch_size = 256
+        # batch_size = 8
 
         start = time.time()
         trainer = HeadResetClassificationCSLTrainer(
@@ -126,7 +128,7 @@ def run_all_perm_mnist():
                 batch_size=batch_size,
                 num_tasks=150,
                 num_epochs_per_task=1,
-                num_workers=0,  # (os.cpu_count() or 0) // 2,
+                num_workers=(os.cpu_count() or 0) // 2,
             ),
             train_cfg=TrainingConfig(
                 resume=args.resume,
@@ -139,7 +141,8 @@ def run_all_perm_mnist():
                 wandb_mode=args.wandb_mode,
                 interval=100,
                 eval_during_training=True,
-                sl_slow_metrics_batch_size=batch_size * 100,
+                eval_interval=16_000 // batch_size,
+                sl_slow_metrics_batch_size=16_000,
             ),
         )
         trainer.train()

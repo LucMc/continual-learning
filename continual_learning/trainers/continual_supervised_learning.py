@@ -3,6 +3,7 @@ import abc
 import os
 from collections import deque
 from functools import partial
+from time import time
 from typing import override
 
 import flax.traverse_util
@@ -197,13 +198,18 @@ class CSLTrainerBase(abc.ABC):
         self.total_steps = step + 1
 
     def train(self):
+        start = time()
+        total_samples = 0
+
         if self.train_cfg.resume:
             self.load(step=self.train_cfg.resume_from_step)
 
         for _, task in enumerate(self.dataset.tasks):
             current_slow_logs_batchsize, slow_logs_queue = 0, deque()
+
             for step, batch in enumerate(task):
                 x, y = batch
+                total_samples += x.shape[0]
 
                 if self.logger.cfg.sl_slow_metrics_batch_size is not None:
                     slow_logs_queue.append(x)
@@ -237,6 +243,9 @@ class CSLTrainerBase(abc.ABC):
 
                 if step % self.logger.cfg.interval == 0:
                     self.logger.push(self.total_steps)
+                    self.logger.log(
+                        {"sps": total_samples / (time() - start)}, self.total_steps
+                    )
 
                 self.save(dataloader=task, metrics=metrics)
 
@@ -390,6 +399,9 @@ class MaskedClassificationCSLTrainer(CSLTrainerBase):
 class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
     @override
     def train(self):
+        start = time()
+        total_samples = 0
+
         if self.train_cfg.resume:
             self.load(step=self.train_cfg.resume_from_step)
 
@@ -397,6 +409,7 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
             current_slow_logs_batchsize, slow_logs_queue = 0, deque()
             for step, batch in enumerate(task):
                 x, y = batch
+                total_samples += x.shape[0]
 
                 if self.logger.cfg.sl_slow_metrics_batch_size is not None:
                     slow_logs_queue.append(x)
@@ -422,6 +435,9 @@ class HeadResetClassificationCSLTrainer(ClassificationCSLTrainer):
 
                 if step % self.logger.cfg.interval == 0:
                     self.logger.push(self.total_steps)
+                    self.logger.log(
+                        {"sps": total_samples / (time() - start)}, self.total_steps
+                    )
 
                 metrics = None
                 if (
