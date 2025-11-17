@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-import jax
 from typing import Callable, Literal
+
+import jax
 import optax
 
 
@@ -82,6 +83,8 @@ class CcbpConfig(ResetMethodConfig):
     replacement_rate: float = 0.01
     sharpness: float = 16
     threshold: float = 0.95
+    low_utility_threshold: float = 0.95  # For logging
     decay_rate: float = 0.99
     update_frequency: int = 1000
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp"
+    metrics_type: Literal["regrama", "cbp"] = "regrama"

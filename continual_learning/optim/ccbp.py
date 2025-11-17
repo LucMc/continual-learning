@@ -1,13 +1,13 @@
 from functools import partial
-from typing import Callable, Tuple, Literal
+from typing import Callable, Literal, Tuple
 
 import flax
+import flax.traverse_util
 import jax
 import jax.numpy as jnp
 import jax.random as random
 import optax
 from flax.core import FrozenDict
-import flax.traverse_util
 from jaxtyping import (
     Array,
     Float,
@@ -15,9 +15,9 @@ from jaxtyping import (
     PyTree,
 )
 
-from continual_learning.types import GradientTransformationExtraArgsReset
 import continual_learning.utils.optim as utils
 from continual_learning.optim.cbp import CbpOptimState
+from continual_learning.types import GradientTransformationExtraArgsReset
 
 
 class CcbpOptimState(CbpOptimState):
@@ -44,6 +44,21 @@ def get_updated_utility(
     return updated_utility
 
 
+def get_updated_utility_cbp(
+    features: Float[Array, "#batch #neurons"],  # Vmap over batches
+    utility: Float[Array, "#neurons"],
+    out_w_mag: Float[Array, "#weights"],
+    decay_rate: float = 0.9,  # 0 means no running stats
+) -> Float[Array, "#neurons"]:
+    updated_utility = (
+        (decay_rate * utility)
+        + ((1 - decay_rate) * jnp.abs(features)).mean(axis=tuple(range(features.ndim - 1)))
+        * out_w_mag
+    ).flatten()  # Arr[#neurons]
+
+    return updated_utility
+
+
 def continuous_reset_weights(
     key_tree: PRNGKeyArray,
     weights: PyTree[Float[Array, "..."]],
@@ -52,6 +67,7 @@ def continuous_reset_weights(
     replacement_rate: float = 0.012,
     sharpness: float = 16,  # How linear/expone)ntial? inf=hard resets
     threshold: float = 0.95,  # Where is the cut off to hard reset
+    low_utility_threshold: float = 0.95,
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
 ):
     all_layer_names = list(weights.keys())
@@ -64,10 +80,18 @@ def continuous_reset_weights(
         init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
 
         match transform_type:
-            case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
-            case "sigmoid": transform = lambda x: jnp.minimum(2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0)
-            case "softplus": transform = lambda x: jnp.minimum(jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0)
-            case "linear": transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
+            case "exp":
+                transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
+            case "sigmoid":
+                transform = lambda x: jnp.minimum(
+                    2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0
+                )
+            case "softplus":
+                transform = lambda x: jnp.minimum(
+                    jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0
+                )
+            case "linear":
+                transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
 
         transformed_utilities = jax.tree.map(transform, utilities)
 
@@ -113,7 +137,7 @@ def continuous_reset_weights(
 
         logs[layer_name] = {
             "nodes_reset": reset_prop.mean(),
-            "low_utility": jnp.sum(utilities[layer_name] < 0.95),
+            "low_utility": jnp.sum(utilities[layer_name] < low_utility_threshold),
             "mean_utils": jnp.mean(utilities[layer_name]),
         }
 
@@ -127,11 +151,13 @@ def ccbp(
     replacement_rate: float = 0.012,
     sharpness: float = 16,
     threshold: float = 0.95,
+    low_utility_threshold: float = 0.95,
     decay_rate: float = 0.99,
     update_frequency: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
+    metrics_type: Literal["regrama", "cbp"] = "regrama",
 ) -> GradientTransformationExtraArgsReset:
     """Continuous Continual Backpropergation (CCBP)"""
 
@@ -162,24 +188,42 @@ def ccbp(
         features: PyTree,
         tx_state: optax.OptState,
     ) -> tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
-        del features
+        flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
+        flat_feats, _ = jax.tree.flatten(features)
+
+        weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+
+        out_w_mag = utils.get_out_weights_mag(weights)
+        w_mag_tdef = jax.tree.structure(out_w_mag)
+        _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
 
         def no_update(updates):
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
-
-            weight_grads.pop(out_layer_name)
-            _utility = jax.tree.map(
-                partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
-                state.utilities,
-            )
+            match metrics_type:
+                case "regrama":
+                    flat_updates = flax.traverse_util.flatten_dict(updates["params"])
+                    weight_grads = {
+                        k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"
+                    }
+                    weight_grads.pop(out_layer_name)
+                    _utility = jax.tree.map(
+                        partial(get_updated_utility, decay_rate=decay_rate),
+                        weight_grads,
+                        state.utilities,
+                    )
+                case "cbp":
+                    _utility = jax.tree.map(
+                        partial(get_updated_utility_cbp, decay_rate=decay_rate),
+                        _features,
+                        state.utilities,
+                        out_w_mag,
+                    )
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
 
             _logs = {
                 "std_util": all_utils.std(),
                 "nodes_reset": 0.0,  # state.logs['nodes_reset'],
-                "low_utility": jnp.sum(all_utils < 0.95),
+                "low_utility": jnp.sum(all_utils < low_utility_threshold),
                 "mean_utils": all_utils.mean(),
             }
 
@@ -192,24 +236,28 @@ def ccbp(
         def _ccbp(
             updates: optax.Updates,
         ) -> Tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
-            flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
-
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            # out_w_mag = utils.get_out_weights_mag(weights)
-
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
-            flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
-
-            weight_grads.pop(out_layer_name)
-            _utility = jax.tree.map(
-                partial(get_updated_utility, decay_rate=decay_rate),
-                weight_grads,
-                state.utilities,
-            )
+            match metrics_type:
+                case "regrama":
+                    flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
+                    weight_grads = {
+                        k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"
+                    }
+                    weight_grads.pop(out_layer_name)
+                    _utility = jax.tree.map(
+                        partial(get_updated_utility, decay_rate=decay_rate),
+                        weight_grads,
+                        state.utilities,
+                    )
+                case "cbp":
+                    _utility = jax.tree.map(
+                        partial(get_updated_utility_cbp, decay_rate=decay_rate),
+                        _features,
+                        state.utilities,
+                        out_w_mag,
+                    )
 
             # reset weights given mask
             _weights, reset_logs = continuous_reset_weights(
@@ -221,6 +269,7 @@ def ccbp(
                 replacement_rate,
                 sharpness,
                 threshold,
+                low_utility_threshold,
                 transform_type,
             )
 
