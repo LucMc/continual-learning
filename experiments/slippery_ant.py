@@ -1,4 +1,5 @@
 import time
+from dataclasses import field
 from typing import Literal
 
 import jax
@@ -10,9 +11,9 @@ from continual_learning.configs import (
     AdamConfig,
     CbpConfig,
     CcbpConfig,
-    RegramaConfig,
     LoggingConfig,
     RedoConfig,
+    RegramaConfig,
     ShrinkAndPerterbConfig,
 )
 from continual_learning.configs.envs import EnvConfig
@@ -26,9 +27,6 @@ from continual_learning.types import (
 )
 
 
-from dataclasses import field
-
-
 @dataclass(frozen=True)
 class Args:
     seed: int = 42
@@ -39,6 +37,9 @@ class Args:
     resume: bool = False
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
+
+    layer_norm: bool = False
+    layer_norm_type: Literal["ln", "rmsnorm"] = "ln"
 
 
 def run_all_slippery_ant():
@@ -120,6 +121,8 @@ def run_all_slippery_ant():
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                     std_type=StdType.MLP_HEAD,
                 ),
@@ -132,6 +135,8 @@ def run_all_slippery_ant():
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                 ),
                 num_rollout_steps=2048 * 32 * 3,

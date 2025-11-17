@@ -38,6 +38,9 @@ class Args:
     postfix: str | None = None  # Postfix name tag
     base_optim: Literal["adam", "adamw", "muon"] = "adam"
 
+    layer_norm: bool = False
+    layer_norm_type: Literal["ln", "rmsnorm"] = "ln"
+
 
 def run_all_inc_mnist():
     args = tyro.cli(Args)
@@ -113,7 +116,11 @@ def run_all_inc_mnist():
 
         trainer = HeadResetClassificationCSLTrainer(
             seed=args.seed,
-            model_config=MLPConfig(output_size=10),
+            model_config=MLPConfig(
+                output_size=10,
+                layer_norm=args.layer_norm,
+                layer_norm_type=args.layer_norm_type,
+            ),
             optim_cfg=opt_conf,
             data_cfg=DatasetConfig(
                 name="classinc_mnist",

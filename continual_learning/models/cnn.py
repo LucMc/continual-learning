@@ -46,6 +46,7 @@ class CNN(nn.Module):
                     "preactivations", f"{idx}_conv_{feature}_{layer}_pre", flatten_last(x)
                 )
                 x = self.config.activation_fn(x)
+                # TODO: maybe add layernorm here?
 
                 if self.config.dropout is not None:
                     x = nn.Dropout(self.config.dropout, deterministic=not training)(x)
@@ -61,6 +62,12 @@ class CNN(nn.Module):
         # MLP head
         x = x.reshape((x.shape[0], -1))
         for layer in range(self.config.num_dense_layers):
+            match self.config.layer_norm_type:
+                case "ln":
+                    x = nn.LayerNorm()(x)
+                case "rmsnorm":
+                    x = nn.RMSNorm()(x)
+
             x = Dense(self.config.dense_hidden_size, name=f"{idx}_Dense_{layer}")(x)
             self.sow("preactivations", f"{idx}_Dense_{layer}_pre", x)
             x = self.config.activation_fn(x)

@@ -38,6 +38,9 @@ class Args:
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
 
+    layer_norm: bool = False
+    layer_norm_type: Literal["ln", "rmsnorm"] = "ln"
+
 
 def run_all_slippery_humanoid():
     args = tyro.cli(Args)
@@ -122,6 +125,8 @@ def run_all_slippery_humanoid():
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                     std_type=StdType.MLP_HEAD,
                 ),
@@ -134,6 +139,8 @@ def run_all_slippery_humanoid():
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                 ),
                 num_rollout_steps=2048 * 32 * 5,

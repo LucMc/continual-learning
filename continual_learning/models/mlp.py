@@ -21,6 +21,13 @@ class MLP(nn.Module):
         )
 
         for i in range(self.config.num_layers):
+            if self.config.layer_norm:
+                match self.config.layer_norm_type:
+                    case "ln":
+                        x = nn.LayerNorm()(x)
+                    case "rmsnorm":
+                        x = nn.RMSNorm()(x)
+
             x = Dense(self.config.hidden_size, name=f"layer_{i}")(x)
             self.sow("preactivations", f"layer_{i}_pre", x)
             x = self.config.activation_fn(x)
