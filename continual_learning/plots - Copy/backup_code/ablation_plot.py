@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+import tyro
+import numpy as np
+import altair as alt
+from pathlib import Path
+import wandb
+import pandas as pd
+import re
+from collections import defaultdict
+from typing import Optional, Literal
+
+def compute_iqm(values: np.ndarray) -> float:
+    if len(values) < 4: return np.mean(values)
+    q25, q75 = np.percentile(values, [25, 75])
+    mask = (values >= q25) & (values <= q75)
+    return np.mean(values[mask]) if np.any(mask) else np.mean(values)
+
+
+def coerce_numeric_value(value) -> Optional[float]:
+    """Best-effort conversion of W&B history values to finite floats."""
+
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value) if np.isfinite(value) else None
+
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        lowered = cleaned.lower()
+        if lowered in {"nan", "inf", "+inf", "-inf"}:
+            return None
+        try:
+            numeric = float(cleaned)
+        except ValueError:
+            matches = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", cleaned)
+            if len(matches) != 1:
+                return None
+            try:
+                numeric = float(matches[0])
+            except ValueError:
+                return None
+        return float(numeric) if np.isfinite(numeric) else None
+
+    if isinstance(value, (list, tuple, np.ndarray)):
+        try:
+            arr = np.asarray(value, dtype=np.float64).reshape(-1)
+        except (ValueError, TypeError):
+            return None
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 1:
+            return float(finite[0])
+        return None
+
+    return None
+
+
+def parse_run_name(run_name: str) -> dict:
+    if '_' not in run_name:
+        return {"algorithm": run_name, "seed": "0"}
+
+    algorithm, remainder = run_name.split('_', 1)
+    params = {}
+    seed_value: Optional[str] = None
+
+    for param_pair in remainder.split(','):
+        if '=' not in param_pair:
+            continue
+
+        key, value = param_pair.split('=', 1)
+        try:
+            converted = float(value) if '.' in value or 'e' in value.lower() else int(value)
+        except ValueError:
+            converted = value
+
+        params[key] = converted
+        if key == 'seed':
+            seed_value = str(converted)
+
+    if 'seed' in params:
+        params.pop('seed')
+
+    if seed_value is None:
+        match = re.search(r'_s(\d+)$', run_name)
+        seed_value = match.group(1) if match else "0"
+
+    return {"algorithm": algorithm, "seed": seed_value, **params}
+
+
+def fetch_runs(entity: str, project: str, group: str):
+    api = wandb.Api()
+    runs = list(api.runs(f"{entity}/{project}", filters={"group": group}, per_page=300))
+    print(f"Fetched {len(runs)} runs, {len([r for r in runs if r.state == 'finished'])} finished")
+    return [r for r in runs if r.state == "finished"]
+
+
+def fetch_ablation_data(entity: str, project: str, group: str, metric: str, split_by: Optional[str] = None) -> pd.DataFrame:
+    runs = fetch_runs(entity, project, group)
+    run_data = []
+
+    for run in runs:
+        parsed = parse_run_name(run.name)
+        history = run.history(keys=[metric, "_step"], samples=5000)
+        if history.empty: continue
+
+        for _, row in history.iterrows():
+            step, value = row.get("_step"), row.get(metric)
+            numeric_value = coerce_numeric_value(value)
+            if pd.notna(step) and numeric_value is not None:
+                run_data.append({**parsed, "step": step, "value": numeric_value, "run_name": run.name})
+
+    if not run_data: return pd.DataFrame()
+
+    df = pd.DataFrame(run_data)
+    if split_by and split_by in df.columns:
+        def normalized_split_value(row):
+            value = row[split_by]
+            if isinstance(value, str):
+                match = re.match(r'(.+)_s(\d+)$', value)
+                if match and str(row.get('seed')) == match.group(2):
+                    return match.group(1)
+            return value
+
+        normalized_values = df.apply(normalized_split_value, axis=1)
+        df['group'] = f"{split_by}=" + normalized_values.astype(str)
+    else:
+        df['group'] = df['algorithm']
+
+    return df
+
+
+def create_short_labels(df: pd.DataFrame, short_labels: bool = True) -> pd.DataFrame:
+    if not short_labels: return df
+
+    def shorten_group_name(group_name: str) -> str:
+        if '=' in group_name:
+            segments = group_name.split(',')
+            if len(segments) == 1:
+                return group_name
+
+            parts = []
+            for param in segments[1:]:
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    key = '_'.join(key.split('_')[1:]) if key.startswith('redo_') else key
+                    initials = ''.join([w[0] for w in key.split('_')]) if '_' in key else key[:3]
+                    parts.append(f"{initials}={value}")
+                else:
+                    parts.append(param)
+            return ','.join(parts) if parts else segments[0]
+        elif '_' in group_name:
+            parts = group_name.split('_')
+            return '_'.join([p if i == 0 or (p.startswith('s') and p[1:].isdigit()) else p[:3]
+                           for i, p in enumerate(parts)])
+        return group_name
+
+    df_copy = df.copy()
+    df_copy['short_group'] = df_copy['group'].apply(shorten_group_name)
+    return df_copy
+
+
+def aggregate_data(df: pd.DataFrame, grouping_mode: Literal["parameter", "seed", "config"] = "parameter") -> pd.DataFrame:
+    if grouping_mode == "seed":
+        param_cols = [col for col in df.columns if col not in ['algorithm', 'seed', 'step', 'value', 'run_name', 'group']]
+        config_str = df[param_cols].apply(lambda row: ','.join([f"{k}={v}" for k, v in row.items()]), axis=1)
+        df['group'] = df['algorithm'] + '_' + config_str + '_' + df['seed']
+    elif grouping_mode == "config":
+        param_cols = [col for col in df.columns if col not in ['algorithm', 'seed', 'step', 'value', 'run_name', 'group']]
+        config_str = df[param_cols].apply(lambda row: ','.join([f"{k}={v}" for k, v in row.items()]), axis=1)
+        df['group'] = df['algorithm'] + '_' + config_str
+
+    df['binned_step'] = (df['step'] / 10_000).round() * 10_000
+
+    aggregated_data = []
+    for (group_name, step), group_df in df.groupby(['group', 'binned_step']):
+        values = pd.to_numeric(group_df['value'], errors='coerce').dropna().to_numpy(dtype=np.float64)
+        if len(values) > 0:
+            iqm_value = compute_iqm(values)
+            q25, q75 = np.percentile(values, [25, 75]) if len(values) > 1 else (iqm_value, iqm_value)
+            aggregated_data.append({
+                'group': group_name, 'step': step / 1_000_000, 'iqm': iqm_value,
+                'q25': q25, 'q75': q75, 'n_runs': len(values)
+            })
+
+    return pd.DataFrame(aggregated_data).sort_values(['group', 'step'])
+
+
+def create_ablation_chart(df: pd.DataFrame, metric: str, title: str = "", use_short_labels: bool = True) -> alt.Chart:
+    chart_df = create_short_labels(df, use_short_labels)
+    group_col = 'short_group' if use_short_labels and 'short_group' in chart_df.columns else 'group'
+
+    max_step = float(chart_df['step'].max()) if not chart_df['step'].empty else 0.0
+    x_scale = alt.Scale(domain=[0, max_step * 1.1 if max_step > 0 else 1.0], nice=True)
+
+    color_legend = alt.Legend(
+        title="Configuration",
+        symbolOpacity=1.0,
+        symbolType='stroke',
+        symbolStrokeWidth=3,
+        symbolSize=200,
+        fillColor="rgba(255,255,255,1)",
+        strokeColor="gray",
+        padding=5,
+        cornerRadius=3,
+        orient="bottom-left",
+    )
+    color_encoding = alt.Color(f'{group_col}:N', legend=color_legend)
+
+    base = alt.Chart(chart_df).encode(
+        x=alt.X('step:Q', title='Training Steps (Millions)', scale=x_scale)
+    )
+
+    smoothed_base = base.transform_window(
+        frame=[-5, 5], groupby=[group_col],
+        smooth_iqm='mean(iqm)', smooth_q25='mean(q25)', smooth_q75='mean(q75)'
+    )
+
+    bands = smoothed_base.mark_area(opacity=0.2).encode(
+        color=color_encoding,
+        y=alt.Y('smooth_q25:Q', title=metric.replace('_', ' ').title()),
+        y2=alt.Y2('smooth_q75:Q')
+    )
+
+    lines = smoothed_base.mark_line(strokeWidth=2).encode(
+        color=color_encoding,
+        y=alt.Y('smooth_iqm:Q', title=""),
+        tooltip=[alt.Tooltip(f'{group_col}:N', title='Group'),
+                alt.Tooltip('step:Q', title='Step (M)', format='.2f'),
+                alt.Tooltip('smooth_iqm:Q', title='IQM', format='.3f')]
+    )
+
+    return (bands + lines).properties(
+        width=800, height=400,
+        title=title or f"{metric.replace('_', ' ').title()} Ablation Study"
+    ).configure_axis(grid=True, gridOpacity=0.3).interactive()
+
+
+def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str = "slippery_ant_ccbp_sweep",
+         metric: str = "charts/mean_episodic_return", split_by: Optional[str] = None,
+         grouping_mode: Literal["parameter", "seed", "config"] = "parameter", top_k: Optional[int] = None,
+         ranking_criteria: Literal["final", "peak", "average", "auc"] = "final", short_labels: bool = True,
+         output_dir: str = "./plots/ablation", ext: str = "svg", debug: bool = False):
+    df = fetch_ablation_data(wandb_entity, wandb_project, group, metric, split_by)
+    if df.empty: return print(f"No data found for group: '{group}'")
+
+    agg_df = aggregate_data(df, grouping_mode)
+    if agg_df.empty: return print("No aggregated data available")
+    if top_k and top_k > 0:
+        ranking = {'final': agg_df.groupby('group')['iqm'].last(),
+                  'peak': agg_df.groupby('group')['iqm'].max(),
+                  'average': agg_df.groupby('group')['iqm'].mean(),
+                  'auc': pd.Series({g: np.trapz(gdf['iqm'], gdf['step'])
+                                   for g, gdf in agg_df.groupby('group') if len(gdf) > 1})}
+        top_groups = ranking[ranking_criteria].sort_values(ascending=False).head(top_k).index
+        agg_df = agg_df[agg_df['group'].isin(top_groups)]
+        if agg_df.empty: return
+    title_parts = [group.replace('_', ' ').title()]
+    if split_by: title_parts.append(f"by {split_by}")
+    if top_k: title_parts.append(f"(top {top_k} by {ranking_criteria})")
+    title_parts.append(f"({grouping_mode} mode)")
+    title = ": ".join(title_parts)
+
+    final_data = agg_df.groupby('group')['iqm'].last().sort_values(ascending=False)
+    print(f"\nTop performers: {dict(final_data.head(3))}")
+
+    chart = create_ablation_chart(agg_df, metric, title, short_labels)
+
+    save_name = f"{group}_{metric.replace('/', '_')}"
+    if split_by: save_name += f"_by_{split_by}"
+    if top_k: save_name += f"_top{top_k}_{ranking_criteria}"
+    save_name += f"_{grouping_mode}_ablation.{ext}"
+
+    save_path = Path(output_dir) / save_name
+    save_path.parent.mkdir(exist_ok=True, parents=True)
+    chart.save(str(save_path))
+    print(f"Chart saved to: {save_path}")
+    return chart
+
+
+if __name__ == "__main__":
+    tyro.cli(main)

@@ -66,7 +66,7 @@ def run_all_slippery_humanoid():
         "ccbp": CcbpConfig(
             tx=base_optim,
             seed=args.seed,
-            replacement_rate=0.015,
+            replacement_rate=0.03,
             decay_rate=0.99,
             sharpness=16,
             threshold=0.95,

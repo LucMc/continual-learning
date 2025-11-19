@@ -9,7 +9,13 @@ import re
 from collections import defaultdict
 from typing import Optional, Union, List, Tuple
 
-from ablation_plot import parse_run_name, coerce_numeric_value
+from ablation_plot import (
+    parse_run_name,
+    coerce_numeric_value,
+    ALT_FONT_FAMILY,
+    build_algorithm_legend_domain,
+    scaled_font_size,
+)
 
 
 NETWORK_METRIC_COMBINATIONS = {
@@ -28,6 +34,16 @@ NETWORK_METRIC_COMBINATIONS = {
         "actor": "actor_srank_hidden",
         "total": "total_srank_hidden",
     },
+    "gradient_norm": {
+        "value": "nn/vf_gradient_norm",
+        "actor": "nn/policy_gradient_norm",
+        "total": "nn/total_gradient_norm",
+    },
+    "parameter_norm": {
+        "value": "nn/vf_parameter_norm",
+        "actor": "nn/policy_parameter_norm",
+        "total": "nn/total_parameter_norm",
+    },
 }
 
 
@@ -36,13 +52,21 @@ NETWORK_METRIC_COMBINATIONS = {
 
 SRANK_LAYER_COMBINATIONS = {
     "value_srank_hidden": {
-        "components": [f"nn/value_srank/{suffix}" for suffix in [f"layer_{idx}_act" for idx in range(5)]],
+        "components": [
+            f"nn/value_srank/{suffix}"
+            for suffix in [f"layer_{idx}_act" for idx in range(5)]
+        ]
+        + ["nn/value_srank/output_act"],
         "output_metric": "value_srank_hidden",
         "label": "Value Network: Hidden Layer S-Rank (Mean)",
         "reducer": np.mean,
     },
     "actor_srank_hidden": {
-        "components": [f"nn/actor_srank/main/{suffix}" for suffix in [f"layer_{idx}_act" for idx in range(4)]],
+        "components": [
+            f"nn/actor_srank/main/{suffix}"
+            for suffix in [f"layer_{idx}_act" for idx in range(4)]
+        ]
+        + ["nn/actor_srank/main/output_act"],
         "output_metric": "actor_srank_hidden",
         "label": "Actor Network: Hidden Layer S-Rank (Mean)",
         "reducer": np.mean,
@@ -64,10 +88,33 @@ CUSTOM_METRIC_TITLES["nn/total_linearised_neurons/total_ratio_normalized"] = (
 CUSTOM_METRIC_TITLES["total_srank_hidden_normalized"] = (
     "Combined Networks: Hidden Layer S-Rank (Balanced)"
 )
+CUSTOM_METRIC_TITLES["nn/total_gradient_norm"] = "Combined Networks: Gradient Norm"
+CUSTOM_METRIC_TITLES["nn/total_gradient_norm_normalized"] = (
+    "Combined Networks: Gradient Norm (Balanced)"
+)
 
 
 METRIC_ALIASES = {
     "policy_srank_hidden": "actor_srank_hidden",
+    "grad_norm": "gradient_norm",
+}
+
+ALGORITHM_DISPLAY_NAMES = {
+    # Ant
+    "redo": "ReDo",
+    "regrama": "ReGraMa",
+    "cbp": "CBP",
+    "ccbp": "CCBP",
+    "shrink_and_perturb": "Shrink & Perturb",
+    "adam": "Adam",
+    "standard": "Adam",
+    # Humanoid
+    "ccbp_bigger_rollout_new_hparams": "CCBP",
+    "regrama_bigger_rollout_new_hparams": "ReGraMa",
+    "cbp_bigger_rollout": "CBP",
+    "redo_bigger_rollout": "ReDo",
+    "shrink_and_perturb_bigger_rollout": "Shrink & Perturb",
+    "standard_bigger_rollout": "Adam"
 }
 
 
@@ -106,6 +153,8 @@ def normalize_combined_metric_name(metric: str) -> str:
         "value_srank_hidden",
     }:
         return "srank_hidden"
+    if lowered in {"gradient_norm", "grad_norm", "gradientnorm", "gradnorm"}:
+        return "gradient_norm"
     return canonical
 
 
@@ -121,6 +170,12 @@ def build_combined_metric_suffix(metric: str, balanced: bool = False) -> str:
         base = re.sub(r"[^a-z0-9]+", "_", normalized_metric).strip("_") or "metric"
     suffix = "balanced_combined" if balanced else "combined"
     return f"{base}_{suffix}"
+
+
+def slugify_title(value: str) -> str:
+    sanitized = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip())
+    sanitized = sanitized.strip("_")
+    return sanitized.lower() or "plot"
 
 
 def resolve_metric_labels(metric: str) -> Tuple[str, str]:
@@ -142,6 +197,12 @@ def resolve_metric_labels(metric: str) -> Tuple[str, str]:
         metric_name = "Actor Network: Linearized Neuron Ratio"
     elif "total_linearised_neurons" in metric:
         metric_name = "Combined Networks: Total Linearized Neuron Ratio"
+    elif "total_gradient_norm" in metric:
+        metric_name = "Combined Networks: Gradient Norm"
+    elif "vf_gradient_norm" in metric:
+        metric_name = "Value Network: Gradient Norm"
+    elif "policy_gradient_norm" in metric:
+        metric_name = "Actor Network: Gradient Norm"
     elif "mean_episodic_return" in metric:
         metric_name = "Mean Episode Return"
     else:
@@ -155,9 +216,11 @@ def resolve_metric_labels(metric: str) -> Tuple[str, str]:
         if normalized_variant:
             y_label = "Balanced Ratio (Z-Score)"
         else:
-            y_label = "Ratio (0-1)"
+            y_label = "Percentage"
     elif "srank" in metric:
         y_label = "Balanced S-Rank (Z-Score)" if normalized_variant else "S-Rank"
+    elif "gradient_norm" in metric:
+        y_label = "Balanced Gradient Norm (Z-Score)" if normalized_variant else "Gradient Norm"
     elif "mean_episodic_return" in metric:
         y_label = "Episode Return"
     else:
@@ -247,6 +310,11 @@ def normalize_algorithm_name(name: str) -> str:
     normalized = re.sub(r'_s\d+$', '', normalized)
     normalized = re.sub(r'[,_-]+$', '', normalized)
     return normalized or "unknown_algorithm"
+
+
+def display_algorithm_name(name: str) -> str:
+    label = name.strip()
+    return ALGORITHM_DISPLAY_NAMES.get(label.lower(), label)
 
 
 def extract_run_identity(run) -> Tuple[str, str]:
@@ -458,12 +526,13 @@ def fetch_and_process_data(
 
     for run in runs:
         algo_name, seed_id = extract_run_identity(run)
+        display_name = display_algorithm_name(algo_name)
 
         split_label = get_split_label(run, split_by)
         if split_by and split_label:
-            algo_label = f"{algo_name}, {split_by}={split_label}"
+            algo_label = f"{display_name}, {split_by}={split_label}"
         else:
-            algo_label = algo_name
+            algo_label = display_name
             if split_by:
                 missing_split_runs.append(getattr(run, "name", algo_name))
 
@@ -486,6 +555,10 @@ def fetch_and_process_data(
                 numeric_value = coerce_numeric_value(row.get(metric))
                 if numeric_value is None:
                     continue
+                metric_key = metric.lower()
+                if isinstance(numeric_value, (int, float, np.integer, np.floating)):
+                    if "episodic_return" in metric_key or "episode_return" in metric_key:
+                        numeric_value = max(float(numeric_value), -2000.0)
                 algo_data[algo_label][metric][binned_step][seed_id].append(numeric_value)
                 data_points += 1
 
@@ -705,11 +778,38 @@ def create_chart(
     metrics: Union[str, List[str]],
     title: str = "",
     combine_networks: bool = False,
+    show_iqr: bool = True,
+    base_text_size: float = 25.0,
+    chart_width: Optional[int] = None,
+    chart_height: Optional[int] = None,
+    line_width: float = 2.0,
+    y_tick_count: Optional[int] = None,
+    x_axis_max: float = 400.0,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
 ) -> alt.Chart:
-    """Create a smoothed Altair chart with a line for IQM and a shaded area for IQR."""
+    """Create a smoothed Altair chart with IQM lines and optional shaded IQR."""
 
     if isinstance(metrics, str):
         metrics = [metrics]
+
+    axis_label_large = scaled_font_size(base_text_size, 1.5)
+    axis_label_default = scaled_font_size(base_text_size, 1.0)
+    # axis_label_small = scaled_font_size(base_text_size, 0.7)
+    axis_title_large = scaled_font_size(base_text_size, 1.5)
+    # axis_title_small = scaled_font_size(base_text_size, 0.8)
+    legend_label_large = scaled_font_size(base_text_size, 1.1)
+    # legend_label_small = scaled_font_size(base_text_size, 0.7)
+    legend_title_large = scaled_font_size(base_text_size, 1.5)
+    legend_symbol_large = scaled_font_size(base_text_size, 50)
+    # legend_symbol_small = scaled_font_size(base_text_size, 7.5)
+    legend_symbol_stroke_large = max(2, scaled_font_size(base_text_size, 0.5))
+    legend_symbol_stroke_small = max(2, scaled_font_size(base_text_size, 0.35))
+    legend_label_limit = max(220, int(round(base_text_size * 12)))
+    chart_title_small = scaled_font_size(base_text_size, 0.7) # bar chart only
+    chart_title_medium = scaled_font_size(base_text_size, 0.8)
+    chart_title_large = scaled_font_size(base_text_size, 1.6)
+    default_padding = {"right": 25}
 
     # If we have multiple metrics, create subplots
     if len(df["metric"].unique()) > 1:
@@ -718,17 +818,29 @@ def create_chart(
         for metric in df["metric"].unique():
             metric_df = df[df["metric"] == metric]
             metric_name, y_label = resolve_metric_labels(metric)
+            legend_domain = build_algorithm_legend_domain(metric_df["algorithm"])
+            color_scale = (
+                alt.Scale(domain=legend_domain)
+                if legend_domain
+                else alt.Undefined
+            )
 
             base = alt.Chart(metric_df).encode(
                 x=alt.X(
                     "step:Q",
                     title="Training Steps (Millions)",
-                    scale=alt.Scale(domain=[0, 400], nice=True),
-                    axis=alt.Axis(labelFontSize=12, titleFontSize=14),
+                    scale=alt.Scale(domain=[0, x_axis_max], nice=True),
+                    axis=alt.Axis(
+                        labelFontSize=axis_label_large,
+                        titleFontSize=axis_title_large,
+                        labelFont=ALT_FONT_FAMILY,
+                        titleFont=ALT_FONT_FAMILY,
+                    ),
                 ),
                 color=alt.Color(
                     "algorithm:N",
                     title="Algorithm",
+                    scale=color_scale,
                     legend=alt.Legend(
                         title=None,
                         symbolOpacity=1.0,
@@ -737,8 +849,16 @@ def create_chart(
                         strokeColor="gray",
                         padding=5,
                         cornerRadius=3,
-                        labelFontSize=12,
-                        symbolSize=150,
+                        labelFontSize=legend_label_large,
+                        labelFontWeight="bold",
+                        titleFontSize=legend_title_large,
+                        titleFontWeight="bold",
+                        symbolSize=legend_symbol_large,
+                        symbolStrokeWidth=legend_symbol_stroke_small,
+                        labelLimit=legend_label_limit,
+                        labelPadding=8,
+                        labelFont=ALT_FONT_FAMILY,
+                        titleFont=ALT_FONT_FAMILY,
                     ),
                 ),
             )
@@ -753,17 +873,47 @@ def create_chart(
             )
 
             # Create bands and lines
-            bands = smoothed_base.mark_area(opacity=0.25).encode(
-                y=alt.Y(
-                    "smooth_q25:Q",
-                    title=y_label,
-                    axis=alt.Axis(labelFontSize=12, titleFontSize=14),
-                ),
-                y2=alt.Y2("smooth_q75:Q", title=""),
-            )
+            axis_kwargs = {
+                "labelFontSize": axis_label_default,
+                "titleFontSize": axis_title_large,
+                "labelFont": ALT_FONT_FAMILY,
+                "titleFont": ALT_FONT_FAMILY,
+            }
+            if y_tick_count is not None:
+                axis_kwargs["tickCount"] = max(2, int(y_tick_count))
+            axis_config = alt.Axis(**axis_kwargs)
 
-            lines = smoothed_base.mark_line(strokeWidth=2).encode(
-                y=alt.Y("smooth_iqm:Q", title=""),
+            # Configure y-axis scale
+            y_scale_kwargs = {}
+            if y_min is not None and y_max is not None:
+                # Both bounds specified
+                y_scale_kwargs["domain"] = [y_min, y_max]
+            elif y_min is not None:
+                # Only min specified
+                y_scale_kwargs["domainMin"] = y_min
+            elif y_max is not None:
+                # Only max specified
+                y_scale_kwargs["domainMax"] = y_max
+            y_scale_config = alt.Scale(**y_scale_kwargs) if y_scale_kwargs else alt.Undefined
+
+            if show_iqr:
+                bands = smoothed_base.mark_area(opacity=0.25).encode(
+                    y=alt.Y(
+                        "smooth_q25:Q",
+                        title=y_label,
+                        axis=axis_config,
+                        scale=y_scale_config,
+                    ),
+                    y2=alt.Y2("smooth_q75:Q", title=""),
+                )
+
+            lines = smoothed_base.mark_line(strokeWidth=line_width).encode(
+                y=alt.Y(
+                    "smooth_iqm:Q",
+                    title="" if show_iqr else y_label,
+                    axis=axis_config,
+                    scale=y_scale_config,
+                ),
                 tooltip=[
                     alt.Tooltip("algorithm:N", title="Algorithm"),
                     alt.Tooltip("step:Q", title="Step (M)", format=".2f"),
@@ -773,10 +923,20 @@ def create_chart(
                 ],
             )
 
-            chart = (bands + lines).properties(
-                width=800,
-                height=300,
-                title=alt.TitleParams(text=metric_name, fontSize=14, fontWeight="bold"),
+            chart = lines
+            if show_iqr:
+                chart = bands + chart
+
+            chart = chart.properties(
+                width=chart_width if chart_width is not None else 800,
+                height=chart_height if chart_height is not None else 300,
+                title=alt.TitleParams(
+                    text=metric_name,
+                    fontSize=chart_title_small,
+                    fontWeight="bold",
+                    font=ALT_FONT_FAMILY,
+                ),
+                padding=default_padding,
             )
 
             charts.append(chart)
@@ -788,11 +948,21 @@ def create_chart(
             combined_chart.properties(
                 title=alt.TitleParams(
                     text=title if title else "Network Metrics Comparison",
-                    fontSize=16,
+                    fontSize=chart_title_medium,
                     fontWeight="bold",
-                )
+                    font=ALT_FONT_FAMILY,
+                ),
+                padding=default_padding,
             )
-            .configure_axis(grid=True, gridOpacity=0.3, labelFontSize=12, titleFontSize=14)
+            .configure_axis(
+                grid=True,
+                gridOpacity=0.8,
+                labelFontSize=axis_label_default,
+                titleFontSize=axis_title_large,
+                labelFont=ALT_FONT_FAMILY,
+                titleFont=ALT_FONT_FAMILY,
+            )
+            .configure_legend(labelFont=ALT_FONT_FAMILY, titleFont=ALT_FONT_FAMILY)
             .interactive()
         )
 
@@ -800,17 +970,29 @@ def create_chart(
         # Single metric - use original logic
         metric = df["metric"].iloc[0] if "metric" in df.columns else metrics[0]
         metric_name, y_label = resolve_metric_labels(metric)
+        legend_domain = build_algorithm_legend_domain(df["algorithm"])
+        color_scale = (
+            alt.Scale(domain=legend_domain)
+            if legend_domain
+            else alt.Undefined
+        )
 
         base = alt.Chart(df).encode(
             x=alt.X(
                 "step:Q",
                 title="Training Steps (Millions)",
-                scale=alt.Scale(domain=[0, 400], nice=True),
-                axis=alt.Axis(labelFontSize=14, titleFontSize=16),
+                scale=alt.Scale(domain=[0, x_axis_max], nice=True),
+                axis=alt.Axis(
+                    labelFontSize=axis_label_large,
+                    titleFontSize=axis_title_large,
+                    labelFont=ALT_FONT_FAMILY,
+                    titleFont=ALT_FONT_FAMILY,
+                ),
             ),
             color=alt.Color(
                 "algorithm:N",
                 title="Algorithm",
+                scale=color_scale,
                 legend=alt.Legend(
                     title=None,
                     symbolOpacity=1.0,
@@ -819,8 +1001,14 @@ def create_chart(
                     strokeColor="gray",
                     padding=5,
                     cornerRadius=3,
-                    labelFontSize=14,
-                    symbolSize=200,
+                    labelFontSize=legend_label_large,
+                    labelFontWeight="bold",
+                    symbolSize=legend_symbol_large,
+                    symbolStrokeWidth=legend_symbol_stroke_large,
+                    labelLimit=legend_label_limit,
+                    labelPadding=8,
+                    labelFont=ALT_FONT_FAMILY,
+                    titleFont=ALT_FONT_FAMILY,
                 ),
             ),
         )
@@ -835,18 +1023,48 @@ def create_chart(
     )
 
     # Create the shaded area using the SMOOTHED q25 and q75 values
-    bands = smoothed_base.mark_area(opacity=0.25).encode(
-        y=alt.Y(
-            "smooth_q25:Q",
-            title=y_label,
-            axis=alt.Axis(labelFontSize=14, titleFontSize=16),
-        ),
-        y2=alt.Y2("smooth_q75:Q", title=""),
-    )
+    axis_kwargs = {
+        "labelFontSize": axis_label_large,
+        "titleFontSize": axis_title_large,
+        "labelFont": ALT_FONT_FAMILY,
+        "titleFont": ALT_FONT_FAMILY,
+    }
+    if y_tick_count is not None:
+        axis_kwargs["tickCount"] = max(2, int(y_tick_count))
+    axis_config = alt.Axis(**axis_kwargs)
+
+    # Configure y-axis scale
+    y_scale_kwargs = {}
+    if y_min is not None and y_max is not None:
+        # Both bounds specified
+        y_scale_kwargs["domain"] = [y_min, y_max]
+    elif y_min is not None:
+        # Only min specified
+        y_scale_kwargs["domainMin"] = y_min
+    elif y_max is not None:
+        # Only max specified
+        y_scale_kwargs["domainMax"] = y_max
+    y_scale_config = alt.Scale(**y_scale_kwargs) if y_scale_kwargs else alt.Undefined
+
+    if show_iqr:
+        bands = smoothed_base.mark_area(opacity=0.25).encode(
+            y=alt.Y(
+                "smooth_q25:Q",
+                title=y_label,
+                axis=axis_config,
+                scale=y_scale_config,
+            ),
+            y2=alt.Y2("smooth_q75:Q", title=""),
+        )
 
     # Create the line chart using the SMOOTHED iqm value
-    lines = smoothed_base.mark_line(strokeWidth=2).encode(
-        y=alt.Y("smooth_iqm:Q", title=""),
+    lines = smoothed_base.mark_line(strokeWidth=line_width).encode(
+        y=alt.Y(
+            "smooth_iqm:Q",
+            title="" if show_iqr else y_label,
+            axis=axis_config,
+            scale=y_scale_config,
+        ),
         tooltip=[
             alt.Tooltip("algorithm:N", title="Algorithm"),
             alt.Tooltip("step:Q", title="Step (M)", format=".2f"),
@@ -856,21 +1074,33 @@ def create_chart(
         ],
     )
 
-    chart = bands + lines
+    chart = lines
+    if show_iqr:
+        chart = bands + chart
 
     return (
         chart.properties(
-            width=1000,
-            height=400,
+            width=chart_width if chart_width is not None else 1000,
+            height=chart_height if chart_height is not None else 400,
             title=alt.TitleParams(
                 text=title
                 if title
                 else f"{metric_name} (IQM over Seeds)",
-                fontSize=18,
+                fontSize=chart_title_large,
                 fontWeight="bold",
+                font=ALT_FONT_FAMILY,
             ),
+            padding=default_padding,
         )
-        .configure_axis(grid=True, gridOpacity=0.3, labelFontSize=14, titleFontSize=16)
+        .configure_axis(
+            grid=True,
+            gridOpacity=0.8,
+            labelFontSize=axis_label_large,
+            titleFontSize=axis_title_large,
+            labelFont=ALT_FONT_FAMILY,
+            titleFont=ALT_FONT_FAMILY,
+        )
+        .configure_legend(labelFont=ALT_FONT_FAMILY, titleFont=ALT_FONT_FAMILY)
         .interactive()
     )
 
@@ -879,6 +1109,7 @@ def create_peak_final_bar_chart(
     summary_df: pd.DataFrame,
     overall_title: str,
     metric_label: str,
+    base_text_size: float = 20.0,
 ) -> alt.Chart:
     """
     Grouped bar chart (Final vs Peak IQM) with robust y-axis:
@@ -888,16 +1119,23 @@ def create_peak_final_bar_chart(
     - Extra padding + autosize(type='pad', contains='padding') to prevent clipping.
     - clip=True applied on each mark (not the LayerChart).
     """
-    import numpy as np
-    import pandas as pd
-    import altair as alt
-
     if summary_df.empty:
         raise ValueError("Performance summary is empty; cannot build bar chart.")
 
     df = summary_df.copy()
     if "metric" not in df.columns:
         df["metric"] = metric_label
+
+    axis_label_size = scaled_font_size(base_text_size, 1.1)
+    axis_title_size = scaled_font_size(base_text_size, 1.2)
+    legend_label_size = scaled_font_size(base_text_size, 4.0)
+    legend_title_size = scaled_font_size(base_text_size, 1.2)
+    legend_symbol_size = scaled_font_size(base_text_size, 12.5)
+    legend_label_limit = max(220, int(round(base_text_size * 12)))
+    chart_title_size = scaled_font_size(base_text_size, 1.2)
+    x_label_size = axis_label_size
+    tick_size = scaled_font_size(base_text_size, 0.9)
+    header_font_size = axis_label_size
 
     # --- reshape to long format (Final / Peak rows)
     rows = []
@@ -938,20 +1176,34 @@ def create_peak_final_bar_chart(
 
     chart_df = pd.DataFrame(rows)
 
+    # Each metric's bars should start from its observed minimum so that values "fill"
+    # upward from the lowest performance (e.g., -2000) instead of diverging around 0.
+    baseline_map = {}
+    for metric_name, metric_rows in chart_df.groupby("metric"):
+        candidates = pd.concat(
+            [metric_rows["iqm"], metric_rows["lower"]],
+            axis=0,
+            ignore_index=True,
+        ).dropna()
+        baseline_map[metric_name] = float(candidates.min()) if not candidates.empty else 0.0
+
+    chart_df["baseline"] = chart_df["metric"].map(baseline_map)
+    baseline_floor = float(chart_df["baseline"].min()) if not chart_df.empty else 0.0
+    baseline_floor = -2001
+
     # --- explicit, robust y-domain (single metric => global domain)
     metric_count = chart_df["metric"].nunique()
     y_domain = None
     if metric_count == 1:
-        ymin = np.nanmin([chart_df["iqm"].min(), chart_df["lower"].min()])
         ymax = np.nanmax([chart_df["iqm"].max(), chart_df["upper"].max()])
-        if not np.isfinite(ymin) or not np.isfinite(ymax):
-            ymin, ymax = 0.0, 1.0
-        if ymin == ymax:
-            pad = 0.05 if ymax == 0 else 0.05 * abs(ymax)
-            ymin, ymax = ymin - pad, ymax + pad
-        span = ymax - ymin
-        pad = max(1e-6, 0.05 * span)
-        y_domain = [float(ymin - pad), float(ymax + pad)]
+        if not np.isfinite(ymax):
+            ymax = baseline_floor + 1.0
+        if ymax <= baseline_floor:
+            pad = max(1.0, 0.05 * abs(baseline_floor) if baseline_floor else 0.05)
+            ymax = baseline_floor + pad
+        span = max(1e-9, ymax - baseline_floor)
+        top_pad = max(1e-6, 0.04 * span)
+        y_domain = [baseline_floor, float(ymax + top_pad)]
 
     # --- encodings
     algorithm_count = chart_df["algorithm"].nunique()
@@ -964,17 +1216,28 @@ def create_peak_final_bar_chart(
     color_scale = alt.Scale(domain=["Final", "Peak"], range=["#1f77b4", "#ff7f0e"])
     legend = alt.Legend(
         title="Stage", orient="top", direction="horizontal",
-        padding=10, labelFontSize=14, titleFontSize=16, symbolSize=150,
+        padding=10,
+        labelFontSize=legend_label_size,
+        labelFontWeight="bold",
+        titleFontSize=legend_title_size,
+        titleFontWeight="bold",
+        symbolSize=legend_symbol_size,
         values=["Final", "Peak"],
+        labelLimit=legend_label_limit,
+        labelPadding=8,
+        labelFont=ALT_FONT_FAMILY,
+        titleFont=ALT_FONT_FAMILY,
     )
 
     x = alt.X(
         "algorithm:N",
         sort=alt.SortField(field="sort_key", order="descending"),
-        title="Algorithm",
+        title=None,
         axis=alt.Axis(
             offset=12, labelAngle=-30, labelPadding=8,
+            labelFontSize=x_label_size,
             labelBaseline="top", labelAlign="right", labelLimit=360,
+            labelFont=ALT_FONT_FAMILY,
         ),
     )
     x_off  = alt.XOffset("stage:N", sort=["Final", "Peak"])
@@ -982,23 +1245,34 @@ def create_peak_final_bar_chart(
     order  = alt.Order("stage_order:Q")
 
     # Shared y-scale with explicit domain (no 'nice', no zero)
-    y_scale = alt.Scale(zero=False, nice=False, domain=y_domain) if y_domain \
-              else alt.Scale(zero=False, nice=True)
+    if y_domain:
+        y_scale = alt.Scale(zero=False, nice=False, domain=y_domain)
+    else:
+        y_scale = alt.Scale(zero=False, nice=True, domainMin=baseline_floor)
 
-    y = alt.Y(
-        "iqm:Q",
-        scale=y_scale,
-        axis=alt.Axis(
-            title=axis_label, format=".2f",
-            titlePadding=10, titleFontSize=16, labelFontSize=14, tickCount=6,
-        ),
+    y_axis = alt.Axis(
+        title=axis_label,
+        format=".2f",
+        titlePadding=10,
+        titleFontSize=axis_title_size,
+        labelFontSize=axis_label_size,
+        titleFont=ALT_FONT_FAMILY,
+        labelFont=ALT_FONT_FAMILY,
+        tickCount=6,
     )
+    y = alt.Y("baseline:Q", scale=y_scale, axis=y_axis)
+    y2 = alt.Y2("iqm:Q")
 
     base = alt.Chart(chart_df)  # no clip here
 
     # Bars define the axis; other layers reuse the scale
     bars = base.mark_bar(size=28, clip=True).encode(
-        x=x, xOffset=x_off, y=y, color=color, order=order,
+        x=x,
+        xOffset=x_off,
+        y=y,
+        y2=y2,
+        color=color,
+        order=order,
         tooltip=[
             alt.Tooltip("algorithm:N", title="Algorithm"),
             alt.Tooltip("stage:N",     title="Stage"),
@@ -1017,21 +1291,21 @@ def create_peak_final_bar_chart(
         order=order,
     )
 
-    lower_caps = base.mark_tick(thickness=2, size=18, clip=True).encode(
+    lower_caps = base.mark_tick(thickness=2, size=tick_size, clip=True).encode(
         x=x, xOffset=x_off,
         y=alt.Y("lower:Q", scale=y_scale),
         color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    upper_caps = base.mark_tick(thickness=2, size=18, clip=True).encode(
+    upper_caps = base.mark_tick(thickness=2, size=tick_size, clip=True).encode(
         x=x, xOffset=x_off,
         y=alt.Y("upper:Q", scale=y_scale),
         color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    chart = bars + rules + lower_caps + upper_caps
+    chart = bars# + rules# + lower_caps + upper_caps
 
     # Facet if multiple metrics; keep independent y per facet
     if metric_count > 1:
@@ -1039,7 +1313,12 @@ def create_peak_final_bar_chart(
             column=alt.Column(
                 "metric:N",
                 title=None,
-                header=alt.Header(labelFontSize=14, titleFontSize=14),
+                header=alt.Header(
+                    labelFontSize=header_font_size,
+                    titleFontSize=header_font_size,
+                    labelFont=ALT_FONT_FAMILY,
+                    titleFont=ALT_FONT_FAMILY,
+                ),
             )
         ).resolve_scale(y="independent")
 
@@ -1047,15 +1326,29 @@ def create_peak_final_bar_chart(
         chart.properties(
             width=base_width,
             height=420,
-            padding={"left": 76, "right": 12, "top": 10, "bottom": 44},
+            padding={"left": 76, "right": 18, "top": 10, "bottom": 44},
             autosize=alt.AutoSizeParams(type="pad", contains="padding"),
             title=alt.TitleParams(
                 text=overall_title or f"{metric_label}: Peak vs Final IQM",
-                fontSize=18, fontWeight="bold",
+                fontSize=chart_title_size,
+                fontWeight="bold",
+                font=ALT_FONT_FAMILY,
             ),
         )
-        .configure_axis(grid=True, gridOpacity=0.2)
-        .configure_legend()
+        .configure_axis(
+            grid=True,
+            gridOpacity=0.8,
+            labelFontSize=axis_label_size,
+            titleFontSize=axis_title_size,
+            labelFont=ALT_FONT_FAMILY,
+            titleFont=ALT_FONT_FAMILY,
+        )
+        .configure_legend(
+            labelFont=ALT_FONT_FAMILY,
+            titleFont=ALT_FONT_FAMILY,
+            labelFontSize=legend_label_size,
+            titleFontSize=legend_title_size,
+        )
     )
 
 def main(
@@ -1067,10 +1360,20 @@ def main(
     combine_networks: bool = False,
     normalize_networks: bool = False,
     split_by: Optional[str] = None,
+    plot_title: Optional[str] = None,
     output_dir: str = "./plots",
     ext: str = "png",
     debug: bool = False,
+    show_iqr: bool = True,
+    base_text_size: float = 20.0,
     bar_chart: bool = False,
+    chart_width: Optional[int] = None,
+    chart_height: Optional[int] = None,
+    line_width: float = 8.0,
+    y_tick_count: Optional[int] = 6,
+    x_axis_max: float = 400.0,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
 ):
     if not metrics:
         metrics = [metric] if metric else ["eval_loss"]
@@ -1151,9 +1454,28 @@ def main(
     )
     if split_by:
         save_suffix = f"{save_suffix}_split_by_{split_by}"
-    chart = create_chart(df, metrics, title, combine_networks)
+    slugged_title = slugify_title(plot_title) if plot_title else None
+    if plot_title:
+        title = plot_title
 
-    save_path = Path(output_dir) / ext / f"{group}_{save_suffix}_iqm_smoothed.{ext}"
+    chart = create_chart(
+        df,
+        metrics,
+        title,
+        combine_networks,
+        show_iqr=show_iqr,
+        base_text_size=base_text_size,
+        chart_width=chart_width,
+        chart_height=chart_height,
+        line_width=line_width,
+        y_tick_count=y_tick_count,
+        x_axis_max=x_axis_max,
+        y_min=y_min,
+        y_max=y_max,
+    )
+
+    filename_stem = slugged_title if slugged_title else f"{group}_{save_suffix}_iqm_smoothed"
+    save_path = Path(output_dir) / ext / f"{filename_stem}.{ext}"
     save_path.parent.mkdir(exist_ok=True, parents=True)
     chart.save(str(save_path))
     print(f"Chart saved to: {save_path}")
@@ -1162,15 +1484,19 @@ def main(
         if summary_df.empty:
             print("Warning: unable to generate peak vs. final bar chart (no summary data).")
         else:
-            bar_title = f"{group.replace('_', ' ').title()}: Peak vs Final IQM"
+            bar_title = plot_title if plot_title else f"{group.replace('_', ' ').title()}: Peak vs Final IQM"
             bar_chart_obj = create_peak_final_bar_chart(
-                summary_df, bar_title, metric_label
+                summary_df,
+                bar_title,
+                metric_label,
+                base_text_size=base_text_size,
             )
-            bar_save_path = (
-                Path(output_dir)
-                / ext
-                / f"{group}_{save_suffix}_peak_vs_final_bar.{ext}"
+            bar_filename_stem = (
+                f"{slugged_title}_peak_vs_final_bar"
+                if slugged_title
+                else f"{group}_{save_suffix}_peak_vs_final_bar"
             )
+            bar_save_path = Path(output_dir) / ext / f"{bar_filename_stem}.{ext}"
             bar_save_path.parent.mkdir(exist_ok=True, parents=True)
             bar_chart_obj.save(str(bar_save_path))
             print(f"Summary bar chart saved to: {bar_save_path}")
