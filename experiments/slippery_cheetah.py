@@ -1,3 +1,9 @@
+import os
+
+os.environ["XLA_FLAGS"] = "--xla_gpu_graph_min_graph_size=1 --xla_gpu_triton_gemm_any=True"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
+
 import time
 from dataclasses import dataclass, field
 from typing import Literal
@@ -37,8 +43,11 @@ class Args:
     exclude: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
 
+    layer_norm: bool = False
+    layer_norm_type: Literal["ln", "rmsnorm"] = "ln"
 
-def run_all_slippery_ant():
+
+def run_all_slippery_cheetah():
     args = tyro.cli(Args)
 
     if args.wandb_mode != "disabled":
@@ -46,7 +55,7 @@ def run_all_slippery_ant():
         assert args.wandb_entity is not None
 
     optimizers = {
-        "adam": AdamConfig(learning_rate=1e-3),
+        "standard": AdamConfig(learning_rate=1e-3),
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
             update_frequency=1000,
@@ -58,12 +67,12 @@ def run_all_slippery_ant():
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.99,
-            replacement_rate=0.015,
-            sharpness=16,
-            threshold=1,
+            decay_rate=0.9,
+            # replacement_rate=0.01,
+            sharpness=10,
+            threshold=0.5,
             update_frequency=1000,
-            transform_type="sigmoid",
+            transform_type="linear",
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
@@ -113,10 +122,12 @@ def run_all_slippery_ant():
                     network=MLPConfig(
                         num_layers=4,
                         hidden_size=32,
-                        output_size=8,
+                        output_size=6,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                     std_type=StdType.MLP_HEAD,
                 ),
@@ -129,6 +140,8 @@ def run_all_slippery_ant():
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
+                        layer_norm=args.layer_norm,
+                        layer_norm_type=args.layer_norm_type,
                     ),
                 ),
                 num_rollout_steps=2048 * 32 * 3,
@@ -142,17 +155,17 @@ def run_all_slippery_ant():
                 normalize_advantages=True,
             ),
             env_cfg=EnvConfig(
-                "slippery_ant", num_envs=2048, num_tasks=20, episode_length=1000
+                "slippery_cheetah", num_envs=2048, num_tasks=20, episode_length=1000
             ),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_new_{args.seed}",
+                run_name=f"{opt_name}_cheetah_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_ant_full2",
+                group="slippery_cheetah",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
@@ -165,7 +178,7 @@ def run_all_slippery_ant():
 
 
 if __name__ == "__main__":
-    run_all_slippery_ant()
+    run_all_slippery_cheetah()
 
 #     num_rollout_steps=2048 * 32 * 5,
 #     num_epochs=4,
@@ -178,5 +191,5 @@ if __name__ == "__main__":
 #     normalize_advantages=True,
 # ),
 # env_cfg=EnvConfig(
-#     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
+#     "slippery_cheetah", num_envs=4096, num_tasks=20, episode_length=1000
 # ),

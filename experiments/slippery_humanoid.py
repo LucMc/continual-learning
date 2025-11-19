@@ -1,11 +1,10 @@
 import time
-from dataclasses import field
+from dataclasses import dataclass, field
 from typing import Literal
 
 import jax
 import jax.numpy as jnp
 import tyro
-from chex import dataclass
 
 from continual_learning.configs import (
     AdamConfig,

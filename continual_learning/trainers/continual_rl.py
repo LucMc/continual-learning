@@ -497,11 +497,17 @@ class JittedContinualPPOTrainer(PPO):
 
                 episode_infos = infos["episode_metrics"]
                 dones = infos["episode_done"].astype(bool)
-                episode_logs = {
-                    "charts/num_episodes": dones.sum(),
-                    "charts/mean_episodic_length": infos["steps"][dones].mean(),
-                    "charts/mean_episodic_return": episode_infos["sum_reward"][dones].mean(),
-                }
+                num_episodes = int(dones.sum())
+                if num_episodes > 0:
+                    mean_episodic_length = float(infos["steps"][dones].mean())
+                    mean_episodic_return = float(episode_infos["sum_reward"][dones].mean())
+                    episode_logs = {
+                        "charts/num_episodes": num_episodes,
+                        "charts/mean_episodic_length": mean_episodic_length,
+                        "charts/mean_episodic_return": mean_episodic_return,
+                    }
+                else:
+                    episode_logs = {}
                 sps = {
                     "charts/SPS": (self.total_steps - self.start_step)
                     / (time.time() - start_time)

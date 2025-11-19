@@ -1,16 +1,23 @@
 # pyright: reportAttributeAccessIssue=false
-from typing import Generator
+from typing import Any, Generator
 
 import jax
 import jax.numpy as jnp
 import mujoco
+import mujoco_playground as mjp
 import numpy as np
 from brax import envs as brax_envs
 from brax.envs.ant import Ant
+from brax.envs.base import PipelineEnv
 from brax.envs.humanoid import Humanoid
-from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from etils import epath
+from mujoco import mjx
+from mujoco_playground._src.dm_control_suite.cheetah import Run as CheetahRun
+from mujoco_playground._src.dm_control_suite.cheetah import (
+    default_config as default_cheetah_config,
+)
+from mujoco_playground._src.mjx_env import MjxEnv
 
 from continual_learning.configs.envs import EnvConfig
 from continual_learning.envs.base import (
@@ -20,6 +27,23 @@ from continual_learning.envs.base import (
     Timestep,
 )
 from continual_learning.types import Action, EnvState, Observation
+
+State = Any
+
+
+class SlipperyCheetah(CheetahRun):
+    def __init__(
+        self, friction: float = 0.4, config=default_cheetah_config(), config_overrides=None
+    ):
+        super().__init__(config, config_overrides)
+
+        floor_geom_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_GEOM, "ground")
+        if floor_geom_id == -1:
+            raise ValueError("Cheetah MJCF missing geom named 'floor'.")
+
+        self._mj_model.geom_friction[floor_geom_id] = np.array([friction, 0.1, 0.1])
+        self._mjx_model = mjx.put_model(self._mj_model, impl=self._config.impl)  # pyright: ignore[reportArgumentType]
+        self._post_init()
 
 
 class SlipperyHumanoid(Humanoid):
@@ -160,17 +184,24 @@ class JittableVectorEnvWrapper(JittableVectorEnv):
     def __init__(
         self,
         seed: int,
-        env: PipelineEnv,
+        env: PipelineEnv | MjxEnv,
         num_envs: int,
         episode_length: int,
         env_checkpoint: EnvState | None = None,
         reward_gain: float = 1.0,
     ):
-        envs = brax_envs.training.wrap(
-            env,
-            episode_length=episode_length,
-            action_repeat=1,
-        )
+        if isinstance(env, PipelineEnv):
+            envs = brax_envs.training.wrap(
+                env,
+                episode_length=episode_length,
+                action_repeat=1,
+            )
+        elif isinstance(env, MjxEnv):
+            envs = mjp.wrapper.wrap_for_brax_training(
+                env,
+                episode_length=episode_length,
+                action_repeat=1,
+            )
 
         self.envs = envs
         self.key = jax.random.split(jax.random.PRNGKey(seed), num_envs)
@@ -322,4 +353,66 @@ class ContinualHumanoid(JittableContinualLearningEnv):
     @property
     def action_dim(self) -> int:
         env = SlipperyHumanoid(friction=self.frictions[0])
+        return env.action_size
+
+
+class ContinualCheetah(JittableContinualLearningEnv):
+    def __init__(self, seed: int, config: EnvConfig):
+        self._num_envs = config.num_envs
+        self._episode_length = config.episode_length
+
+        rng = np.random.default_rng(seed)
+        self.seed = seed
+        low, high = np.log10(0.02), np.log10(2.0)
+        self.frictions = np.pow(10, rng.uniform(low=low, high=high, size=config.num_tasks))
+        self.current_task = 0
+        self.saved_envs: JittableVectorEnv | None = None
+        self.reward_gain = 10.0
+        self.impl = "warp"
+
+    @property
+    def tasks(self) -> Generator[JittableVectorEnv, None, None]:
+        for task in range(self.current_task, len(self.frictions)):
+            self.current_task = task
+            yield self._get_task(task, self.saved_envs)
+            self.saved_envs = None
+
+    def save(self, env_state: EnvState) -> dict:
+        return {"current_task": self.current_task, "env_state": env_state}
+
+    def load(self, checkpoint: dict):
+        self.current_task = checkpoint["current_task"]
+        self.saved_env_state = checkpoint["env_state"]
+
+    def _get_task(self, task_id: int, env_checkpoint: EnvState) -> JittableVectorEnv:
+        friction = self.frictions[task_id]
+        return self._make_envs(friction, env_checkpoint)
+
+    def _make_envs(self, friction: float, env_checkpoint: EnvState) -> JittableVectorEnv:
+        return JittableVectorEnvWrapper(
+            seed=self.seed,
+            env=SlipperyCheetah(friction=friction, config_overrides={"impl": self.impl}),
+            num_envs=self.num_envs,
+            episode_length=self._episode_length,
+            env_checkpoint=env_checkpoint,
+            reward_gain=self.reward_gain,
+        )
+
+    @property
+    def num_envs(self) -> int:
+        return self._num_envs
+
+    def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float] | None:
+        # TODO:
+        del agent, forgetting
+        return None
+
+    @property
+    def observation_spec(self) -> jax.ShapeDtypeStruct:
+        env = SlipperyCheetah()
+        return jax.ShapeDtypeStruct((1, env.observation_size), jnp.float32)
+
+    @property
+    def action_dim(self) -> int:
+        env = SlipperyCheetah()
         return env.action_size
