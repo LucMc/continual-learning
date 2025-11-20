@@ -172,15 +172,85 @@ def slugify_title(value: str) -> str:
     return sanitized.lower() or "plot"
 
 
-def fetch_runs(entity: str, project: str, group: str):
+def fetch_runs(entity: str, project: str, group: str, created_after: Optional[str] = None, include_failed: bool = False):
     api = wandb.Api()
     runs = list(api.runs(f"{entity}/{project}", filters={"group": group}, per_page=300))
-    print(f"Fetched {len(runs)} runs, {len([r for r in runs if r.state == 'finished'])} finished")
-    return [r for r in runs if r.state == "finished"]
+
+    # Filter by state
+    if include_failed:
+        valid_runs = [r for r in runs if r.state in ["finished", "failed"]]
+    else:
+        valid_runs = [r for r in runs if r.state == "finished"]
+
+    # Filter by creation date if specified
+    if created_after:
+        from datetime import datetime, timezone
+        # Parse cutoff date - add timezone if not present
+        if 'T' in created_after:
+            cutoff_date = datetime.fromisoformat(created_after.replace('Z', '+00:00'))
+        else:
+            # Assume midnight UTC for date-only strings
+            cutoff_date = datetime.fromisoformat(created_after + "T00:00:00+00:00")
+
+        filtered_runs = []
+        for run in valid_runs:
+            # Parse run date and ensure it has timezone info
+            run_date_str = run.created_at
+            if isinstance(run_date_str, str):
+                run_date = datetime.fromisoformat(run_date_str.replace('Z', '+00:00'))
+            else:
+                # If it's already a datetime, ensure it has timezone
+                run_date = run_date_str
+                if run_date.tzinfo is None:
+                    run_date = run_date.replace(tzinfo=timezone.utc)
+
+            # Ensure cutoff_date has timezone
+            if cutoff_date.tzinfo is None:
+                cutoff_date = cutoff_date.replace(tzinfo=timezone.utc)
+
+            if run_date >= cutoff_date:
+                filtered_runs.append(run)
+
+        status_msg = "finished/failed" if include_failed else "finished"
+        print(f"Fetched {len(runs)} runs, {len(valid_runs)} {status_msg}, {len(filtered_runs)} after {created_after}")
+        return filtered_runs
+
+    status_msg = "finished/failed" if include_failed else "finished"
+    print(f"Fetched {len(runs)} runs, {len(valid_runs)} {status_msg}")
+    return valid_runs
 
 
-def fetch_ablation_data(entity: str, project: str, group: str, metric: str, split_by: Optional[str] = None, show_metric_in_legend: bool = False) -> pd.DataFrame:
-    runs = fetch_runs(entity, project, group)
+def format_hyperparameter_value(value, force_scientific: bool = False) -> str:
+    """Format hyperparameter values consistently for display and grouping.
+
+    Args:
+        value: The hyperparameter value to format
+        force_scientific: If True, use scientific notation for all numeric values
+    """
+    if isinstance(value, (int, np.integer)):
+        if force_scientific and value != 0:
+            return f"{float(value):.0e}"
+        return str(int(value))
+    elif isinstance(value, (float, np.floating)):
+        # Handle zero specially to avoid '0e+00' formatting
+        if value == 0.0:
+            return "0"
+        if force_scientific:
+            # Use scientific notation for all values
+            return f"{value:.0e}"
+        # Use scientific notation for very small or large numbers
+        if abs(value) < 0.0001 or abs(value) >= 10000:
+            return f"{value:.0e}"  # e.g., "1e-06", "1e+04"
+        else:
+            # Standard notation, removing trailing zeros
+            formatted = f"{value:.6f}".rstrip('0').rstrip('.')
+            return formatted
+    else:
+        return str(value)
+
+
+def fetch_ablation_data(entity: str, project: str, group: str, metric: str, split_by: Optional[str] = None, show_metric_in_legend: bool = False, created_after: Optional[str] = None, force_scientific: bool = False, include_failed: bool = False) -> pd.DataFrame:
+    runs = fetch_runs(entity, project, group, created_after, include_failed)
     run_data = []
 
     for run in runs:
@@ -208,8 +278,9 @@ def fetch_ablation_data(entity: str, project: str, group: str, metric: str, spli
 
         normalized_values = df.apply(normalized_split_value, axis=1)
 
-        normalized_str = normalized_values.astype(str)
-        df['group'] = normalized_str.apply(lambda value: f"r={value}" if show_metric_in_legend else value)
+        # Format values consistently for proper grouping and display
+        formatted_values = normalized_values.apply(lambda v: format_hyperparameter_value(v, force_scientific=force_scientific))
+        df['group'] = formatted_values.apply(lambda value: f"{split_by}={value}" if show_metric_in_legend else value)
     else:
         df['group'] = df['algorithm']
 
@@ -530,8 +601,11 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
          chart_width: int = 800,
          chart_height: int = 400,
          line_width: float = 6.0,
-         y_tick_count: Optional[int] = None):
-    df = fetch_ablation_data(wandb_entity, wandb_project, group, metric, split_by, show_metric_in_legend)
+         y_tick_count: Optional[int] = None,
+         created_after: Optional[str] = None,
+         scientific_labels: bool = False,
+         include_failed: bool = False):
+    df = fetch_ablation_data(wandb_entity, wandb_project, group, metric, split_by, show_metric_in_legend, created_after, scientific_labels, include_failed)
     if df.empty: return print(f"No data found for group: '{group}'")
 
     agg_df = aggregate_data(df, grouping_mode)

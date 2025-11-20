@@ -364,19 +364,11 @@ def compute_iqm(values: np.ndarray) -> float:
     return np.mean(values[mask]) if np.any(mask) else np.mean(values)
 
 
-def fetch_runs(entity: str, project: str, group: str, name_pattern: Optional[str] = None):
+def fetch_runs(entity: str, project: str, group: str):
     api = wandb.Api()
     runs = list(api.runs(f"{entity}/{project}", filters={"group": group}, per_page=300))
     finished = [r for r in runs if r.state == "finished"]
-
-    # Filter by name pattern if provided
-    if name_pattern:
-        import fnmatch
-        finished = [r for r in finished if fnmatch.fnmatch(r.name, name_pattern)]
-        print(f"Fetched {len(runs)} runs, {len(finished)} finished matching pattern '{name_pattern}'")
-    else:
-        print(f"Fetched {len(runs)} runs, {len(finished)} finished")
-
+    print(f"Fetched {len(runs)} runs, {len(finished)} finished")
     return finished
 
 
@@ -466,9 +458,8 @@ def fetch_and_process_data(
     normalize_networks: bool = False,
     split_by: Optional[str] = None,
     algorithm_name: Optional[str] = None,
-    name_pattern: Optional[str] = None,
 ) -> pd.DataFrame:
-    runs = fetch_runs(entity, project, group, name_pattern)
+    runs = fetch_runs(entity, project, group)
 
     # Handle single metric or list of metrics
     if isinstance(metrics, str):
@@ -1398,7 +1389,6 @@ def main(
     normalize_networks: bool = False,
     split_by: Optional[str] = None,
     algorithm_name: Optional[str] = None,
-    name_pattern: Optional[str] = None,
     plot_title: Optional[str] = None,
     output_dir: str = "./plots",
     ext: str = "png",
@@ -1465,7 +1455,6 @@ def main(
         normalize_networks,
         split_by,
         algorithm_name,
-        name_pattern,
     )
     if df.empty:
         return print(f"No data found for group: '{group}'")

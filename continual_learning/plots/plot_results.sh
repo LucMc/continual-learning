@@ -18,7 +18,7 @@
      # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics srank_hidden --combine-networks --output-dir plots/main/combined/unnorm --ext png --plot-title "S-rank" --no-show-iqr
      
  # Perm MNIST
- # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png
+ # python analyze.py $WANDB_CFG --group perm_mnist --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png --x-axis-max 2 --y-min 0.90 --no-show-iqr
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/actor_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_linearised_neurons/total_ratio --output-dir plots/perm_mnist --ext png
@@ -125,7 +125,7 @@
      ## python analyze.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_transforms --metrics srank_hidden --combine-networks --output-dir plots/main/combined --ext png --normalize-networks --plot-title "S-rank transforms" --no-show-iqr     
  
  # Slippery Humanoid
- python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metric charts/mean_episodic_return --output-dir plots/humanoid --ext png --bar-chart --plot-title "Mean Episodic Return" --no-show-iqr
+ # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metric charts/mean_episodic_return --output-dir plots/humanoid --ext png --bar-chart --plot-title "Mean Episodic Return" --no-show-iqr
  # python analyze.py $WANDB_CFG --group slippery_humanoid_test --wandb_project crl_experiments --metric charts/mean_episodic_return --output-dir plots/humanoid --ext png --bar-chart
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_experiments --metric charts/mean_episodic_return --output-dir plots/humanoid --ext png --bar-chart --plot-title "Episodic Return"
  
@@ -141,3 +141,6 @@
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metrics dormant --combine-networks --output-dir plots/humanoid --ext png --plot-title "Dormant Neurons" --no-show-iqr
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metrics linearized --combine-networks --output-dir plots/humanoid --ext png --plot-title "Linearized Neurons" --no-show-iqr
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metrics gradient_norm --combine-networks --output-dir plots/humanoid --ext png --plot-title "Gradient Norm" --no-show-iqr
+ # Threshold ablation
+  python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_humanoid --group luc_humanoid_tau --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_br_adam_sb_lr_smaller_net_*" --pattern-2 "ccbp_bigger_rollout_new_hparams_*" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyHumanoid threshold comparison"
+  python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_final --group ant_tau_1 --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_smaller_*" --pattern-2 "ccbp_s*-copy" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyAnt threshold comparison"
