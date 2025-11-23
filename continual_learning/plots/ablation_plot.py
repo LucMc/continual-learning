@@ -55,6 +55,10 @@ RENAME_LEGEND = {"exp": "Exponential",
           "linear": "Linear",
           "softplus": "Softplus"}
 
+PARAMETER_SYMBOLS = {
+    "replacement_rate": "ρ",
+}
+
 ALGORITHM_LEGEND_ORDER = [
     "CCBP",
     "CCBP",
@@ -280,7 +284,9 @@ def fetch_ablation_data(entity: str, project: str, group: str, metric: str, spli
 
         # Format values consistently for proper grouping and display
         formatted_values = normalized_values.apply(lambda v: format_hyperparameter_value(v, force_scientific=force_scientific))
-        df['group'] = formatted_values.apply(lambda value: f"{split_by}={value}" if show_metric_in_legend else value)
+        # Use symbol notation if available (e.g., ρ for replacement_rate)
+        param_name = PARAMETER_SYMBOLS.get(split_by, split_by)
+        df['group'] = formatted_values.apply(lambda value: f"{param_name}={value}" if show_metric_in_legend else value)
     else:
         df['group'] = df['algorithm']
 

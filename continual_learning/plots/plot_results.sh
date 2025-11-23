@@ -107,7 +107,7 @@
  # Ablations
      # CCBP
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_transforms --metric charts/mean_episodic_return --grouping-mode parameter --split-by transform_type --ext png --output-dir plots/ablations/ccbp --plot-title "Transformation Function Comparison" --no-show-iqr --no-show-metric-in-legend
-     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group ccbp_replacement_rate --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp --plot-title "Stability-Plastiticy Tuning" --no-show-iqr --y-tick-count 6
+     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group ccbp_replacement_rate --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp --plot-title "Stability-Plastiticy Tuning" --no-show-iqr --y-tick-count 6
      
      # Combined
      # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric dormant --combine-networks --output-dir plots/main/combined/unnorm --ext png --plot-title "Dormant Neurons" --no-show-iqr
@@ -142,5 +142,5 @@
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metrics linearized --combine-networks --output-dir plots/humanoid --ext png --plot-title "Linearized Neurons" --no-show-iqr
  # python analyze.py $WANDB_CFG --group slippery_humanoid_full6 --wandb_project crl_humanoid --metrics gradient_norm --combine-networks --output-dir plots/humanoid --ext png --plot-title "Gradient Norm" --no-show-iqr
  # Threshold ablation
-  python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_humanoid --group luc_humanoid_tau --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_br_adam_sb_lr_smaller_net_*" --pattern-2 "ccbp_bigger_rollout_new_hparams_*" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyHumanoid threshold comparison"
-  python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_final --group ant_tau_1 --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_smaller_*" --pattern-2 "ccbp_s*-copy" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyAnt threshold comparison"
+  # python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_humanoid --group luc_humanoid_tau --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_br_adam_sb_lr_smaller_net_*" --pattern-2 "ccbp_bigger_rollout_new_hparams_*" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyHumanoid threshold comparison"
+  # python compare_thresholds.py --wandb-entity lucmc --wandb-project crl_final --group ant_tau_1 --metric charts/mean_episodic_return --threshold-1 1.0 --threshold-2 0.95 --pattern-1 "ccbp_smaller_*" --pattern-2 "ccbp_s*-copy" --bar-chart --base-text-size 20.0 --y-min -2000 --plot-title "SlipperyAnt threshold comparison"

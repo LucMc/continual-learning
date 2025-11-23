@@ -116,6 +116,8 @@ ALGORITHM_DISPLAY_NAMES = {
     "redo_bigger_rollout": "ReDo",
     "shrink_and_perturb_bigger_rollout": "Shrink & Perturb",
     "soft_shrink_and_perturb_bigger_rollout": "Soft Shrink & Perturb",
+    "shrink_and_perturb_br_adam_sb_lr_smaller_net": "Soft Shrink & Perturb",
+    "shrink_and_perturb_smaller": "Soft Shrink & Perturb",
     "standard_bigger_rollout": "Adam"
 }
 
@@ -791,6 +793,17 @@ def fetch_and_process_data(
     return df
 
 
+def get_algorithm_render_order(algorithm: str) -> int:
+    """Determine rendering order for algorithms. Higher values are drawn later (on top).
+
+    CCBP should always be drawn last to appear in the foreground.
+    """
+    algo_upper = algorithm.upper()
+    if "CCBP" in algo_upper:
+        return 1000  # Draw CCBP last (foreground)
+    return 0  # Draw other algorithms first (background)
+
+
 def create_chart(
     df: pd.DataFrame,
     metrics: Union[str, List[str]],
@@ -815,6 +828,12 @@ def create_chart(
 
     if isinstance(metrics, str):
         metrics = [metrics]
+
+    # Sort dataframe to ensure CCBP is drawn last (appears in foreground)
+    df = df.copy()
+    df["_render_order"] = df["algorithm"].apply(get_algorithm_render_order)
+    df = df.sort_values(["_render_order", "algorithm", "metric", "step"])
+    df = df.drop(columns=["_render_order"])
 
     axis_label_large = scaled_font_size(base_text_size, 1.5)
     axis_label_default = scaled_font_size(base_text_size, 1.0)
@@ -1157,9 +1176,14 @@ def create_peak_final_bar_chart(
     if "metric" not in df.columns:
         df["metric"] = metric_label
 
+    # Sort to ensure consistent ordering with line charts (CCBP last)
+    df["_render_order"] = df["algorithm"].apply(get_algorithm_render_order)
+    df = df.sort_values(["_render_order", "algorithm"])
+    df = df.drop(columns=["_render_order"])
+
     axis_label_size = scaled_font_size(base_text_size, 1.1)
     axis_title_size = scaled_font_size(base_text_size, 1.2)
-    legend_label_size = scaled_font_size(base_text_size, 4.0)
+    legend_label_size = scaled_font_size(base_text_size, 1.1)  # Match axis label size
     legend_title_size = scaled_font_size(base_text_size, 1.2)
     legend_symbol_size = scaled_font_size(base_text_size, 12.5)
     legend_label_limit = max(220, int(round(base_text_size * 12)))
@@ -1246,18 +1270,17 @@ def create_peak_final_bar_chart(
 
     color_scale = alt.Scale(domain=["Final", "Peak"], range=["#1f77b4", "#ff7f0e"])
     legend = alt.Legend(
-        title="Stage", orient="top", direction="horizontal",
+        title=None,
+        orient="top",
+        direction="horizontal",
         padding=10,
         labelFontSize=legend_label_size,
         labelFontWeight="bold",
-        titleFontSize=legend_title_size,
-        titleFontWeight="bold",
         symbolSize=legend_symbol_size,
         values=["Final", "Peak"],
         labelLimit=legend_label_limit,
         labelPadding=8,
         labelFont=ALT_FONT_FAMILY,
-        titleFont=ALT_FONT_FAMILY,
     )
 
     x = alt.X(
