@@ -124,10 +124,10 @@ def run_all_slippery_ant():
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_new_{args.seed}",
+                run_name=f"{opt_name}_cbp_stats_ant_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_ant_full2",
+                group="slippery_ant_cbp_stats",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),

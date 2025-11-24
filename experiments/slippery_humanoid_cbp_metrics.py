@@ -128,10 +128,10 @@ def run_all_slippery_humanoid():
                 steps_per_task=20_000_000,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"{opt_name}_larger_rollout_{args.seed}",
+                run_name=f"{opt_name}_cbp_stats_humanoid_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="slippery_humanoid_full6",
+                group="slippery_humanoid_cbp_stats",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
