@@ -49,6 +49,9 @@ class CNNConfig(struct.PyTreeNode):
     use_bias: bool = True
     dtype: jnp.dtype = jnp.bfloat16
 
+    layer_norm: bool = False
+    layer_norm_type: Literal["ln", "rmsnorm"] = "ln"
+
 
 @struct.dataclass(frozen=True)
 class ResNetConfig(struct.PyTreeNode):

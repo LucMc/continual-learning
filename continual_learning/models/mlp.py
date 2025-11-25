@@ -21,7 +21,7 @@ class MLP(nn.Module):
         )
 
         for i in range(self.config.num_layers):
-            if self.config.layer_norm:
+            if self.config.layer_norm and i > 0:
                 match self.config.layer_norm_type:
                     case "ln":
                         x = nn.LayerNorm()(x)
