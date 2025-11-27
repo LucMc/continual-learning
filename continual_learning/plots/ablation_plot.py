@@ -57,6 +57,7 @@ RENAME_LEGEND = {"exp": "Exponential",
 
 PARAMETER_SYMBOLS = {
     "replacement_rate": "ρ",
+    "sharpness": "κ",
 }
 
 ALGORITHM_LEGEND_ORDER = [
@@ -84,12 +85,38 @@ def _algorithm_legend_sort_key(label: str) -> tuple[int, str]:
     return order_index, label
 
 
-def build_algorithm_legend_domain(labels: Iterable[str]) -> List[str]:
+def _extract_numeric_from_label(label: str) -> Optional[float]:
+    """Extract numeric value from a parameter label like 'ρ=0.1' or '0.1'."""
+    if '=' in label:
+        # Extract value after '='
+        value_str = label.split('=', 1)[1].split(',')[0].strip()
+    else:
+        value_str = label.strip()
+
+    try:
+        # Try to parse as float
+        return float(value_str)
+    except ValueError:
+        return None
+
+
+def _parameter_value_sort_key(label: str) -> tuple[float, str]:
+    """Sort by numeric value, then by label for ties."""
+    numeric_value = _extract_numeric_from_label(label)
+    if numeric_value is not None:
+        return (numeric_value, label)
+    # If no numeric value found, put at the end
+    return (float('inf'), label)
+
+
+def build_algorithm_legend_domain(labels: Iterable[str], sort_by_value: bool = False) -> List[str]:
     cleaned = {
         label.strip(): None
         for label in labels
         if isinstance(label, str) and label.strip()
     }
+    if sort_by_value:
+        return sorted(cleaned.keys(), key=_parameter_value_sort_key)
     return sorted(cleaned.keys(), key=_algorithm_legend_sort_key)
 
 
@@ -458,6 +485,7 @@ def create_ablation_chart(
     chart_height: int = 400,
     line_width: float = 3.0,
     y_tick_count: Optional[int] = None,
+    sort_by_value: bool = False,
 ) -> alt.Chart:
     chart_df = create_short_labels(df, use_short_labels)
     group_col = 'short_group' if use_short_labels and 'short_group' in chart_df.columns else 'group'
@@ -492,7 +520,23 @@ def create_ablation_chart(
     else:
         x_scale = alt.Scale(domain=[0, 1.0], nice=True)
 
-    legend_domain = build_algorithm_legend_domain(chart_df[group_col])
+    # When sorting by value, always use the original 'group' column to extract numeric values
+    # Then map to display column (short_group or group) while preserving sorted order
+    if sort_by_value:
+        if use_short_labels and 'short_group' in chart_df.columns:
+            # Create mapping from group to short_group, keeping only unique mappings
+            group_to_display = {}
+            for g, sg in zip(chart_df['group'], chart_df['short_group']):
+                group_to_display[g] = sg
+            # Sort original groups by numeric value
+            sorted_groups = sorted(set(chart_df['group']), key=_parameter_value_sort_key)
+            # Map to short labels while preserving order
+            legend_domain = [group_to_display[g] for g in sorted_groups if g in group_to_display]
+        else:
+            # Sort by numeric value using the group column
+            legend_domain = sorted(set(chart_df[group_col]), key=_parameter_value_sort_key)
+    else:
+        legend_domain = build_algorithm_legend_domain(chart_df[group_col], sort_by_value=False)
     color_legend = alt.Legend(
         title=None,
         symbolOpacity=1.0,
@@ -610,7 +654,8 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
          y_tick_count: Optional[int] = None,
          created_after: Optional[str] = None,
          scientific_labels: bool = False,
-         include_failed: bool = False):
+         include_failed: bool = False,
+         sort_by_value: bool = False):
     df = fetch_ablation_data(wandb_entity, wandb_project, group, metric, split_by, show_metric_in_legend, created_after, scientific_labels, include_failed)
     if df.empty: return print(f"No data found for group: '{group}'")
 
@@ -660,6 +705,7 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
         chart_height=chart_height,
         line_width=line_width,
         y_tick_count=y_tick_count,
+        sort_by_value=sort_by_value,
     )
 
     save_stem = f"{group}_{metric.replace('/', '_')}"

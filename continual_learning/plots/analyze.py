@@ -185,6 +185,8 @@ def slugify_title(value: str) -> str:
 def resolve_metric_labels(metric: str) -> Tuple[str, str]:
     """Return a human-readable title and y-axis label for a metric key."""
 
+    # Remove _ci suffix if present (confidence interval notation)
+    metric_clean = metric.replace("_ci", "").replace("_CI", "")
     normalized_variant = metric.endswith("_normalized")
 
     if metric in CUSTOM_METRIC_TITLES:
@@ -209,11 +211,14 @@ def resolve_metric_labels(metric: str) -> Tuple[str, str]:
         metric_name = "Actor Network: Gradient Norm"
     elif "mean_episodic_return" in metric:
         metric_name = "Mean Episode Return"
+    elif "eval_accuracy" in metric_clean:
+        metric_name = "Mean Evaluation Accuracy"
     else:
+        # Use cleaned metric for display to avoid "Ci" suffix
         metric_name = (
-            metric.split("/")[-1].replace("_", " ").title()
-            if "/" in metric
-            else metric.replace("_", " ").title()
+            metric_clean.split("/")[-1].replace("_", " ").title()
+            if "/" in metric_clean
+            else metric_clean.replace("_", " ").title()
         )
 
     if "dormant_neurons" in metric or "linearised_neurons" in metric:
@@ -227,6 +232,8 @@ def resolve_metric_labels(metric: str) -> Tuple[str, str]:
         y_label = "Balanced Gradient Norm (Z-Score)" if normalized_variant else "Gradient Norm"
     elif "mean_episodic_return" in metric:
         y_label = "Episode Return"
+    elif "eval_accuracy" in metric:
+        y_label = "Evaluation Accuracy"
     else:
         y_label = "Balanced Score (Z-Score)" if normalized_variant else metric_name
 
@@ -830,9 +837,10 @@ def create_chart(
         metrics = [metrics]
 
     # Sort dataframe to ensure CCBP is drawn last (appears in foreground)
+    # Higher render_order values are drawn later (on top)
     df = df.copy()
     df["_render_order"] = df["algorithm"].apply(get_algorithm_render_order)
-    df = df.sort_values(["_render_order", "algorithm", "metric", "step"])
+    df = df.sort_values(["_render_order", "algorithm", "metric", "step"], ascending=[True, True, True, True])
     df = df.drop(columns=["_render_order"])
 
     axis_label_large = scaled_font_size(base_text_size, 1.5)
@@ -1157,6 +1165,7 @@ def create_peak_final_bar_chart(
     metric_label: str,
     base_text_size: float = 20.0,
     log_scale: bool = False,
+    show_iqr: bool = True,
 ) -> alt.Chart:
     """
     Grouped bar chart (Final vs Peak IQM) with robust y-axis:
@@ -1343,29 +1352,30 @@ def create_peak_final_bar_chart(
         ],
     )
 
-    rules = base.mark_rule(clip=True).encode(
+    rules = base.mark_rule(clip=True, color="black").encode(
         x=x, xOffset=x_off,
         y=alt.Y("lower:Q", scale=y_scale),
         y2=alt.Y2("upper:Q"),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    lower_caps = base.mark_tick(thickness=2, size=tick_size, clip=True).encode(
+    lower_caps = base.mark_tick(thickness=2, size=tick_size, clip=True, color="black").encode(
         x=x, xOffset=x_off,
         y=alt.Y("lower:Q", scale=y_scale),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    upper_caps = base.mark_tick(thickness=2, size=tick_size, clip=True).encode(
+    upper_caps = base.mark_tick(thickness=2, size=tick_size, clip=True, color="black").encode(
         x=x, xOffset=x_off,
         y=alt.Y("upper:Q", scale=y_scale),
-        color=alt.Color("stage:N", scale=color_scale, legend=None),
         order=order,
     )
 
-    chart = bars# + rules# + lower_caps + upper_caps
+    # Conditionally add IQR error bars
+    if show_iqr:
+        chart = bars + rules + lower_caps + upper_caps
+    else:
+        chart = bars
 
     # Facet if multiple metrics; keep independent y per facet
     if metric_count > 1:
@@ -1557,6 +1567,7 @@ def main(
                 metric_label,
                 base_text_size=base_text_size,
                 log_scale=log_scale,
+                show_iqr=show_iqr,
             )
             bar_filename_stem = (
                 f"{slugged_title}_peak_vs_final_bar"

@@ -18,7 +18,7 @@
      # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metrics srank_hidden --combine-networks --output-dir plots/main/combined/unnorm --ext png --plot-title "S-rank" --no-show-iqr
      
  # Perm MNIST
- # python analyze.py $WANDB_CFG --group perm_mnist --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png --x-axis-max 2 --y-min 0.90 --no-show-iqr
+ # python analyze.py $WANDB_CFG --group perm_mnist --wandb_project crl_final --metric metrics/eval_accuracy_ci --output-dir plots/perm_mnist --ext png --x-axis-max 2 --y-min 0.90 --no-show-iqr --plot-title "Mean Evaluation Accuracy"
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/actor_dormant_neurons/total_ratio --output-dir plots/perm_mnist --ext png
  # python analyze.py $WANDB_CFG --group perm_mnist_final --wandb_project crl_final --metric nn/value_linearised_neurons/total_ratio --output-dir plots/perm_mnist --ext png
@@ -79,7 +79,7 @@
     
 ################################################################################################################################################################################################################
  # Slippery Ant Results
- # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/main --ext png --bar-chart --plot-title "Mean Episodic Return" --no-show-iqr 
+ python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric charts/mean_episodic_return --output-dir plots/main --ext png --bar-chart --plot-title "Mean Episodic Return"
  
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/value_dormant_neurons/total_ratio --output-dir plots/main --ext png
  # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric nn/actor_dormant_neurons/total_ratio --output-dir plots/main --ext png
@@ -107,8 +107,9 @@
  # Ablations
      # CCBP
      # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_transforms --metric charts/mean_episodic_return --grouping-mode parameter --split-by transform_type --ext png --output-dir plots/ablations/ccbp --plot-title "Transformation Function Comparison" --no-show-iqr --no-show-metric-in-legend
-     python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group ccbp_replacement_rate --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp --plot-title "Stability-Plastiticy Tuning" --no-show-iqr --y-tick-count 6
-     
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group ccbp_replacement_rate --metric charts/mean_episodic_return --grouping-mode parameter --split-by replacement_rate --ext png --output-dir plots/ablations/ccbp --plot-title "Stability-Plasticity Tuning" --no-show-iqr --y-tick-count 6
+     # python ablation_plot.py --wandb-entity lucmc --wandb_project crl_experiments --group slippery_ant_ccbp_sharpness_sweep --metric charts/mean_episodic_return --grouping-mode parameter --split-by sharpness --ext png --output-dir plots/ablations/ccbp --plot-title "Sharpness Ablation" --no-show-iqr --sort-by-value
+
      # Combined
      # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric dormant --combine-networks --output-dir plots/main/combined/unnorm --ext png --plot-title "Dormant Neurons" --no-show-iqr
      # python analyze.py $WANDB_CFG --group ccbp_server --wandb_project crl_final --metric linearized --combine-networks --output-dir plots/main/combined/unnorm --ext png --plot-title "Linearized Neurons" --no-show-iqr
