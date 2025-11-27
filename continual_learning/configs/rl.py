@@ -47,6 +47,7 @@ class PPOConfig(struct.PyTreeNode):
     num_gradient_steps: int = 32
     num_epochs: int = 16
     num_rollout_steps: int = 100_000
+    neuron_logs_batch_size: int = 16384
 
     reset_normalizer_on_task_change: bool = False
     """Flag to reset the observation normalisation params on task change.

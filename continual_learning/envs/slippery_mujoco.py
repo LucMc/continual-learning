@@ -1,4 +1,5 @@
 # pyright: reportAttributeAccessIssue=false
+from functools import partial
 from typing import Any, Generator
 
 import jax
@@ -17,6 +18,7 @@ from mujoco_playground._src.dm_control_suite.cheetah import Run as CheetahRun
 from mujoco_playground._src.dm_control_suite.cheetah import (
     default_config as default_cheetah_config,
 )
+from mujoco_playground._src.dm_control_suite.humanoid import Humanoid as MjpHumanoid
 from mujoco_playground._src.mjx_env import MjxEnv
 
 from continual_learning.configs.envs import EnvConfig
@@ -415,4 +417,65 @@ class ContinualCheetah(JittableContinualLearningEnv):
     @property
     def action_dim(self) -> int:
         env = SlipperyCheetah()
+        return env.action_size
+
+
+class HumanoidStand(JittableContinualLearningEnv):
+    def __init__(self, seed: int, config: EnvConfig):
+        self._num_envs = config.num_envs
+        self._episode_length = config.episode_length
+
+        self.seed = seed
+        self.num_tasks = config.num_tasks
+        self.current_task = 0
+        self.saved_envs: JittableVectorEnv | None = None
+        self.reward_gain = 10.0
+        self._env_create_fn = partial(MjpHumanoid, move_speed=0.0)
+        self.impl = "jax"
+
+    @property
+    def tasks(self) -> Generator[JittableVectorEnv, None, None]:
+        for task in range(self.current_task, self.num_tasks):
+            self.current_task = task
+            yield self._get_task(task, self.saved_envs)
+            self.saved_envs = None
+
+    def save(self, env_state: EnvState) -> dict:
+        return {"current_task": self.current_task, "env_state": env_state}
+
+    def load(self, checkpoint: dict):
+        self.current_task = checkpoint["current_task"]
+        self.saved_env_state = checkpoint["env_state"]
+
+    def _get_task(self, task_id: int, env_checkpoint: EnvState) -> JittableVectorEnv:
+        del task_id
+        return self._make_envs(env_checkpoint)
+
+    def _make_envs(self, env_checkpoint: EnvState) -> JittableVectorEnv:
+        return JittableVectorEnvWrapper(
+            seed=self.seed,
+            env=self._env_create_fn(config_overrides={"impl": self.impl}),
+            num_envs=self.num_envs,
+            episode_length=self._episode_length,
+            env_checkpoint=env_checkpoint,
+            reward_gain=self.reward_gain,
+        )
+
+    @property
+    def num_envs(self) -> int:
+        return self._num_envs
+
+    def evaluate(self, agent: Agent, forgetting: bool = False) -> dict[str, float] | None:
+        # TODO:
+        del agent, forgetting
+        return None
+
+    @property
+    def observation_spec(self) -> jax.ShapeDtypeStruct:
+        env = self._env_create_fn()
+        return jax.ShapeDtypeStruct((1, env.observation_size), jnp.float32)
+
+    @property
+    def action_dim(self) -> int:
+        env = self._env_create_fn()
         return env.action_size

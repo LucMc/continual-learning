@@ -275,7 +275,9 @@ class PPO:
             data.values.reshape(-1), value_targets.reshape(-1)
         )
         logs.update(accumulate_concatenated_metrics(metrics))
-        key, neuron_logs = PPO.get_neuron_logs(data, policy, vf, key)
+        key, neuron_logs = PPO.get_neuron_logs(
+            data, policy, vf, key, cfg.neuron_logs_batch_size
+        )
         logs.update(neuron_logs)
 
         return key, policy, vf, logs
