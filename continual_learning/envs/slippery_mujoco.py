@@ -431,7 +431,8 @@ class HumanoidStand(JittableContinualLearningEnv):
         self.saved_envs: JittableVectorEnv | None = None
         self.reward_gain = 10.0
         self._env_create_fn = partial(MjpHumanoid, move_speed=0.0)
-        self.impl = "jax"
+        # self.impl = "jax"
+        self.impl = "warp"
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:

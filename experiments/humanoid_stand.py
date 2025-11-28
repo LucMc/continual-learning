@@ -148,7 +148,7 @@ def run_all_humanoid_stand():
                         layer_norm_type=args.layer_norm_type,
                     ),
                 ),
-                num_rollout_steps=2048 * 32 * 3,
+                num_rollout_steps=2048 * 32,
                 num_epochs=4,
                 num_gradient_steps=32,
                 gamma=0.97,
@@ -159,7 +159,9 @@ def run_all_humanoid_stand():
                 normalize_advantages=True,
                 normalize_observations=True,
             ),
-            env_cfg=EnvConfig("humanoid_stand", num_envs=1, num_tasks=1, episode_length=1000),
+            env_cfg=EnvConfig(
+                "humanoid_stand", num_envs=1024, num_tasks=1, episode_length=1000
+            ),
             train_cfg=RLTrainingConfig(
                 resume=False,
                 steps_per_task=20_000_000,
