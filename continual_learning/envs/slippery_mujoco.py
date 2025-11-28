@@ -11,6 +11,7 @@ from brax import envs as brax_envs
 from brax.envs.ant import Ant
 from brax.envs.base import PipelineEnv
 from brax.envs.humanoid import Humanoid
+from brax.envs.humanoidstandup import HumanoidStandup
 from brax.io import mjcf
 from etils import epath
 from mujoco import mjx
@@ -431,8 +432,9 @@ class HumanoidStand(JittableContinualLearningEnv):
         self.saved_envs: JittableVectorEnv | None = None
         self.reward_gain = 10.0
         self._env_create_fn = partial(MjpHumanoid, move_speed=0.0)
-        # self.impl = "jax"
-        self.impl = "warp"
+        # self._env_create_fn = partial(HumanoidStandup, backend="mjx")
+        self.impl = "jax"
+        # self.impl = "warp"
 
     @property
     def tasks(self) -> Generator[JittableVectorEnv, None, None]:
@@ -456,6 +458,7 @@ class HumanoidStand(JittableContinualLearningEnv):
         return JittableVectorEnvWrapper(
             seed=self.seed,
             env=self._env_create_fn(config_overrides={"impl": self.impl}),
+            # env=self._env_create_fn(),
             num_envs=self.num_envs,
             episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,

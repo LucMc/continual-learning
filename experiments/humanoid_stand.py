@@ -127,6 +127,7 @@ def run_all_humanoid_stand():
                         num_layers=4,
                         hidden_size=32,
                         output_size=21,
+                        # output_size=17,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
@@ -170,7 +171,7 @@ def run_all_humanoid_stand():
                 run_name=f"{opt_name}_humanoid_stand_{args.seed}",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="humanoid_stand",
+                group=f"{opt_name}_humanoid_stand",
                 save=False,  # Disable checkpoints cause it's so fast anyway
                 wandb_mode=args.wandb_mode,
             ),
