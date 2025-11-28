@@ -431,9 +431,9 @@ class HumanoidStand(JittableContinualLearningEnv):
         self.current_task = 0
         self.saved_envs: JittableVectorEnv | None = None
         self.reward_gain = 10.0
-        self._env_create_fn = partial(MjpHumanoid, move_speed=0.0)
-        # self._env_create_fn = partial(HumanoidStandup, backend="mjx")
-        self.impl = "jax"
+        # self._env_create_fn = partial(MjpHumanoid, move_speed=0.0)
+        self._env_create_fn = partial(HumanoidStandup, backend="mjx")
+        # self.impl = "jax"
         # self.impl = "warp"
 
     @property
@@ -457,8 +457,8 @@ class HumanoidStand(JittableContinualLearningEnv):
     def _make_envs(self, env_checkpoint: EnvState) -> JittableVectorEnv:
         return JittableVectorEnvWrapper(
             seed=self.seed,
-            env=self._env_create_fn(config_overrides={"impl": self.impl}),
-            # env=self._env_create_fn(),
+            # env=self._env_create_fn(config_overrides={"impl": self.impl}),
+            env=self._env_create_fn(),
             num_envs=self.num_envs,
             episode_length=self._episode_length,
             env_checkpoint=env_checkpoint,

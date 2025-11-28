@@ -126,8 +126,8 @@ def run_all_humanoid_stand():
                     network=MLPConfig(
                         num_layers=4,
                         hidden_size=32,
-                        output_size=21,
-                        # output_size=17,
+                        # output_size=21,
+                        output_size=17,
                         activation_fn=Activation.Swish,
                         kernel_init=jax.nn.initializers.lecun_normal(),
                         dtype=jnp.float32,
