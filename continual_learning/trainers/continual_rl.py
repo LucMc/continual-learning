@@ -44,6 +44,55 @@ from continual_learning.utils.monitoring import (
 from continual_learning.utils.training import TrainState
 from brax.training.acme import running_statistics
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+
+def process_logs_histograms(logs):
+    """
+    Process logs dict to convert histogram data to W&B format.
+
+    This must be called OUTSIDE JAX traced functions, where we have concrete arrays.
+
+    Args:
+        logs: Dict containing all metrics, potentially including histogram data
+              with keys like "actor/utility_histogram_counts", "value/utility_histogram_counts"
+
+    Returns:
+        Dict with histogram data converted to W&B format
+    """
+    import numpy as np
+
+    processed_logs = dict(logs)
+
+    # Process both actor and value network histograms
+    for network in ["actor", "value"]:
+        counts_key = f"{network}/utility_histogram_counts"
+        edges_key = f"{network}/utility_histogram_edges"
+
+        if counts_key in processed_logs and edges_key in processed_logs:
+            counts = processed_logs.pop(counts_key)
+            edges = processed_logs.pop(edges_key)
+
+            # Convert to numpy (safe now, outside JAX trace)
+            counts_np = np.array(counts)
+            edges_np = np.array(edges)
+
+            # Create W&B histogram if available
+            if WANDB_AVAILABLE:
+                processed_logs[f"{network}/utility_histogram"] = wandb.Histogram(
+                    np_histogram=(counts_np, edges_np)
+                )
+            else:
+                # Fallback: store as lists
+                processed_logs[f"{network}/utility_histogram_counts"] = counts_np.tolist()
+                processed_logs[f"{network}/utility_histogram_edges"] = edges_np.tolist()
+
+    return processed_logs
+
 
 class PPO:
     @staticmethod
@@ -193,6 +242,8 @@ class PPO:
             vf_optim_logs = vf.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
             actor_optim_logs = policy.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
 
+            # Don't process histograms here - we're inside a JAX trace
+            # Keep raw JAX arrays in metrics; process after scan completes
             return total_loss, (
                 {
                     "metrics/total_loss": total_loss,
@@ -403,7 +454,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=jnp.maximum(data.reward, 10),
+                    rewards=jnp.maximum(data.reward, -5),
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
@@ -498,6 +549,9 @@ class JittedContinualPPOTrainer(PPO):
                     obs,
                     env_state,
                 ) = state
+
+                # Process histogram data for W&B logging (must be outside JAX trace)
+                logs = process_logs_histograms(logs)
 
                 episode_infos = infos["episode_metrics"]
                 dones = infos["episode_done"].astype(bool)

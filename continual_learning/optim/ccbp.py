@@ -23,7 +23,14 @@ from continual_learning.optim.cbp import CbpOptimState
 class CcbpOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
-        {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
+        {
+            "std_util": 0.0,
+            "nodes_reset": 0.0,
+            "low_utility": 0,
+            "mean_utils": 0.0,
+            "utility_histogram_counts": jnp.zeros(50),
+            "utility_histogram_edges": jnp.linspace(0.0, 2.0, 51),
+        }
     )
 
 
@@ -176,11 +183,16 @@ def ccbp(
             )
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
 
+            # Compute histogram for utility distribution
+            hist_counts, hist_edges = jnp.histogram(all_utils, bins=50, range=(0.0, 2.0))
+
             _logs = {
                 "std_util": all_utils.std(),
                 "nodes_reset": 0.0,  # state.logs['nodes_reset'],
                 "low_utility": jnp.sum(all_utils < 0.95),
                 "mean_utils": all_utils.mean(),
+                "utility_histogram_counts": hist_counts,
+                "utility_histogram_edges": hist_edges,
             }
 
             new_state = state.replace(
@@ -234,6 +246,10 @@ def ccbp(
             # avg_util = jax.tree.map(lambda v: v.mean(), _utility)
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
+            # Compute histogram for utility distribution (before reset to 1.0)
+            all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
+            hist_counts, hist_edges = jnp.histogram(all_utils, bins=50, range=(0.0, 2.0))
+
             # Logging TODO: Add stats from continuous resetweights
             for layer_name in weights.keys():  # Exclude output layer
                 new_params[layer_name] = {
@@ -250,6 +266,10 @@ def ccbp(
                 _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
 
             _logs["mean_utils"] /= len(reset_logs.keys())  # pyright: ignore[reportArgumentType]
+
+            # Add histogram to logs
+            _logs["utility_histogram_counts"] = hist_counts
+            _logs["utility_histogram_edges"] = hist_edges
 
             # We reset running utilities once used for an update
             # Reset to 1 as this should be the mean of the utility distribution given norm

@@ -249,6 +249,12 @@ def accumulate_concatenated_metrics(metrics: LogDict) -> LogDict:
     for k, v in metrics.items():
         if isinstance(v, Histogram):
             ret[k] = average_histograms_concatenated(v)
+        elif "histogram" in k:
+            # For histogram arrays (counts/edges), take the last value from the scan
+            # to get the final state rather than averaging
+            while v.ndim > 1:
+                v = v[-1]  # Take last from each scan dimension
+            ret[k] = v
         else:
             ret[k] = jnp.mean(v)
     return ret  # pyright: ignore[reportReturnType]
