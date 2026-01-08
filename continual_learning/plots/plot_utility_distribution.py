@@ -23,7 +23,7 @@ from scipy import stats
 
 # Plotting style configuration
 plt.rcParams["font.family"] = "Times New Roman"
-BASE_FONTSIZE = 14
+BASE_FONTSIZE = 20
 COLORS = {
     "utility_hist": "#3498db",  # Blue for utility histogram
     "reset_prob": "#e74c3c",  # Red for reset probability curve
@@ -52,7 +52,7 @@ def fetch_utility_statistics(
     group: str,
     run_name_pattern: str,
     network: str = "value",
-    target_steps: List[int] = [0, 50_000_000, 200_000_000, 400_000_000],
+    target_steps: List[int] = [1_000_000, 50_000_000, 150_000_000, 200_000_000],
 ) -> Tuple[str, List[UtilitySnapshot]]:
     """
     Fetch utility statistics from W&B at specific training steps.
@@ -319,11 +319,11 @@ def plot_utility_panel(
         bin_centers,
         bin_counts,
         width=bin_width,
-        alpha=0.6,
+        alpha=0.7,
         color=COLORS["utility_hist"],
         label="Neuron count",
         edgecolor="white",
-        linewidth=0.5,
+        linewidth=1.0,
     )
 
     # Configure left y-axis (histogram)
@@ -347,7 +347,7 @@ def plot_utility_panel(
         utility_range,
         reset_prob,
         color=COLORS["reset_prob"],
-        linewidth=2.5,
+        linewidth=4.0,
         label="Reset probability",
         zorder=10,
     )
@@ -369,8 +369,8 @@ def plot_utility_panel(
         threshold,
         color=COLORS["threshold"],
         linestyle="--",
-        linewidth=1.5,
-        alpha=0.7,
+        linewidth=3.0,
+        alpha=0.8,
         zorder=5,
     )
 
@@ -389,16 +389,16 @@ def plot_utility_panel(
     # Set x-axis limits
     ax.set_xlim(0, 2.0)
 
-    # Add panel title (training step)
+    # Add panel title (training step) - round to nearest million if close
     step_millions = snapshot.step / 1_000_000
-    if step_millions == 0:
-        title = "Initialization"
-    elif step_millions < 100:
-        title = f"Early training ({step_millions:.0f}M steps)"
-    elif step_millions < 300:
-        title = f"Mid training ({step_millions:.0f}M steps)"
+    rounded_millions = round(step_millions)
+    # Use rounded value if within 5% of a million boundary
+    if rounded_millions > 0 and abs(step_millions - rounded_millions) / rounded_millions < 0.05:
+        title = f"{rounded_millions:.0f}M steps"
+    elif step_millions < 1:
+        title = f"{snapshot.step / 1_000:.0f}K steps"
     else:
-        title = f"Late training ({step_millions:.0f}M steps)"
+        title = f"{step_millions:.0f}M steps"
 
     ax.set_title(title, fontsize=BASE_FONTSIZE + 1, fontweight="bold", pad=10)
 
@@ -468,25 +468,8 @@ def create_utility_evolution_plot(
         y=0.98,
     )
 
-    # Add note about data source
-    has_any_histogram = any(s.histogram_counts is not None for s in snapshots[:4])
-    if has_any_histogram:
-        note_text = "Note: Using exact histogram data from training logs"
-    else:
-        note_text = "Note: Distribution shape approximated from mean/std statistics using Beta distribution"
-
-    fig.text(
-        0.5,
-        0.02,
-        note_text,
-        ha="center",
-        fontsize=BASE_FONTSIZE - 4,
-        style="italic",
-        color="gray",
-    )
-
     # Adjust layout
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.01, 1, 0.96])
 
     # Save if path provided
     if output_path:
@@ -502,8 +485,9 @@ def main(
     wandb_project: str = "crl_experiments",
     group: str = "slippery_ant_full2",
     run_pattern: str = "ccbp_new",
+    seeds: List[int] = [0, 1, 2, 3],
     network: str = "value",
-    target_steps: List[int] = [1_000_000, 50_000_000, 200_000_000, 400_000_000],
+    target_steps: List[int] = [1_000_000, 50_000_000, 150_000_000, 200_000_000],
     replacement_rate: float = 0.012,
     threshold: float = 1.0,
     sharpness: float = 16.0,
@@ -522,13 +506,15 @@ def main(
             --wandb-project crl_experiments \\
             --group slippery_ant \\
             --network value \\
+            --seeds 0 1 2 3 \\
             --output-dir plots/utility_dist
 
     Args:
         wandb_entity: W&B entity name
         wandb_project: W&B project name
         group: W&B group name
-        run_pattern: Pattern to match in run names
+        run_pattern: Base pattern to match in run names (seed will be appended)
+        seeds: List of seeds to generate plots for
         network: Network to visualize ('actor' or 'value')
         target_steps: Training steps to visualize
         replacement_rate: CCBP replacement rate
@@ -545,48 +531,60 @@ def main(
     print(f"{'='*60}")
     print(f"Fetching from: {wandb_entity}/{wandb_project}/{group}")
     print(f"Network: {network}")
+    print(f"Seeds: {seeds}")
     print(f"Target steps: {[f'{s/1e6:.0f}M' if s > 0 else '0' for s in target_steps]}")
     print(f"{'='*60}\n")
 
-    # Fetch data from W&B
-    run_name, snapshots = fetch_utility_statistics(
-        wandb_entity, wandb_project, group, run_pattern, network, target_steps
-    )
+    for seed in seeds:
+        seed_run_pattern = f"{run_pattern}_{seed}"
+        print(f"\n{'─'*60}")
+        print(f"Processing seed {seed} (pattern: {seed_run_pattern})")
+        print(f"{'─'*60}")
 
-    print(f"\n✓ Found {len(snapshots)} snapshots:")
-    for snap in snapshots:
-        print(
-            f"  Step {snap.step:>10}: mean={snap.mean_util:.3f}, std={snap.std_util:.3f}"
-        )
+        try:
+            # Fetch data from W&B
+            run_name, snapshots = fetch_utility_statistics(
+                wandb_entity, wandb_project, group, seed_run_pattern, network, target_steps
+            )
 
-    # Create visualization with run name in filename
-    output_path = (
-        Path(output_dir) / ext / f"ccbp_utility_evolution_{run_name}_{network}.{ext}"
-    )
+            print(f"\n✓ Found {len(snapshots)} snapshots:")
+            for snap in snapshots:
+                print(
+                    f"  Step {snap.step:>10}: mean={snap.mean_util:.3f}, std={snap.std_util:.3f}"
+                )
 
-    print(f"\nGenerating visualization...")
-    print(f"  Replacement rate: {replacement_rate}")
-    print(f"  Threshold: {threshold}")
-    print(f"  Sharpness: {sharpness}")
-    print(f"  Transform: {transform_type}")
+            # Create visualization with run name in filename
+            output_path = (
+                Path(output_dir) / ext / f"ccbp_utility_evolution_{run_name}_{network}.{ext}"
+            )
 
-    fig = create_utility_evolution_plot(
-        snapshots,
-        replacement_rate,
-        threshold,
-        sharpness,
-        transform_type,
-        n_neurons,
-        output_path,
-    )
+            print(f"\nGenerating visualization...")
+            print(f"  Replacement rate: {replacement_rate}")
+            print(f"  Threshold: {threshold}")
+            print(f"  Sharpness: {sharpness}")
+            print(f"  Transform: {transform_type}")
 
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
+            fig = create_utility_evolution_plot(
+                snapshots,
+                replacement_rate,
+                threshold,
+                sharpness,
+                transform_type,
+                n_neurons,
+                output_path,
+            )
+
+            if show_plot:
+                plt.show()
+            else:
+                plt.close(fig)
+
+        except ValueError as e:
+            print(f"  ✗ Skipping seed {seed}: {e}")
+            continue
 
     print(f"\n{'='*60}")
-    print(f"✓ Visualization complete!")
+    print(f"✓ Visualization complete for {len(seeds)} seeds!")
     print(f"{'='*60}\n")
 
 
