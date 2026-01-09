@@ -34,6 +34,44 @@ class ValueFunctionConfig(struct.PyTreeNode):
 
 
 @struct.dataclass(frozen=True)
+class QNetworkConfig(struct.PyTreeNode):
+    """Configuration for Q-network (critic) in SAC."""
+
+    optimizer: OptimizerConfig
+    network: NetworkConfigType
+
+    kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
+    bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
+
+
+@struct.dataclass(frozen=True)
+class SACConfig(struct.PyTreeNode):
+    """Configuration for SAC/BRO algorithm."""
+
+    actor_config: PolicyNetworkConfig
+    critic_config: QNetworkConfig
+
+    # SAC hyperparameters
+    gamma: float = 0.99
+    tau: float = 0.005  # Soft target update coefficient
+    alpha: float = 0.2  # Entropy coefficient (initial value if auto-tuning)
+    auto_entropy: bool = True  # Whether to auto-tune entropy coefficient
+    target_entropy: float | None = None  # Target entropy (None = -action_dim)
+
+    # Replay buffer settings
+    buffer_size: int = 1_000_000
+    batch_size: int = 256
+    learning_starts: int = 10_000  # Steps before training begins
+
+    # BRO-specific settings
+    replay_ratio: int = 1  # Gradient updates per environment step (BRO uses 4-16)
+    reset_interval: int | None = None  # Steps between network resets (None = no resets)
+
+    # Architecture settings
+    use_layer_norm: bool = True  # Critical for stability with high replay ratios
+
+
+@struct.dataclass(frozen=True)
 class PPOConfig(struct.PyTreeNode):
     policy_config: PolicyNetworkConfig
     vf_config: ValueFunctionConfig

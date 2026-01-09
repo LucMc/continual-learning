@@ -19,6 +19,9 @@ def get_benchmark(
         return ContinualHumanoid(seed, env_config)
     if env_config.name == "slippery_cheetah":
         return ContinualCheetah(seed, env_config)
+    if env_config.name == "metaworld_mt10":
+        from .metaworld import MetaWorldMT10Benchmark
+        return MetaWorldMT10Benchmark(seed, env_config)
     else:
         raise ValueError(f"Unknown environment: {env_config.name}")
 

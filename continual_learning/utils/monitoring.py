@@ -299,6 +299,8 @@ class Logger:
             mode=self.cfg.wandb_mode,
             group=self.cfg.group,
             resume="allow",
+            save_code=False,
+            settings=wandb.Settings(_save_requirements=False),  # Avoid wandb bug with package metadata
         )
 
     def accumulate(self, logs: LogDict):
