@@ -33,6 +33,30 @@ GRAD_CLIP_NORM = 1.0
 MAX_Q_VALUE = 1e6
 
 
+def flatten_activations(features: dict) -> dict:
+    """Flatten nested activation dict for reset methods.
+
+    SAC networks use nested modules (q1/q2, main), which creates
+    nested activation dicts like {"q1": {"main": {"layer_0_act": ...}}}.
+    Reset methods expect flat dicts like {"layer_0_act": ...}.
+
+    For twin networks (critic with Q1/Q2), we prefix with module name
+    to avoid collisions.
+    """
+    flat = {}
+
+    def _flatten(d: dict, prefix: str = "") -> None:
+        for key, value in d.items():
+            new_key = f"{prefix}/{key}" if prefix else key
+            if isinstance(value, dict):
+                _flatten(value, new_key)
+            else:
+                flat[new_key] = value
+
+    _flatten(features)
+    return flat
+
+
 class SACTrainState(NamedTuple):
     """Training state for SAC algorithm."""
 
@@ -207,8 +231,8 @@ class SAC:
             critic_grads,
         )
 
-        # Extract features for reset methods
-        critic_feats = intermediates.get("activations", {})
+        # Extract features for reset methods (flatten nested dict from twin Q-networks)
+        critic_feats = flatten_activations(intermediates.get("activations", {}))
 
         # Update critic using custom optimizer pattern
         new_critic = state.critic.apply_gradients(grads=critic_grads, features=critic_feats)
@@ -296,8 +320,8 @@ class SAC:
             actor_grads,
         )
 
-        # Extract features for reset methods
-        actor_feats = intermediates.get("activations", {})
+        # Extract features for reset methods (flatten nested dict from policy network)
+        actor_feats = flatten_activations(intermediates.get("activations", {}))
 
         # Update actor using custom optimizer pattern
         new_actor = state.actor.apply_gradients(grads=actor_grads, features=actor_feats)

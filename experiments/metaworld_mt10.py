@@ -9,25 +9,36 @@ BRO features:
 - Learnable temperature, optimism, and regularizer coefficients
 - BroNet architecture with LayerNorm and residual connections
 - Fixed reset schedule for high replay ratio training
+- Support for reset methods (REDO, ReGrAMA, CBP, CCBP, ShrinkAndPerturb)
 
 Usage:
-    # Quick smoke test
+    # Quick smoke test with AdamW (default)
     python -m experiments.metaworld_mt10 --wandb_mode disabled
+
+    # Run with a specific optimizer/reset method
+    python -m experiments.metaworld_mt10 --wandb_mode disabled --optimizer redo
 
     # Run with wandb logging
     python -m experiments.metaworld_mt10 --wandb_project metaworld_bro --wandb_entity your_entity
 """
 
 import time
-from dataclasses import field
 from typing import Literal
 
 import tyro
 from chex import dataclass
 
-from continual_learning.configs import LoggingConfig
+from continual_learning.configs import (
+    AdamwConfig,
+    CbpConfig,
+    CcbpConfig,
+    LoggingConfig,
+    RedoConfig,
+    RegramaConfig,
+)
 from continual_learning.configs.envs import EnvConfig
 from continual_learning.configs.training import RLTrainingConfig
+from continual_learning.models.rl import orthogonal_init
 from continual_learning.trainers.bro import BROTrainer
 from continual_learning.trainers.bro_learner import BROConfig
 
@@ -40,6 +51,9 @@ class Args:
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = ""
     wandb_entity: str = ""
+
+    # Optimizer selection (supports reset methods)
+    optimizer: Literal["adamw", "redo", "regrama", "cbp", "ccbp"] = "adamw"
 
     # BRO hyperparameters
     updates_per_step: int = 10  # High replay ratio (BRO default)
@@ -62,6 +76,50 @@ class Args:
     std_multiplier: float = 0.75
 
 
+def get_optimizer_config(name: str, seed: int):
+    """Get optimizer config by name."""
+    lr = 3e-4
+    weight_init = orthogonal_init()
+
+    optimizers = {
+        "adamw": AdamwConfig(learning_rate=lr),
+        "redo": RedoConfig(
+            tx=AdamwConfig(learning_rate=lr),
+            update_frequency=5000,
+            score_threshold=0.01,
+            max_reset_frac=0.02,
+            seed=seed,
+            weight_init_fn=weight_init,
+        ),
+        "regrama": RegramaConfig(
+            tx=AdamwConfig(learning_rate=lr),
+            update_frequency=5000,
+            score_threshold=0.01,
+            max_reset_frac=0.02,
+            seed=seed,
+            weight_init_fn=weight_init,
+        ),
+        "cbp": CbpConfig(
+            tx=AdamwConfig(learning_rate=lr),
+            decay_rate=0.99,
+            replacement_rate=0.0002,
+            maturity_threshold=1000,
+            seed=seed,
+            weight_init_fn=weight_init,
+        ),
+        "ccbp": CcbpConfig(
+            tx=AdamwConfig(learning_rate=lr),
+            seed=seed,
+            decay_rate=0.9,
+            sharpness=10,
+            threshold=0.5,
+            update_frequency=5000,
+            transform_type="linear",
+        ),
+    }
+    return optimizers[name]
+
+
 def run_metaworld_mt10():
     """Run BRO on MetaWorld MT10."""
     args = tyro.cli(Args)
@@ -73,6 +131,7 @@ def run_metaworld_mt10():
     print("=" * 60)
     print("BRO (Bigger, Regularized, Optimistic) on MetaWorld MT10")
     print("=" * 60)
+    print(f"Optimizer: {args.optimizer}")
     print(f"Updates per step: {args.updates_per_step}")
     print(f"Steps per task: {args.steps_per_task}")
     print(f"Distributional: {args.distributional}")
@@ -82,11 +141,15 @@ def run_metaworld_mt10():
 
     start = time.time()
 
+    # Get optimizer config
+    opt_cfg = get_optimizer_config(args.optimizer, args.seed)
+
     # Create BRO config
     bro_config = BROConfig(
-        # Learning rates (BRO defaults)
-        actor_lr=3e-4,
-        critic_lr=3e-4,
+        # Optimizer configs (supports reset methods)
+        actor_optimizer=opt_cfg,
+        critic_optimizer=opt_cfg,
+        # Learning rates for scalar params
         temp_lr=3e-4,
         adj_lr=3e-5,  # Lower for adjustment coefficients
         # SAC parameters
@@ -129,7 +192,7 @@ def run_metaworld_mt10():
             steps_per_task=args.steps_per_task,
         ),
         logs_cfg=LoggingConfig(
-            run_name=f"bro_mt10_{args.seed}",
+            run_name=f"bro_{args.optimizer}_{args.seed}",
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             group="metaworld_mt10_bro",

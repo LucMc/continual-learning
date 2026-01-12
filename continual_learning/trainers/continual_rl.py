@@ -256,7 +256,7 @@ class PPO:
                     **prefix_dict("actor", actor_optim_logs),
                     **prefix_dict("value", vf_optim_logs),
                 },
-                actor_feats["main"],
+                actor_feats,  # Pass full nested dict, reset methods will flatten
                 value_feats,
             )
 

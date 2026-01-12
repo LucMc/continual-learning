@@ -28,6 +28,10 @@ class BroNet(nn.Module):
     - LayerNorm after every Dense layer
     - Residual connections
     - Orthogonal initialization
+    - Activation collection for reset methods (via sow)
+
+    Note: Dense layers are named explicitly (Dense_0, Dense_1, etc.) and
+    activation sow() names match these to enable reset methods.
     """
     hidden_dims: int = 256
     depth: int = 1
@@ -38,68 +42,113 @@ class BroNet(nn.Module):
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:
         activation_fn = nn.relu if self.activation == "relu" else nn.tanh
+        dense_idx = 0  # Track Dense layer index for naming
 
         if self.depth == 1:
-            # Initial layer
-            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            # Initial layer (Dense_0)
+            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", x)
             x = nn.LayerNorm()(x)
             x = activation_fn(x)
+            self.sow("activations", f"Dense_{dense_idx}_act", x)
+            dense_idx += 1
 
-            # Residual block
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            # Residual block (Dense_1, Dense_2)
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
             res = nn.LayerNorm()(res)
             res = activation_fn(res)
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(res)
+            self.sow("activations", f"Dense_{dense_idx}_act", res)
+            dense_idx += 1
+
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(res)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
             res = nn.LayerNorm()(res)
-            x = res + x
+            self.sow("activations", f"Dense_{dense_idx}_act", res)  # Sow after LayerNorm for reset methods
+            x = res + x  # Residual connection
+            dense_idx += 1
 
             if self.add_final_layer:
-                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init())(x)
+                # Output layer
+                self.sow("preactivations", "output_pre", x)
+                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init(), name="output")(x)
+                self.sow("activations", "output_act", x)
             return x
 
         elif self.depth == 2:
-            # Initial layer
-            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            # Initial layer (Dense_0)
+            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", x)
             x = nn.LayerNorm()(x)
             x = activation_fn(x)
+            self.sow("activations", f"Dense_{dense_idx}_act", x)
+            dense_idx += 1
 
-            # Residual block 1
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            # Residual block 1 (Dense_1, Dense_2)
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
             res = nn.LayerNorm()(res)
             res = activation_fn(res)
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(res)
-            res = nn.LayerNorm()(res)
-            x = res + x
+            self.sow("activations", f"Dense_{dense_idx}_act", res)
+            dense_idx += 1
 
-            # Residual block 2
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(res)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
+            res = nn.LayerNorm()(res)
+            self.sow("activations", f"Dense_{dense_idx}_act", res)  # Sow after LayerNorm for reset methods
+            x = res + x
+            dense_idx += 1
+
+            # Residual block 2 (Dense_3, Dense_4)
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
             res = nn.LayerNorm()(res)
             res = activation_fn(res)
-            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(res)
+            self.sow("activations", f"Dense_{dense_idx}_act", res)
+            dense_idx += 1
+
+            res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(res)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
             res = nn.LayerNorm()(res)
+            self.sow("activations", f"Dense_{dense_idx}_act", res)  # Sow after LayerNorm for reset methods
             x = res + x
+            dense_idx += 1
 
             if self.add_final_layer:
-                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init())(x)
+                self.sow("preactivations", "output_pre", x)
+                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init(), name="output")(x)
+                self.sow("activations", "output_act", x)
             return x
 
         else:  # depth == 3
-            # Initial layer
-            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+            # Initial layer (Dense_0)
+            x = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+            self.sow("preactivations", f"Dense_{dense_idx}_pre", x)
             x = nn.LayerNorm()(x)
             x = activation_fn(x)
+            self.sow("activations", f"Dense_{dense_idx}_act", x)
+            dense_idx += 1
 
             # Residual blocks
             for _ in range(3):
-                res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(x)
+                res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(x)
+                self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
                 res = nn.LayerNorm()(res)
                 res = activation_fn(res)
-                res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init())(res)
+                self.sow("activations", f"Dense_{dense_idx}_act", res)
+                dense_idx += 1
+
+                res = nn.Dense(self.hidden_dims, kernel_init=orthogonal_init(), name=f"Dense_{dense_idx}")(res)
+                self.sow("preactivations", f"Dense_{dense_idx}_pre", res)
                 res = nn.LayerNorm()(res)
+                self.sow("activations", f"Dense_{dense_idx}_act", res)  # Sow after LayerNorm for reset methods
                 x = res + x
+                dense_idx += 1
 
             if self.add_final_layer:
-                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init())(x)
+                self.sow("preactivations", "output_pre", x)
+                x = nn.Dense(self.output_nodes, kernel_init=orthogonal_init(), name="output")(x)
+                self.sow("activations", "output_act", x)
             return x
 
 
@@ -128,8 +177,9 @@ class BRONormalTanhPolicy(nn.Module):
             add_final_layer=False
         )(observations, training=training)
 
-        means = nn.Dense(self.action_dim, kernel_init=orthogonal_init())(outputs)
-        log_stds = nn.Dense(self.action_dim, kernel_init=orthogonal_init(self.log_std_scale))(outputs)
+        # Use unique names to avoid collision with BroNet's internal Dense layers
+        means = nn.Dense(self.action_dim, kernel_init=orthogonal_init(), name="mean_output")(outputs)
+        log_stds = nn.Dense(self.action_dim, kernel_init=orthogonal_init(self.log_std_scale), name="logstd_output")(outputs)
 
         # Squash log_stds to valid range using tanh (as in official implementation)
         log_stds = LOG_STD_MIN + (LOG_STD_MAX - LOG_STD_MIN) * 0.5 * (1 + nn.tanh(log_stds))
@@ -174,10 +224,12 @@ class BRODualTanhPolicy(nn.Module):
         )(inputs, training=training)
 
         # Predict action shift (small scale initialization)
+        # Use unique name to avoid collision with BroNet's internal Dense layers
         action_shift = nn.Dense(
             self.action_dim,
             kernel_init=orthogonal_init(scale=self.scale_means),
-            use_bias=False
+            use_bias=False,
+            name="action_shift_output"
         )(outputs)
 
         optimistic_means = means + action_shift

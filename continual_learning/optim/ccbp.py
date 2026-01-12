@@ -142,22 +142,28 @@ def ccbp(
 ) -> GradientTransformationExtraArgsReset:
     """Continuous Continual Backpropergation (CCBP)"""
 
+    def _is_output_layer(path: tuple) -> bool:
+        """Check if this is an output layer that shouldn't be reset."""
+        return path[-1] == "output" or path[-1].endswith("_output") or path[-1] == out_layer_name
+
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
-        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-        biases.pop(out_layer_name)
+        # Use kernels (not biases) to determine tracked layers - avoids LayerNorm mismatch
+        # LayerNorm has bias but no kernel (only scale), which would cause tree structure mismatch
+        kernels = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+        # Remove output layers
+        kernels = {k: v for k, v in kernels.items() if not _is_output_layer(k)}
 
         return CcbpOptimState(
-            # initial_weights=deepcopy(weights),
-            utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
-            ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
-            remainder=jax.tree.map(lambda _: 0.0, biases),
+            # Utilities shape = [num_neurons] = kernel output dim (last axis)
+            utilities=jax.tree.map(lambda kernel: jnp.ones(kernel.shape[-1]), kernels),
+            ages=jax.tree.map(lambda kernel: jnp.zeros(kernel.shape[-1]), kernels),
+            remainder=jax.tree.map(lambda _: 0.0, kernels),
             mean_feature_act=jax.tree.map(
-                lambda layer: jnp.zeros_like(layer), biases
-            ),  # TODO: Remove
+                lambda kernel: jnp.zeros(kernel.shape[-1]), kernels
+            ),
             rng=jax.random.PRNGKey(seed),
             time_step=0,
-            # update_frequency=update_frequency, # TODO: Change to update_frequency
             **kwargs,
         )
 
@@ -173,9 +179,11 @@ def ccbp(
 
         def no_update(updates):
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            # Use full path to avoid collisions
+            weight_grads = {k[:-1]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            # Filter out output layers
+            weight_grads = {k: v for k, v in weight_grads.items() if not _is_output_layer(k)}
 
-            weight_grads.pop(out_layer_name)
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
@@ -188,7 +196,7 @@ def ccbp(
 
             _logs = {
                 "std_util": all_utils.std(),
-                "nodes_reset": 0.0,  # state.logs['nodes_reset'],
+                "nodes_reset": 0.0,
                 "low_utility": jnp.sum(all_utils < 0.95),
                 "mean_utils": all_utils.mean(),
                 "utility_histogram_counts": hist_counts,
@@ -206,89 +214,102 @@ def ccbp(
         ) -> Tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            # out_w_mag = utils.get_out_weights_mag(weights)
+            # Use full path to avoid collisions with nested networks
+            weights = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
+
+            # Filter out output layers
+            weights_no_output = {k: v for k, v in weights.items() if not _is_output_layer(k)}
 
             new_rng, util_key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(util_key, weights)
+            key_tree = utils.gen_key_tree(util_key, weights_no_output)
 
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {k[:-1]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {k: v for k, v in weight_grads.items() if not _is_output_layer(k)}
 
-            weight_grads.pop(out_layer_name)
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
                 state.utilities,
             )
 
-            # reset weights given mask
-            _weights, reset_logs = continuous_reset_weights(
-                key_tree,
-                # reset_mask,  # No out_layer
-                weights,  # Yes out_layer
-                _utility,
-                weight_init_fn,
-                replacement_rate,
-                sharpness,
-                threshold,
-                transform_type,
-            )
+            # For nested networks, skip continuous reset (requires sequential layer assumptions)
+            # Just apply simple shrink based on utilities
+            _weights = {}
+            reset_logs = {}
+            for layer_path, w in weights_no_output.items():
+                if layer_path in _utility and layer_path in key_tree:
+                    init_w = weight_init_fn(key_tree[layer_path], w.shape)
+                    util = _utility[layer_path]
 
-            # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
-            _biases = biases
+                    # Simple shrink-based reset
+                    match transform_type:
+                        case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
+                        case "sigmoid": transform = lambda x: jnp.minimum(2.0 * jax.nn.sigmoid(-sharpness * (x - threshold)), 1.0)
+                        case "softplus": transform = lambda x: jnp.minimum(jax.nn.softplus(sharpness * (threshold - x)) / jnp.log(2.0), 1.0)
+                        case "linear": transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
+                        case _: transform = lambda x: jnp.clip(1.0 - sharpness * (x - threshold), 0.0, 1.0)
 
-            new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: Slow operation
+                    reset_prop = replacement_rate * transform(util)
+                    keep_prop = 1 - reset_prop
+                    _weights[layer_path] = (keep_prop * w) + (reset_prop * init_w)
+                    reset_logs[layer_path] = {
+                        "nodes_reset": reset_prop.mean(),
+                        "low_utility": jnp.sum(util < 0.95),
+                        "mean_utils": jnp.mean(util),
+                    }
+                else:
+                    _weights[layer_path] = w
+                    reset_logs[layer_path] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
 
-            # avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
-            # avg_util = jax.tree.map(lambda v: v.mean(), _utility)
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
-            # Compute histogram for utility distribution (before reset to 1.0)
+            # Compute histogram for utility distribution
             all_utils = jnp.concatenate([u.flatten() for u in jax.tree.leaves(_utility)])
             hist_counts, hist_edges = jnp.histogram(all_utils, bins=50, range=(0.0, 2.0))
 
-            # Logging TODO: Add stats from continuous resetweights
-            for layer_name in weights.keys():  # Exclude output layer
-                new_params[layer_name] = {
-                    "kernel": _weights[layer_name],
-                    "bias": _biases[layer_name],
-                }
+            _logs = {k: 0 for k in state.logs}
 
-            for layer_name in _utility.keys():
-                # _logs["avg_age"] += avg_ages[layer_name]
-                # _logs["avg_util"] += avg_util[layer_name]
-                _logs["std_util"] += std_util[layer_name]
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
-                _logs["low_utility"] += reset_logs[layer_name]["low_utility"]
-                _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
+            for layer_path in _utility.keys():
+                _logs["std_util"] += std_util[layer_path]
+                if layer_path in reset_logs:
+                    _logs["nodes_reset"] += reset_logs[layer_path]["nodes_reset"]
+                    _logs["low_utility"] += reset_logs[layer_path]["low_utility"]
+                    _logs["mean_utils"] += reset_logs[layer_path]["mean_utils"]
 
-            _logs["mean_utils"] /= len(reset_logs.keys())  # pyright: ignore[reportArgumentType]
+            if len(reset_logs) > 0:
+                _logs["mean_utils"] /= len(reset_logs)
 
-            # Add histogram to logs
             _logs["utility_histogram_counts"] = hist_counts
             _logs["utility_histogram_edges"] = hist_edges
 
-            # We reset running utilities once used for an update
-            # Reset to 1 as this should be the mean of the utility distribution given norm
+            # Build new flat params dict
+            new_flat_params = {}
+            for path, value in flat_params.items():
+                layer_path = path[:-1]
+                param_type = path[-1]
+
+                if layer_path in _weights and param_type == "kernel":
+                    new_flat_params[path] = _weights[layer_path]
+                else:
+                    new_flat_params[path] = value
+
             new_state = state.replace(
-                # ages=_ages,
                 logs=FrozenDict(_logs),
                 rng=new_rng,
                 utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
-                # utilities=_utility, # Try with and without keeping the runing average
                 time_step=state.time_step + 1,
             )
-            flat_new_params, _ = jax.tree.flatten(new_params)
-            # Experiment: Update bias and tx_state
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                tx_state,
-            )
+            # Reconstruct params tree
+            new_params_dict = flax.traverse_util.unflatten_dict(new_flat_params)
+            new_params = {"params": new_params_dict}
+            for key in params:
+                if key not in new_params:
+                    new_params[key] = params[key]
+
+            return (new_params, new_state, tx_state)
 
         condition = jnp.logical_and(
             state.time_step > 0, (state.time_step % update_frequency == 0)

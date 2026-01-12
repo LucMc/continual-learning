@@ -12,7 +12,39 @@ from copy import deepcopy
 from continual_learning.types import GradientTransformationExtraArgsReset
 
 
+def flatten_features(features: dict) -> dict:
+    """Flatten nested feature dicts into flat dict with "/" separators.
+
+    Handles both flat and nested feature structures:
+    - Flat: {'layer_0_act': array} -> {'layer_0_act': array}
+    - Nested: {'main': {'layer_0_act': array}} -> {'main/layer_0_act': array}
+
+    This ensures feature keys can be converted to param paths consistently.
+    """
+    flat = {}
+
+    def _flatten(d, prefix=""):
+        for key, value in d.items():
+            full_key = f"{prefix}{key}" if prefix else key
+            if isinstance(value, dict):
+                # Nested dict (submodule) - recurse
+                _flatten(value, f"{full_key}/")
+            else:
+                # Leaf value (array or tuple of arrays)
+                flat[full_key] = value
+
+    _flatten(features)
+    return flat
+
+
 def get_out_weights_mag(weights):
+    """Compute outgoing weight magnitudes for CBP utility calculation.
+
+    For multi-network architectures (twin Q-networks, dual actors), we detect
+    network boundaries by checking if the top-level module name changes.
+    When crossing a network boundary (e.g., BroNet_0 -> BroNet_1), we use
+    uniform magnitude (1.0) instead of computing from a non-existent connection.
+    """
     def calculate_mag(curr_layer_w, next_layer_w, is_conv_to_dense=False):
         if is_conv_to_dense:  # To handle flattening of spacial dims
             num_channels = curr_layer_w.shape[-1]  # Last dim
@@ -29,6 +61,14 @@ def get_out_weights_mag(weights):
         else:  # Dense->Dense
             return jnp.abs(next_layer_w).mean(axis=1)
 
+    def _is_network_boundary(curr_key: tuple, next_key: tuple) -> bool:
+        """Check if we're crossing a network boundary (different top-level module)."""
+        # For nested architectures like BRO, keys are tuples like ("BroNet_0", "Dense_0")
+        # We detect a boundary when the top-level module changes
+        if len(curr_key) > 1 and len(next_key) > 1:
+            return curr_key[0] != next_key[0]
+        return False
+
     keys = list(weights.keys())
     w_mags = {}
 
@@ -36,12 +76,27 @@ def get_out_weights_mag(weights):
         curr_key = keys[i]
         next_key = keys[i + 1]
         curr_weights = weights[curr_key]
+
+        # Check if we're crossing a network boundary (e.g., BroNet_0 -> BroNet_1)
+        # In this case, there's no actual connection, so use uniform magnitude
+        if _is_network_boundary(curr_key, next_key):
+            w_mags[curr_key] = jnp.ones(curr_weights.shape[-1])
+            continue
+
         next_weights = weights[next_key]
 
         # Check if this is a conv->dense
         is_conv_to_dense = len(curr_weights.shape) == 4 and len(next_weights.shape) == 2
 
         w_mags[curr_key] = calculate_mag(curr_weights, next_weights, is_conv_to_dense)
+
+    # Include the last layer with uniform magnitude (no outgoing connection)
+    # This ensures all non-output layers are tracked for utilities
+    if len(keys) > 0:
+        last_key = keys[-1]
+        if last_key not in w_mags:
+            last_weights = weights[last_key]
+            w_mags[last_key] = jnp.ones(last_weights.shape[-1])
 
     return w_mags
 
@@ -114,61 +169,90 @@ def reset_weights(
     reset_mask: PyTree[Bool[Array, "#neurons"]],
     weights: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    reset_outgoing: bool = False,
 ):
+    """Reset dormant neuron weights following ReDo/SNR methodology.
+
+    This implementation follows the simpler approach used in Google's ReDo and
+    SNR (Self-Normalized Resets), which works for arbitrary network topologies:
+    - Reset incoming weights to random initialization
+    - Optionally zero outgoing weights (disabled by default for complex architectures)
+    - Biases are handled separately by the caller
+
+    For complex architectures (ResNets, twin Q-networks, etc.), outgoing weight
+    reset is skipped because determining the "next layer" requires topology knowledge
+    that isn't available with nested module structures.
+
+    Args:
+        key_tree: Random keys for weight initialization
+        reset_mask: Boolean mask per layer indicating which neurons to reset
+        weights: Current weight values (modified in place)
+        weight_init_fn: Initialization function for new weights
+        reset_outgoing: Whether to attempt outgoing weight reset (requires sequential topology)
+
+    Returns:
+        Updated weights and logs dict with reset counts per layer
+    """
     all_layer_names = list(weights.keys())
-    all_mask_names = list(reset_mask.keys())  # Just to check layer names are the same
+    all_mask_names = set(reset_mask.keys())
     logs = {}
 
-    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
+    # Find layers that exist in both weights and reset_mask
+    # Skip the last layer (assumed to be output layer which shouldn't be reset)
+    layers_to_reset = [name for name in all_layer_names[:-1] if name in all_mask_names]
 
-    for idx, layer_name in enumerate(all_layer_names[:-1]):
-        assert layer_name in all_mask_names, (
-            f"Layer names should be identical: {layer_name} not in {all_mask_names}"
-        )
+    for layer_name in layers_to_reset:
+        if layer_name not in all_mask_names:
+            continue
 
         in_mask_1d = reset_mask[layer_name]
         assert in_mask_1d.dtype == bool, f"Mask type isn't bool for {layer_name}"
 
-        # Reset incoming weights
+        # Reset incoming weights (standard approach from ReDo/SNR)
         in_weight_mask = expand_mask_for_weights(
             in_mask_1d, weights[layer_name].shape, mask_type="incoming"
         )
-
         random_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
         weights[layer_name] = jnp.where(in_weight_mask, random_weights, weights[layer_name])
 
-        # Reset outgoing weights
-        if idx + 1 < len(all_layer_names):
-            next_layer = all_layer_names[idx + 1]
-            out_weight_shape = weights[next_layer].shape
+        # Outgoing weight reset - only for simple sequential networks
+        # For complex architectures (ResNets, twin networks), skip this
+        if reset_outgoing:
+            try:
+                pos_in_all = all_layer_names.index(layer_name)
+                if pos_in_all + 1 < len(all_layer_names):
+                    next_layer = all_layer_names[pos_in_all + 1]
+                    out_weight_shape = weights[next_layer].shape
 
-            if len(out_weight_shape) == 2:  # Dense layer
-                if len(weights[layer_name].shape) == 4:  # Check if previous layer was conv
-                    spatial_size = out_weight_shape[0] // in_mask_1d.size
-                    out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
-                else:  # Dense -> Dense
-                    out_mask_1d = in_mask_1d
+                    if len(out_weight_shape) == 2:  # Dense layer
+                        if len(weights[layer_name].shape) == 4:  # Conv -> Dense
+                            spatial_size = out_weight_shape[0] // in_mask_1d.size
+                            out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
+                        else:  # Dense -> Dense
+                            out_mask_1d = in_mask_1d
+                    elif len(out_weight_shape) == 4:  # Conv layer
+                        out_mask_1d = in_mask_1d
+                    else:
+                        out_mask_1d = None
 
-            elif len(out_weight_shape) == 4:  # Conv layer
-                # expected_in_channels = out_weight_shape[2]
-                out_mask_1d = in_mask_1d
-            else:
-                raise ValueError(f"Unsupported weight shape: {out_weight_shape}")
-
-            # Apply outgoing mask
-            out_weight_mask = expand_mask_for_weights(
-                out_mask_1d, out_weight_shape, mask_type="outgoing"
-            )
-
-            weights[next_layer] = jnp.where(
-                out_weight_mask, jnp.zeros_like(weights[next_layer]), weights[next_layer]
-            )
+                    if out_mask_1d is not None:
+                        out_weight_mask = expand_mask_for_weights(
+                            out_mask_1d, out_weight_shape, mask_type="outgoing"
+                        )
+                        weights[next_layer] = jnp.where(
+                            out_weight_mask, jnp.zeros_like(weights[next_layer]), weights[next_layer]
+                        )
+            except ValueError:
+                pass  # Layer not in sequential order, skip outgoing reset
 
         # Count reset neurons
         n_reset = in_mask_1d.sum()
         logs[layer_name] = {"nodes_reset": n_reset}
 
-    logs[all_layer_names[-1]] = {"nodes_reset": 0}
+    # Log 0 resets for remaining layers
+    for layer_name in all_layer_names:
+        if layer_name not in logs:
+            logs[layer_name] = {"nodes_reset": 0}
 
     return weights, logs
 
@@ -179,8 +263,16 @@ def reset_optim_params(tx_state, reset_mask):
     def reset_params(tx_state):
         def map_fn(momentum):
             all_layer_names = list(momentum.keys())
+            all_mask_names = set(reset_mask.keys())
             momentum = deepcopy(momentum)
-            for idx, layer_name in enumerate(list(momentum.keys())[:-1]):  # momentum is mu/nu
+
+            # Only process layers that exist in both momentum and reset_mask, skip last layer
+            layers_to_reset = [name for name in all_layer_names[:-1] if name in all_mask_names]
+
+            for layer_name in layers_to_reset:
+                if layer_name not in all_mask_names:
+                    continue
+
                 in_mask_1d = reset_mask[layer_name]
 
                 in_momentum_mask = expand_mask_for_weights(
@@ -195,40 +287,41 @@ def reset_optim_params(tx_state, reset_mask):
                 )
 
                 # Reset outgoing momentum
-                if idx + 1 < len(all_layer_names):
-                    next_layer = all_layer_names[idx + 1]
-                    out_momentum_shape = momentum[next_layer]["kernel"].shape
+                try:
+                    pos_in_all = all_layer_names.index(layer_name)
+                    if pos_in_all + 1 < len(all_layer_names):
+                        next_layer = all_layer_names[pos_in_all + 1]
+                        out_momentum_shape = momentum[next_layer]["kernel"].shape
 
-                    if len(out_momentum_shape) == 2:  # Dense layer
-                        if (
-                            len(momentum[layer_name]["kernel"].shape) == 4
-                        ):  # Check if previous layer was conv
-                            spatial_size = out_momentum_shape[0] // in_mask_1d.size
-                            out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
-                        else:  # Dense -> Dense
+                        if len(out_momentum_shape) == 2:  # Dense layer
+                            if len(momentum[layer_name]["kernel"].shape) == 4:  # Conv -> Dense
+                                spatial_size = out_momentum_shape[0] // in_mask_1d.size
+                                out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
+                            else:  # Dense -> Dense
+                                out_mask_1d = in_mask_1d
+                        elif len(out_momentum_shape) == 4:  # Conv layer
                             out_mask_1d = in_mask_1d
+                        else:
+                            out_mask_1d = None  # Skip unsupported shapes
 
-                    elif len(out_momentum_shape) == 4:  # Conv layer
-                        out_mask_1d = in_mask_1d
-                    else:
-                        raise ValueError(f"Unsupported weight shape: {out_momentum_shape}")
+                        if out_mask_1d is not None:
+                            out_momentum_mask = expand_mask_for_weights(
+                                out_mask_1d, out_momentum_shape, mask_type="outgoing"
+                            )
+                            momentum[next_layer]["kernel"] = jnp.where(
+                                out_momentum_mask,
+                                jnp.zeros_like(momentum[next_layer]["kernel"]),
+                                momentum[next_layer]["kernel"],
+                            )
 
-                    # Apply outgoing mask
-                    out_momentum_mask = expand_mask_for_weights(
-                        out_mask_1d, out_momentum_shape, mask_type="outgoing"
-                    )
-
-                    momentum[next_layer]["kernel"] = jnp.where(
-                        out_momentum_mask,
-                        jnp.zeros_like(momentum[next_layer]["kernel"]),
-                        momentum[next_layer]["kernel"],
-                    )
-                    # Reset bias too
-                    momentum[layer_name]["bias"] = jnp.where(
-                        reset_mask[layer_name][None:],
-                        jnp.zeros_like(momentum[layer_name]["bias"]),
-                        momentum[layer_name]["bias"],
-                    )
+                        # Reset bias too
+                        momentum[layer_name]["bias"] = jnp.where(
+                            reset_mask[layer_name][None:],
+                            jnp.zeros_like(momentum[layer_name]["bias"]),
+                            momentum[layer_name]["bias"],
+                        )
+                except ValueError:
+                    pass  # Layer not in sequential order, skip outgoing reset
 
             return momentum
 
@@ -250,6 +343,11 @@ def reset_optim_params(tx_state, reset_mask):
 
             return tuple(new_elems)
             # return (reset_params(tx_state[0]),) + tx_state[1:]
+
+        # Check if this is a namedtuple or has the expected structure
+        if not hasattr(tx_state, "_fields"):
+            # Not a namedtuple, return unchanged
+            return tx_state
 
         if hasattr(tx_state, "mu"):
             new_state_dict["mu"] = {

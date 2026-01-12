@@ -10,6 +10,7 @@ Key components:
 - Learnable temperature, optimism, and regularizer coefficients
 - BroNet architecture with LayerNorm and residual connections
 - Fixed reset schedule for high replay ratio training
+- Support for reset methods (REDO, ReGrAMA, CBP, CCBP, ShrinkAndPerturb)
 """
 
 from functools import partial
@@ -22,21 +23,35 @@ import optax
 from flax.core import FrozenDict
 from jaxtyping import Array, Float, PRNGKeyArray
 
+from continual_learning.configs.optim import (
+    OptimizerConfig,
+    ResetMethodConfig,
+    AdamwConfig,
+    AdamConfig,
+)
 from continual_learning.models.rl import (
     BRONormalTanhPolicy,
     BRODualTanhPolicy,
     BRODistributionalCritic,
     Temperature,
     Adjustment,
+    orthogonal_init,
 )
+from continual_learning.optim import get_optimizer
 from continual_learning.types import LogDict
+from continual_learning.utils.training import TrainState
 
 
 class BROConfig(NamedTuple):
-    """Configuration for BRO algorithm."""
-    # Learning rates
-    actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
+    """Configuration for BRO algorithm.
+
+    Supports pluggable optimizers including reset methods (REDO, ReGrAMA, CBP, CCBP, ShrinkAndPerturb).
+    """
+    # Optimizer configs (supports reset methods)
+    actor_optimizer: OptimizerConfig | ResetMethodConfig = AdamwConfig(learning_rate=3e-4)
+    critic_optimizer: OptimizerConfig | ResetMethodConfig = AdamwConfig(learning_rate=3e-4)
+
+    # Learning rates for scalar params (no reset methods needed)
     temp_lr: float = 3e-4
     adj_lr: float = 3e-5  # Lower LR for adjustment coefficients
 
@@ -67,21 +82,23 @@ class BROConfig(NamedTuple):
     learning_starts: int = 5000
 
     # Reset schedule (steps at which to reset networks)
+    # This is BRO's built-in reset mechanism, complementary to optimizer reset methods
     reset_steps: tuple[int, ...] = (15001, 50001, 250001, 500001, 750001, 1000001, 1500001, 2000001)
 
 
 class BROState(NamedTuple):
-    """Training state for BRO algorithm."""
-    # Networks
-    actor_params: FrozenDict
-    actor_opt_state: optax.OptState
-    actor_o_params: FrozenDict
-    actor_o_opt_state: optax.OptState
-    critic_params: FrozenDict
-    critic_opt_state: optax.OptState
+    """Training state for BRO algorithm.
+
+    Uses TrainState for networks (supports reset methods).
+    Uses raw params/opt_state for scalar learnable coefficients (no reset needed).
+    """
+    # Networks using TrainState (supports reset methods)
+    actor: TrainState
+    actor_o: TrainState
+    critic: TrainState
     target_critic_params: FrozenDict
 
-    # Learnable coefficients
+    # Learnable coefficients (keep as raw params - no reset needed for scalars)
     temp_params: FrozenDict
     temp_opt_state: optax.OptState
     optimism_params: FrozenDict
@@ -106,6 +123,30 @@ def clip_grads(grads, max_norm: float = 1.0):
     grad_norm = tree_norm(grads)
     scale = jnp.minimum(1.0, max_norm / (grad_norm + 1e-8))
     return jax.tree.map(lambda g: g * scale, grads), grad_norm
+
+
+def flatten_activations(features: dict) -> dict:
+    """Flatten nested activation dict for reset methods.
+
+    BRO networks use nested modules (BroNet_0, BroNet_1), which creates
+    nested activation dicts like {"BroNet_0": {"Dense_0_act": ...}}.
+    Reset methods expect flat dicts with keys matching param paths.
+
+    Always include full path to match param structure (e.g., "BroNet_0/Dense_0_act"
+    maps to param path ("BroNet_0", "Dense_0", "kernel")).
+    """
+    flat = {}
+
+    def _flatten(d: dict, prefix: str = "") -> None:
+        for key, value in d.items():
+            new_key = f"{prefix}/{key}" if prefix else key
+            if isinstance(value, dict):
+                _flatten(value, new_key)
+            else:
+                flat[new_key] = value
+
+    _flatten(features)
+    return flat
 
 
 def huber_loss(td_errors: jax.Array, kappa: float = 1.0) -> jax.Array:
@@ -157,7 +198,7 @@ class BROLearner:
             self.reset_steps = cfg.reset_steps
 
     def _init_state(self, seed: int, obs_dim: int, action_dim: int) -> BROState:
-        """Initialize BRO training state."""
+        """Initialize BRO training state with TrainState for reset method support."""
         key = jax.random.PRNGKey(seed)
         keys = jax.random.split(key, 8)
         (key, actor_key, actor_o_key, critic_key,
@@ -167,41 +208,56 @@ class BROLearner:
         dummy_obs = jnp.zeros((1, obs_dim))
         dummy_action = jnp.zeros((1, action_dim))
 
-        # Initialize conservative actor
-        actor = BRONormalTanhPolicy(
+        # Initialize conservative actor with TrainState
+        actor_module = BRONormalTanhPolicy(
             action_dim=action_dim,
             hidden_dims=cfg.hidden_dims,
             depth=cfg.depth,
         )
-        actor_params = actor.init(actor_key, dummy_obs)
-        actor_tx = optax.adamw(learning_rate=cfg.actor_lr)
-        actor_opt_state = actor_tx.init(actor_params)
+        actor_params = actor_module.init(actor_key, dummy_obs)
+        actor = TrainState.create(
+            apply_fn=actor_module.apply,
+            params=actor_params,
+            tx=get_optimizer(cfg.actor_optimizer),
+            kernel_init=orthogonal_init(),
+            bias_init=jax.nn.initializers.zeros,
+        )
 
-        # Initialize optimistic actor
-        actor_o = BRODualTanhPolicy(
+        # Initialize optimistic actor with TrainState
+        actor_o_module = BRODualTanhPolicy(
             action_dim=action_dim,
             hidden_dims=cfg.hidden_dims,
             depth=cfg.depth,
         )
-        actor_o_params = actor_o.init(
+        actor_o_params = actor_o_module.init(
             actor_o_key, dummy_obs, dummy_action, dummy_action, cfg.std_multiplier
         )
-        actor_o_tx = optax.adamw(learning_rate=cfg.actor_lr)
-        actor_o_opt_state = actor_o_tx.init(actor_o_params)
+        actor_o = TrainState.create(
+            apply_fn=actor_o_module.apply,
+            params=actor_o_params,
+            tx=get_optimizer(cfg.actor_optimizer),
+            kernel_init=orthogonal_init(),
+            bias_init=jax.nn.initializers.zeros,
+        )
 
-        # Initialize distributional critic
+        # Initialize distributional critic with TrainState
         n_quantiles = cfg.n_quantiles if cfg.distributional else 1
-        critic = BRODistributionalCritic(
+        critic_module = BRODistributionalCritic(
             n_quantiles=n_quantiles,
             hidden_dims=cfg.hidden_dims,
             depth=cfg.depth,
         )
-        critic_params = critic.init(critic_key, dummy_obs, dummy_action)
-        critic_tx = optax.adamw(learning_rate=cfg.critic_lr)
-        critic_opt_state = critic_tx.init(critic_params)
+        critic_params = critic_module.init(critic_key, dummy_obs, dummy_action)
+        critic = TrainState.create(
+            apply_fn=critic_module.apply,
+            params=critic_params,
+            tx=get_optimizer(cfg.critic_optimizer),
+            kernel_init=orthogonal_init(),
+            bias_init=jax.nn.initializers.zeros,
+        )
         target_critic_params = jax.tree.map(lambda x: x.copy(), critic_params)
 
-        # Initialize temperature
+        # Initialize temperature (scalar param - no reset method needed)
         temp = Temperature(initial_temperature=cfg.init_temperature)
         temp_params = temp.init(temp_key)
         temp_tx = optax.adam(learning_rate=cfg.temp_lr, b1=0.5)
@@ -215,7 +271,7 @@ class BROLearner:
                 (np.log(init_val) - log_val_min) / ((log_val_max - log_val_min) * 0.5) - 1
             ))
 
-        # Initialize optimism
+        # Initialize optimism (scalar param - no reset method needed)
         optimism = Adjustment(
             init_value=calc_init_value(cfg.init_optimism),
             log_val_min=log_val_min,
@@ -225,7 +281,7 @@ class BROLearner:
         optimism_tx = optax.adam(learning_rate=cfg.adj_lr, b1=0.5)
         optimism_opt_state = optimism_tx.init(optimism_params)
 
-        # Initialize regularizer
+        # Initialize regularizer (scalar param - no reset method needed)
         regularizer = Adjustment(
             init_value=calc_init_value(cfg.init_regularizer),
             log_val_min=log_val_min,
@@ -236,12 +292,9 @@ class BROLearner:
         regularizer_opt_state = regularizer_tx.init(regularizer_params)
 
         return BROState(
-            actor_params=actor_params,
-            actor_opt_state=actor_opt_state,
-            actor_o_params=actor_o_params,
-            actor_o_opt_state=actor_o_opt_state,
-            critic_params=critic_params,
-            critic_opt_state=critic_opt_state,
+            actor=actor,
+            actor_o=actor_o,
+            critic=critic,
             target_critic_params=target_critic_params,
             temp_params=temp_params,
             temp_opt_state=temp_opt_state,
@@ -277,24 +330,16 @@ class BROLearner:
 
         if use_optimistic:
             # Get conservative actor's mean/std
-            _, mu_c, std_c = BRONormalTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=self.cfg.hidden_dims,
-                depth=self.cfg.depth,
-            ).apply(
-                self.state.actor_params,
+            _, mu_c, std_c = self.state.actor.apply_fn(
+                self.state.actor.params,
                 observations,
                 temperature=temperature,
                 return_params=True,
             )
 
             # Sample from optimistic actor
-            dist, _, _ = BRODualTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=self.cfg.hidden_dims,
-                depth=self.cfg.depth,
-            ).apply(
-                self.state.actor_o_params,
+            dist, _, _ = self.state.actor_o.apply_fn(
+                self.state.actor_o.params,
                 observations,
                 mu_c,
                 std_c,
@@ -303,12 +348,8 @@ class BROLearner:
             actions = dist.sample(seed=action_key)
         else:
             # Sample from conservative actor
-            dist = BRONormalTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=self.cfg.hidden_dims,
-                depth=self.cfg.depth,
-            ).apply(
-                self.state.actor_params,
+            dist = self.state.actor.apply_fn(
+                self.state.actor.params,
                 observations,
                 temperature=temperature,
             )
@@ -329,7 +370,7 @@ class BROLearner:
         next_observations: jax.Array,
         dones: jax.Array,
     ) -> tuple[BROState, LogDict]:
-        """Update distributional critic."""
+        """Update distributional critic with activation collection for reset methods."""
         cfg = self.cfg
         key, action_key = jax.random.split(state.key)
 
@@ -337,21 +378,12 @@ class BROLearner:
         temperature = Temperature(initial_temperature=cfg.init_temperature).apply(state.temp_params)
 
         # Sample next actions from conservative actor
-        next_dist = BRONormalTanhPolicy(
-            action_dim=self.action_dim,
-            hidden_dims=cfg.hidden_dims,
-            depth=cfg.depth,
-        ).apply(state.actor_params, next_observations)
+        next_dist = state.actor.apply_fn(state.actor.params, next_observations)
         next_actions = next_dist.sample(seed=action_key)
         next_log_probs = next_dist.log_prob(next_actions)
 
         # Get target Q-values
-        critic = BRODistributionalCritic(
-            n_quantiles=cfg.n_quantiles if cfg.distributional else 1,
-            hidden_dims=cfg.hidden_dims,
-            depth=cfg.depth,
-        )
-        next_q1, next_q2 = critic.apply(state.target_critic_params, next_observations, next_actions)
+        next_q1, next_q2 = state.critic.apply_fn(state.target_critic_params, next_observations, next_actions)
 
         # Pessimism-weighted combination
         next_q = (next_q1 + next_q2) / 2 - cfg.pessimism * jnp.abs(next_q1 - next_q2) / 2
@@ -367,7 +399,12 @@ class BROLearner:
         target_q = jax.lax.stop_gradient(target_q)
 
         def critic_loss_fn(critic_params):
-            q1, q2 = critic.apply(critic_params, observations, actions)
+            # Collect activations for reset methods
+            (q1, q2), intermediates = state.critic.apply_fn(
+                critic_params, observations, actions,
+                training=True,
+                mutable=("activations",),
+            )
 
             if cfg.distributional:
                 td_errors1 = target_q - q1[..., None]
@@ -379,16 +416,18 @@ class BROLearner:
             else:
                 loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
 
-            return loss, {"q1": q1.mean(), "q2": q2.mean()}
+            return loss, {"q1": q1.mean(), "q2": q2.mean(), "intermediates": intermediates}
 
-        (critic_loss, aux), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)(state.critic_params)
+        (critic_loss, aux), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)(state.critic.params)
 
         # Clip gradients for stability
         grads, grad_norm = clip_grads(grads, max_norm=1.0)
 
-        critic_tx = optax.adamw(learning_rate=cfg.critic_lr)
-        updates, new_critic_opt_state = critic_tx.update(grads, state.critic_opt_state, state.critic_params)
-        new_critic_params = optax.apply_updates(state.critic_params, updates)
+        # Get activation features for reset methods
+        features = flatten_activations(aux["intermediates"].get("activations", {}))
+
+        # Update critic using TrainState (supports reset methods)
+        new_critic = state.critic.apply_gradients(grads=grads, features=features)
 
         logs = {
             "critic/loss": critic_loss,
@@ -398,8 +437,7 @@ class BROLearner:
         }
 
         new_state = state._replace(
-            critic_params=new_critic_params,
-            critic_opt_state=new_critic_opt_state,
+            critic=new_critic,
             key=key,
         )
 
@@ -411,28 +449,26 @@ class BROLearner:
         state: BROState,
         observations: jax.Array,
     ) -> tuple[BROState, LogDict]:
-        """Update conservative actor."""
+        """Update conservative actor with activation collection for reset methods."""
         cfg = self.cfg
         key, action_key = jax.random.split(state.key)
 
         temperature = Temperature(initial_temperature=cfg.init_temperature).apply(state.temp_params)
 
         def actor_loss_fn(actor_params):
-            dist, mu, std = BRONormalTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=cfg.hidden_dims,
-                depth=cfg.depth,
-            ).apply(actor_params, observations, return_params=True)
+            # Collect activations for reset methods
+            (dist, mu, std), intermediates = state.actor.apply_fn(
+                actor_params, observations,
+                return_params=True,
+                training=True,
+                mutable=("activations",),
+            )
 
             actions = dist.sample(seed=action_key)
             log_probs = dist.log_prob(actions)
 
-            critic = BRODistributionalCritic(
-                n_quantiles=cfg.n_quantiles if cfg.distributional else 1,
-                hidden_dims=cfg.hidden_dims,
-                depth=cfg.depth,
-            )
-            q1, q2 = critic.apply(state.critic_params, observations, actions)
+            # Get Q-values (no gradient through critic)
+            q1, q2 = state.critic.apply_fn(state.critic.params, observations, actions)
 
             # Pessimism-weighted Q
             q = (q1 + q2) / 2 - cfg.pessimism * jnp.abs(q1 - q2) / 2
@@ -441,16 +477,18 @@ class BROLearner:
 
             actor_loss = (log_probs * temperature - q).mean()
 
-            return actor_loss, {"entropy": -log_probs.mean(), "std": std.mean()}
+            return actor_loss, {"entropy": -log_probs.mean(), "std": std.mean(), "intermediates": intermediates}
 
-        (actor_loss, aux), grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(state.actor_params)
+        (actor_loss, aux), grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(state.actor.params)
 
         # Clip gradients for stability
         grads, grad_norm = clip_grads(grads, max_norm=1.0)
 
-        actor_tx = optax.adamw(learning_rate=cfg.actor_lr)
-        updates, new_actor_opt_state = actor_tx.update(grads, state.actor_opt_state, state.actor_params)
-        new_actor_params = optax.apply_updates(state.actor_params, updates)
+        # Get activation features for reset methods
+        features = flatten_activations(aux["intermediates"].get("activations", {}))
+
+        # Update actor using TrainState (supports reset methods)
+        new_actor = state.actor.apply_gradients(grads=grads, features=features)
 
         logs = {
             "actor/loss": actor_loss,
@@ -460,8 +498,7 @@ class BROLearner:
         }
 
         new_state = state._replace(
-            actor_params=new_actor_params,
-            actor_opt_state=new_actor_opt_state,
+            actor=new_actor,
             key=key,
         )
 
@@ -473,7 +510,7 @@ class BROLearner:
         state: BROState,
         observations: jax.Array,
     ) -> tuple[BROState, LogDict]:
-        """Update optimistic actor."""
+        """Update optimistic actor with activation collection for reset methods."""
         cfg = self.cfg
         key, action_key = jax.random.split(state.key)
 
@@ -490,35 +527,26 @@ class BROLearner:
         ).apply(state.regularizer_params)
 
         def actor_o_loss_fn(actor_o_params):
-            # Get conservative actor's mean/std
-            _, mu_c, std_c = BRONormalTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=cfg.hidden_dims,
-                depth=cfg.depth,
-            ).apply(state.actor_params, observations, return_params=True)
+            # Get conservative actor's mean/std (no gradient through this)
+            _, mu_c, std_c = state.actor.apply_fn(
+                state.actor.params, observations, return_params=True
+            )
 
-            # Get optimistic actor's distribution
-            dist, mu_o, std_o = BRODualTanhPolicy(
-                action_dim=self.action_dim,
-                hidden_dims=cfg.hidden_dims,
-                depth=cfg.depth,
-            ).apply(
+            # Get optimistic actor's distribution with activation collection
+            (dist, mu_o, std_o), intermediates = state.actor_o.apply_fn(
                 actor_o_params,
                 observations,
                 mu_c,
                 std_c,
                 cfg.std_multiplier,
+                training=True,
+                mutable=("activations",),
             )
 
             actions = dist.sample(seed=action_key)
 
-            # Get Q-values
-            critic = BRODistributionalCritic(
-                n_quantiles=cfg.n_quantiles if cfg.distributional else 1,
-                hidden_dims=cfg.hidden_dims,
-                depth=cfg.depth,
-            )
-            q1, q2 = critic.apply(state.critic_params, observations, actions)
+            # Get Q-values (no gradient through critic)
+            q1, q2 = state.critic.apply_fn(state.critic.params, observations, actions)
 
             # KL divergence between optimistic and conservative
             std_o_scaled = std_o / cfg.std_multiplier
@@ -542,16 +570,19 @@ class BROLearner:
                 "std_o": std_o.mean(),
                 "q_mean": ((q1 + q2) / 2).mean(),
                 "q_std": (jnp.abs(q1 - q2) / 2).mean(),
+                "intermediates": intermediates,
             }
 
-        (actor_o_loss, aux), grads = jax.value_and_grad(actor_o_loss_fn, has_aux=True)(state.actor_o_params)
+        (actor_o_loss, aux), grads = jax.value_and_grad(actor_o_loss_fn, has_aux=True)(state.actor_o.params)
 
         # Clip gradients for stability
         grads, grad_norm = clip_grads(grads, max_norm=1.0)
 
-        actor_o_tx = optax.adamw(learning_rate=cfg.actor_lr)
-        updates, new_actor_o_opt_state = actor_o_tx.update(grads, state.actor_o_opt_state, state.actor_o_params)
-        new_actor_o_params = optax.apply_updates(state.actor_o_params, updates)
+        # Get activation features for reset methods
+        features = flatten_activations(aux["intermediates"].get("activations", {}))
+
+        # Update optimistic actor using TrainState (supports reset methods)
+        new_actor_o = state.actor_o.apply_gradients(grads=grads, features=features)
 
         logs = {
             "actor_o/loss": actor_o_loss,
@@ -564,8 +595,7 @@ class BROLearner:
         }
 
         new_state = state._replace(
-            actor_o_params=new_actor_o_params,
-            actor_o_opt_state=new_actor_o_opt_state,
+            actor_o=new_actor_o,
             key=key,
         )
 
@@ -681,7 +711,7 @@ class BROLearner:
         new_target_params = jax.tree.map(
             lambda t, s: tau * s + (1 - tau) * t,
             state.target_critic_params,
-            state.critic_params,
+            state.critic.params,
         )
         return state._replace(target_critic_params=new_target_params)
 

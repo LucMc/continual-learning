@@ -71,6 +71,22 @@ def redo(
         gated_scores = jnp.where(threshold_mask, scores, jnp.inf)
         return utils.get_bottom_k_mask(gated_scores, k_eff)
 
+    def _feature_key_to_path(key: str) -> tuple:
+        """Convert flattened feature key to path tuple.
+
+        e.g., "q1/main/layer_0_act" -> ("q1", "main", "layer_0")
+        """
+        # Remove _act or _pre suffix
+        if key.endswith("_act"):
+            key = key[:-4]
+        elif key.endswith("_pre"):
+            key = key[:-4]
+        return tuple(key.split("/"))
+
+    def _is_output_layer(path: tuple) -> bool:
+        """Check if this is an output layer that shouldn't be reset."""
+        return path[-1] == "output" or path[-1].endswith("_output")
+
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
@@ -91,57 +107,89 @@ def redo(
 
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            # Use full path (except last element) as key to avoid collisions with nested networks
+            # e.g., ("q1", "main", "layer_0", "kernel") -> ("q1", "main", "layer_0")
+            weights = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
 
-            scores = {
-                key.split("_act")[0]: get_score(feature_tuple[0])
-                for key, feature_tuple in zip(features.keys(), features.values())
-            }
+            # Flatten nested feature dicts (e.g., {'main': {'layer_0_act': ...}})
+            # into flat dict with "/" separators (e.g., {'main/layer_0_act': ...})
+            flat_features = utils.flatten_features(features)
+
+            # Compute dormancy scores from activations
+            # Features are flattened like "q1/main/layer_0_act" -> convert to path tuple
+            scores = {}
+            for key, feature_tuple in flat_features.items():
+                path = _feature_key_to_path(key)
+                # feature_tuple is a tuple of (activation_array,)
+                scores[path] = get_score(feature_tuple[0] if isinstance(feature_tuple, tuple) else feature_tuple)
+
             reset_mask = jax.tree.map(get_reset_mask, scores)
-            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
+
+            # Exclude output layers from resets
+            for path in list(reset_mask.keys()):
+                if _is_output_layer(path):
+                    reset_mask[path] = jnp.zeros_like(reset_mask[path], dtype=bool)
+
             _rng, key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(key, weights)
 
-            # reset weights given mask
+            # Filter to only layers that exist in both weights and reset_mask
+            layers_to_reset = [k for k in weights.keys() if k in reset_mask]
+            weights_to_reset = {k: weights[k] for k in layers_to_reset}
+            key_tree_filtered = utils.gen_key_tree(key, weights_to_reset)
+
+            # Reset weights
             _weights, reset_logs = utils.reset_weights(
-                key_tree,
+                key_tree_filtered,
                 reset_mask,
-                weights,
-                weight_init_fn,  # state.initial_weights
+                weights_to_reset,
+                weight_init_fn,
             )
 
-            # Update bias
-            _biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                reset_mask,
-                biases,
-            )
+            # Reset biases for layers that were reset
+            _biases = {}
+            for layer_path in layers_to_reset:
+                if layer_path in biases and layer_path in reset_mask:
+                    mask = reset_mask[layer_path]
+                    bias = biases[layer_path]
+                    _biases[layer_path] = jnp.where(mask, jnp.zeros_like(bias, dtype=bias.dtype), bias)
 
-            new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: Could be improved
+            # Build new flat params by updating original with reset values
+            new_flat_params = {}
+            _logs = {k: 0 for k in state.logs}
+            counted_layers = set()
 
-            for layer_name in biases.keys():
-                new_params[layer_name] = {
-                    "kernel": _weights[layer_name],
-                    "bias": _biases[layer_name],
-                }
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+            for path, value in flat_params.items():
+                layer_path = path[:-1]  # Full path without 'kernel'/'bias'
+                param_type = path[-1]  # "kernel", "bias", "scale", etc.
+
+                if layer_path in _weights and param_type == "kernel":
+                    new_flat_params[path] = _weights[layer_path]
+                    if layer_path in reset_logs and layer_path not in counted_layers:
+                        _logs["nodes_reset"] += reset_logs[layer_path]["nodes_reset"]
+                        counted_layers.add(layer_path)
+                elif layer_path in _biases and param_type == "bias":
+                    new_flat_params[path] = _biases[layer_path]
+                else:
+                    # Keep original value for non-reset params
+                    new_flat_params[path] = value
+
+            # Reconstruct params tree, preserving any extra keys from original params
+            new_params_dict = flax.traverse_util.unflatten_dict(new_flat_params)
+            new_params = {"params": new_params_dict}
+            # Copy over any extra keys (e.g., activations, preactivations)
+            for key in params:
+                if key not in new_params:
+                    new_params[key] = params[key]
 
             new_state = state.replace(
                 logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng
             )
-            # new_params.update(excluded)
 
-            # Reset optim, i.e. Adamw params
+            # Reset optimizer momentum
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
-            flat_new_params, _ = jax.tree.flatten(new_params)
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                _tx_state,
-            )
+            return (new_params, new_state, _tx_state)
 
         condition = jnp.logical_and(
             state.time_step > 0, (state.time_step % update_frequency == 0)

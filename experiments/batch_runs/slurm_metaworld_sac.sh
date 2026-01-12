@@ -14,7 +14,7 @@
 # Usage: sbatch slurm_metaworld_sac.sh [wandb_entity] [wandb_project]
 # Example: sbatch --array=0-29 slurm_metaworld_sac.sh lucmc metaworld_sac
 
-VENV_DIR="../../../.venv"
+VENV_DIR="../../.venv"
 wandb_entity="${1:-lucmc}"
 wandb_project="${2:-metaworld_sac}"
 
