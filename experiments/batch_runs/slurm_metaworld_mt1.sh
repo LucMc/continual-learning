@@ -9,7 +9,7 @@
 #SBATCH --time=03-00:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
-#SBATCH --array=0-49   # 5 methods x 10 tasks x 5 seeds = 250 jobs, max 50 concurrent
+#SBATCH --array=0-249   # 5 methods x 10 tasks x 5 seeds = 250 jobs
 
 # Usage: sbatch slurm_metaworld_mt1.sh [wandb_entity]
 # Example: sbatch slurm_metaworld_mt1.sh lucmc
@@ -51,8 +51,7 @@ tasks=(
 )
 
 # Seeds (5)
-# seeds=(0 1 2 3 4)
-seeds=(0)
+seeds=(0 1 2 3 4)
 
 num_methods=${#methods[@]}
 num_tasks=${#tasks[@]}
@@ -62,7 +61,6 @@ num_seeds=${#seeds[@]}
 # Layout: iterate over seeds -> tasks -> methods
 # Total = num_methods * num_tasks * num_seeds = 5 * 10 * 5 = 250
 #
-# SLURM_ARRAY_TASK_ID = method_idx + num_methods * (task_idx + num_tasks * seed_idx)
 # method_idx = SLURM_ARRAY_TASK_ID % num_methods
 # task_idx = (SLURM_ARRAY_TASK_ID / num_methods) % num_tasks
 # seed_idx = SLURM_ARRAY_TASK_ID / (num_methods * num_tasks)
@@ -75,50 +73,21 @@ method="${methods[$method_idx]}"
 task="${tasks[$task_idx]}"
 seed="${seeds[$seed_idx]}"
 
-# Output filename for this job
 output_filename="mt1_${task}_${method}_seed${seed}_job${SLURM_JOB_ID}.out"
 
-echo "=============================================="
-echo "MetaWorld MT1 Single-Task Experiment"
-echo "=============================================="
-echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
-echo "Task: $task"
-echo "Method: $method"
-echo "Seed: $seed"
-echo "W&B Entity: $wandb_entity"
-echo "W&B Project: $wandb_project"
-echo "=============================================="
+# --- Setup environment ---
+cd "$SLURM_SUBMIT_DIR"
 
-# --- Navigate to project root ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/../.."
-echo "Working directory: $(pwd)"
-
-# --- Setup Python environment ---
-if ! command -v uv &> /dev/null; then
-    echo "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment..."
-    uv venv "$VENV_DIR" --python 3.12
-fi
-
-echo "Activating virtual environment..."
+# Derive project root from venv path (VENV_DIR is ../../.venv relative to batch_runs/)
+PROJECT_ROOT="$(cd "$VENV_DIR/.." && pwd)"
 source "$VENV_DIR/bin/activate"
 
 # --- Run MT1 experiment ---
-echo "Starting experiment..."
-python -m experiments.metaworld_mt1 \
+echo "Running SAC MT1: task=$task, method=$method, seed=$seed"
+python "$PROJECT_ROOT/experiments/metaworld_mt1.py" \
     --task-name "$task" \
     --optimizer "$method" \
     --seed "$seed" \
     --wandb-entity "$wandb_entity" \
     --wandb-project "$wandb_project" \
-    2>&1 | tee "$output_filename"
-
-exit_code=${PIPESTATUS[0]}
-echo "Experiment finished with exit code: $exit_code"
-exit $exit_code
+    > "$output_filename" 2>&1

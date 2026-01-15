@@ -121,6 +121,7 @@ class SAC:
             dummy_obs,
             dummy_action,
             training=False,
+            mutable=DenyList(["activations", "preactivations"]),
         )
 
         critic = TrainState.create(
