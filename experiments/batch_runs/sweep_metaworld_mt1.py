@@ -41,7 +41,13 @@ from continual_learning.configs import (
     ShrinkAndPerterbConfig,
 )
 from continual_learning.configs.models import MLPConfig
-from continual_learning.configs.rl import PolicyNetworkConfig, QNetworkConfig, SACConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, SACConfig
+
+# Backwards compatibility: Use NetworkConfig if QNetworkConfig not available
+try:
+    from continual_learning.configs.rl import QNetworkConfig
+except ImportError:
+    from continual_learning.configs.rl import NetworkConfig as QNetworkConfig
 from continual_learning.envs.metaworld import MetaWorldSingleTaskEnv
 from continual_learning.trainers.sac import SAC
 from continual_learning.types import Activation, StdType
@@ -89,20 +95,20 @@ SWEEP_RANGES = {
         "learning_rate": [1e-4, 3e-4, 1e-3],
     },
     # ReDo (Sokar et al. 2023): Activation-based dormancy detection
-    # For continuous control (MuJoCo/MetaWorld): optimal τ = 0.025-0.05
-    # Check interval 1000-2000 for stability
+    # For single-task RL: less frequent resets, conservative thresholds
+    # max_reset_frac caps neurons reset per cycle to prevent instability
     "redo": {
-        "update_frequency": [1000, 5000],  # Reduced: paper typical 1000-2000
-        "score_threshold": [0.01, 0.025, 0.05, 0.1, 0.2],  # Full paper range
-        "max_reset_frac": [0.1, None],  # Reduced: common settings
+        "update_frequency": [10000, 100000],
+        "score_threshold": [0.0001, 0.001, 0.01],
+        "max_reset_frac": [0.02, 0.05],
     },
     # ReGraMa (Liu et al. 2025): Gradient magnitude-based resets
     # Uses gradient norm instead of activation - better for deep nets
-    # α threshold: {1e-5, 1e-4, 0.001, 0.01}, optimal 1e-4
+    # max_reset_frac caps neurons reset per cycle to prevent instability
     "regrama": {
-        "update_frequency": [1000, 5000],  # Reduced
-        "score_threshold": [1e-5, 1e-4, 0.001, 0.01],  # Paper gradient thresholds
-        "max_reset_frac": [0.001, 0.01, 0.1],  # Paper reset_rate values
+        "update_frequency": [10000, 100000],
+        "score_threshold": [0.0001, 0.001, 0.01],
+        "max_reset_frac": [0.02, 0.05],
     },
     # CBP (Dohare et al. 2024): Stochastic continuous replacement
     # ρ (replacement_rate): optimal 1e-4 for RL
@@ -114,12 +120,12 @@ SWEEP_RANGES = {
     },
     # CCBP: Threshold-based CBP variant with utility scoring
     "ccbp": {
-        "decay_rate": [0.9, 0.99],
-        "replacement_rate": [0.001, 0.01, 0.1],
+        "decay_rate": [0.9],
+        "replacement_rate": [0.0001, 0.001, 0.01, 0.1, 0.125, 0.15],
         "sharpness": [16],  # Fixed at paper optimal
         "threshold": [1.0],  # Fixed
-        "update_frequency": [1000, 5000],
-        "transform_type": ["linear"],
+        "update_frequency": [1, 1000, 5000],
+        "transform_type": ["sigmoid"],
     },
     # Shrink and Perturb (Ash & Adams 2020)
     # Paper: noise σ ∈ {0.01, 0.1} for S&P baseline
