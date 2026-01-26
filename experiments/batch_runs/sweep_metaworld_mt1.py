@@ -269,7 +269,7 @@ def evaluate(env, sac_state, key, num_episodes: int = 10):
     episode_returns = []
     episode_successes = []
 
-    current_return = np.zeros(1)
+    current_return = np.zeros(env.num_envs)
 
     while len(episode_returns) < num_episodes:
         dist = sac_state.actor.apply_fn(sac_state.actor.params, obs)
@@ -288,7 +288,8 @@ def evaluate(env, sac_state, key, num_episodes: int = 10):
         for i, done in enumerate(dones):
             if done:
                 episode_returns.append(float(current_return[i]))
-                episode_successes.append(timestep.info.get("success", [False])[i])
+                success_list = timestep.info.get("success", [False] * env.num_envs)
+                episode_successes.append(success_list[i] if i < len(success_list) else False)
                 current_return[i] = 0
 
         obs = timestep.next_observation
@@ -433,7 +434,8 @@ def run_config(
         for i, done in enumerate(dones_np):
             if done:
                 episode_rewards.append(float(current_episode_reward[i]))
-                episode_successes.append(timestep.info.get("success", [False])[i])
+                success_list = timestep.info.get("success", [False] * num_envs)
+                episode_successes.append(success_list[i] if i < len(success_list) else False)
                 current_episode_reward[i] = 0
                 current_episode_length[i] = 0
                 total_episodes += 1

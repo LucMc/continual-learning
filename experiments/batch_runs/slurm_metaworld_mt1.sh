@@ -61,7 +61,7 @@ num_seeds=${#seeds[@]}
 
 # Map SLURM_ARRAY_TASK_ID to (method_idx, task_idx, seed_idx)
 # Layout: iterate over seeds -> tasks -> methods
-# Total = num_methods * num_tasks * num_seeds = 5 * 10 * 5 = 250
+# Total = num_methods * num_tasks * num_seeds = 6 * 10 * 5 = 300
 #
 # method_idx = SLURM_ARRAY_TASK_ID % num_methods
 # task_idx = (SLURM_ARRAY_TASK_ID / num_methods) % num_tasks

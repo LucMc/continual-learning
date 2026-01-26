@@ -294,6 +294,7 @@ class MetaWorldSingleTaskEnv(VectorEnv):
 
         if self._async:
             # Use gymnasium's AsyncVectorEnv for true parallelism
+            # Use "spawn" context to avoid JAX fork() deadlock warning
             import gymnasium
             from functools import partial
 
@@ -301,7 +302,8 @@ class MetaWorldSingleTaskEnv(VectorEnv):
                 partial(_make_metaworld_env, task_name, seed, i)
                 for i in range(num_envs)
             ]
-            self._vec_env = gymnasium.vector.AsyncVectorEnv(env_fns)
+            # "spawn" is safer with JAX (avoids fork() with threads)
+            self._vec_env = gymnasium.vector.AsyncVectorEnv(env_fns, context="spawn")
             self._obs_dim = self._vec_env.single_observation_space.shape[0]
             self._action_dim = self._vec_env.single_action_space.shape[0]
         else:

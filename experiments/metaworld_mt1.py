@@ -336,7 +336,8 @@ def run_metaworld_mt1():
             if done:
                 episode_rewards.append(float(current_episode_reward[i]))
                 episode_lengths.append(int(current_episode_length[i]))
-                episode_successes.append(timestep.info.get("success", [False])[i])
+                success_list = timestep.info.get("success", [False] * args.num_envs)
+                episode_successes.append(success_list[i] if i < len(success_list) else False)
                 current_episode_reward[i] = 0
                 current_episode_length[i] = 0
                 total_episodes += 1
@@ -448,8 +449,8 @@ def evaluate(env, sac_state, key, num_episodes: int = 10):
     episode_returns = []
     episode_successes = []
 
-    current_return = np.zeros(1)
-    current_length = np.zeros(1, dtype=int)
+    current_return = np.zeros(env.num_envs)
+    current_length = np.zeros(env.num_envs, dtype=int)
 
     while len(episode_returns) < num_episodes:
         # Deterministic action selection
@@ -470,7 +471,8 @@ def evaluate(env, sac_state, key, num_episodes: int = 10):
         for i, done in enumerate(dones):
             if done:
                 episode_returns.append(float(current_return[i]))
-                episode_successes.append(timestep.info.get("success", [False])[i])
+                success_list = timestep.info.get("success", [False] * env.num_envs)
+                episode_successes.append(success_list[i] if i < len(success_list) else False)
                 current_return[i] = 0
                 current_length[i] = 0
 
