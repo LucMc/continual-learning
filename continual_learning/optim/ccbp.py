@@ -5,6 +5,7 @@ import flax
 import jax
 import jax.numpy as jnp
 import jax.random as random
+import numpy as np
 import optax
 from flax.core import FrozenDict
 import flax.traverse_util
@@ -19,6 +20,10 @@ from continual_learning.types import GradientTransformationExtraArgsReset
 import continual_learning.utils.optim as utils
 from continual_learning.optim.cbp import CbpOptimState
 
+# Default log values - use numpy to avoid JAX initialization at import time
+_DEFAULT_HISTOGRAM_COUNTS = tuple([0.0] * 50)
+_DEFAULT_HISTOGRAM_EDGES = tuple(np.linspace(0.0, 2.0, 51).tolist())
+
 
 class CcbpOptimState(CbpOptimState):
     time_step: int = 0
@@ -28,8 +33,8 @@ class CcbpOptimState(CbpOptimState):
             "nodes_reset": 0.0,
             "low_utility": 0,
             "mean_utils": 0.0,
-            "utility_histogram_counts": jnp.zeros(50),
-            "utility_histogram_edges": jnp.linspace(0.0, 2.0, 51),
+            "utility_histogram_counts": _DEFAULT_HISTOGRAM_COUNTS,
+            "utility_histogram_edges": _DEFAULT_HISTOGRAM_EDGES,
         }
     )
 

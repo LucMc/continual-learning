@@ -249,19 +249,6 @@ class MetaWorldMT10Benchmark(ContinualLearningEnv):
         self._current_task_idx = checkpoint.get("current_task_idx", 0)
 
 
-def _make_metaworld_env(task_name: str, seed: int, task_idx: int):
-    """Factory function for creating MetaWorld envs in subprocesses."""
-    import metaworld
-
-    ml1 = metaworld.ML1(task_name, seed=seed)
-    task_cls = ml1.train_classes[task_name]
-    tasks = ml1.train_tasks
-
-    env = task_cls()
-    env.set_task(tasks[task_idx % len(tasks)])
-    return env
-
-
 class MetaWorldSingleTaskEnv(VectorEnv):
     """Wrapper for a single MetaWorld task with optional async parallelism."""
 
@@ -298,8 +285,12 @@ class MetaWorldSingleTaskEnv(VectorEnv):
             import gymnasium
             from functools import partial
 
+            # Import factory from isolated module that sets JAX_PLATFORMS=cpu
+            # This prevents GPU memory conflicts in spawned worker processes
+            from continual_learning.envs._metaworld_worker import make_metaworld_env
+
             env_fns = [
-                partial(_make_metaworld_env, task_name, seed, i)
+                partial(make_metaworld_env, task_name, seed, i)
                 for i in range(num_envs)
             ]
             # "spawn" is safer with JAX (avoids fork() with threads)

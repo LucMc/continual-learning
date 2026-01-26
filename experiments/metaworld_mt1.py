@@ -15,6 +15,14 @@ Usage:
     python -m experiments.metaworld_mt1 --task-name reach-v3 --optimizer adam --seed 0 --total-steps 100000 --wandb-mode disabled
 """
 
+# IMPORTANT: Detect spawned subprocess workers BEFORE importing JAX.
+# When using multiprocessing with 'spawn' context, this script is re-executed
+# in worker processes. Workers don't need GPU, so force CPU-only JAX.
+import multiprocessing
+if multiprocessing.current_process().name != "MainProcess":
+    import os
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
 import time
 from typing import Literal
 
