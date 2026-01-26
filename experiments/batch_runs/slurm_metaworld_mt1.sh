@@ -2,28 +2,30 @@
 #SBATCH --job-name=metaworld_mt1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
 #SBATCH --partition=2080ti
 #SBATCH --gpus=1
-#SBATCH --time=03-00:00:00
+#SBATCH --time=05-00:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
-#SBATCH --array=0-249   # 5 methods x 10 tasks x 5 seeds = 250 jobs
+#SBATCH --array=0-299   # 6 methods x 10 tasks x 5 seeds = 300 jobs
 
 # Usage: sbatch slurm_metaworld_mt1.sh [wandb_entity]
 # Example: sbatch slurm_metaworld_mt1.sh lucmc
 #
 # This script runs SAC on each of the 10 MetaWorld MT10 tasks individually (as MT1)
-# with 5 different reset methods across 5 seeds.
+# with 6 different reset methods across 5 seeds.
 #
-# Total runs: 5 methods x 10 tasks x 5 seeds = 250 runs
+# Total runs: 6 methods x 10 tasks x 5 seeds = 300 runs
 #
-# Methods: adam, cbp, ccbp, regrama, shrink_and_perturb
+# Methods: adam, cbp, ccbp, redo, regrama, shrink_and_perturb
 # Tasks: reach-v3, push-v3, pick-place-v3, door-open-v3, drawer-open-v3,
 #        drawer-close-v3, button-press-topdown-v3, peg-insert-side-v3,
 #        window-open-v3, window-close-v3
 # Seeds: 0, 1, 2, 3, 4
+#
+# Training: 5M steps with 10 parallel async envs (uses multiprocessing)
 #
 # Results are logged to W&B project "MT1 results" with:
 #   - Group: task name (e.g., "reach-v3")
@@ -33,8 +35,8 @@ VENV_DIR="../../.venv"
 wandb_entity="${1:-lucmc}"
 wandb_project="MT1 results"
 
-# Methods (5)
-methods=("adam" "cbp" "ccbp" "regrama" "shrink_and_perturb")
+# Methods (6)
+methods=("adam" "cbp" "ccbp" "redo" "regrama" "shrink_and_perturb")
 
 # MT10 tasks (10)
 tasks=(
@@ -84,10 +86,14 @@ source "$VENV_DIR/bin/activate"
 
 # --- Run MT1 experiment ---
 echo "Running SAC MT1: task=$task, method=$method, seed=$seed"
+echo "  Total steps: 5M, Num envs: 10 (async)"
 python "$PROJECT_ROOT/experiments/metaworld_mt1.py" \
     --task-name "$task" \
     --optimizer "$method" \
     --seed "$seed" \
+    --total-steps 5000000 \
+    --num-envs 10 \
+    --async-envs \
     --wandb-entity "$wandb_entity" \
     --wandb-project "$wandb_project" \
     > "$output_filename" 2>&1

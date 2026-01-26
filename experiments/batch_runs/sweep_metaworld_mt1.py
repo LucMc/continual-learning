@@ -305,7 +305,9 @@ def run_config(
     config_id: int,
     task: str,
     seed: int = 0,
-    total_steps: int = 500_000,
+    total_steps: int = 5_000_000,
+    num_envs: int = 10,
+    async_envs: bool = True,
     wandb_entity: Optional[str] = None,
     wandb_project: Optional[str] = None,
     wandb_mode: str = "online",
@@ -322,6 +324,8 @@ def run_config(
     print(f"{'='*60}")
     print(f"MT1 Sweep: {algo} config {config_id}")
     print(f"Task: {task}, Seed: {seed}")
+    print(f"Num envs: {num_envs} (async={async_envs})")
+    print(f"Total steps: {total_steps}")
     print(f"Params: {tag}")
     print(f"{'='*60}")
 
@@ -331,7 +335,9 @@ def run_config(
 
     # Create environment
     print("Initializing environment...")
-    env = MetaWorldSingleTaskEnv(task_name=task, num_envs=1, seed=seed)
+    env = MetaWorldSingleTaskEnv(
+        task_name=task, num_envs=num_envs, seed=seed, async_envs=async_envs
+    )
     print(f"  Obs dim: {env.obs_dim}, Action dim: {env.action_dim}")
 
     # Initialize logger
@@ -352,6 +358,8 @@ def run_config(
             "config_id": config_id,
             "seed": seed,
             "total_steps": total_steps,
+            "num_envs": num_envs,
+            "async_envs": async_envs,
             **params,
         },
     )
@@ -384,8 +392,8 @@ def run_config(
 
     episode_rewards: list[float] = []
     episode_successes: list[bool] = []
-    current_episode_reward = np.zeros(1)
-    current_episode_length = np.zeros(1, dtype=int)
+    current_episode_reward = np.zeros(num_envs)
+    current_episode_length = np.zeros(num_envs, dtype=int)
 
     obs = env.init()
     start_time = time.time()
@@ -431,7 +439,7 @@ def run_config(
                 total_episodes += 1
 
         obs = timestep.next_observation
-        total_env_steps += 1
+        total_env_steps += num_envs  # Count all env steps
 
         # Update SAC
         all_logs = []
@@ -517,6 +525,7 @@ def run_config(
     print(f"{'='*60}")
 
     logger.close()
+    env.close()
 
     return final_metrics
 
@@ -571,7 +580,9 @@ class Args:
     task: str = "reach-v3"
     config_id: Optional[int] = None
     seed: int = 0
-    total_steps: int = 500_000
+    total_steps: int = 5_000_000
+    num_envs: int = 10
+    async_envs: bool = True
     wandb_entity: Optional[str] = None
     wandb_project: Optional[str] = None
     wandb_mode: str = "online"
@@ -614,6 +625,8 @@ if __name__ == "__main__":
             task=args.task,
             seed=args.seed,
             total_steps=args.total_steps,
+            num_envs=args.num_envs,
+            async_envs=args.async_envs,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
             wandb_mode=args.wandb_mode,

@@ -29,6 +29,7 @@ from continual_learning.configs import (
     CbpConfig,
     CcbpConfig,
     LoggingConfig,
+    RedoConfig,
     RegramaConfig,
     ShrinkAndPerterbConfig,
 )
@@ -55,7 +56,7 @@ MT10_TASKS = [
     "window-close-v3",
 ]
 
-OPTIMIZERS = ["adam", "cbp", "ccbp", "regrama", "shrink_and_perturb"]
+OPTIMIZERS = ["adam", "cbp", "ccbp", "redo", "regrama", "shrink_and_perturb"]
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ class Args:
     """Command line arguments for MetaWorld MT1 experiment."""
 
     task_name: str
-    optimizer: Literal["adam", "cbp", "ccbp", "regrama", "shrink_and_perturb"]
+    optimizer: Literal["adam", "cbp", "ccbp", "redo", "regrama", "shrink_and_perturb"]
     seed: int = 0
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = "MT1 results"
@@ -74,7 +75,11 @@ class Args:
     buffer_size: int = 1_000_000
     batch_size: int = 256
     learning_starts: int = 5_000
-    total_steps: int = 500_000
+    total_steps: int = 5_000_000
+
+    # Environment settings
+    num_envs: int = 10
+    async_envs: bool = True  # Use multiprocessing for parallel env stepping
 
     # Network architecture (match MT10 SAC)
     hidden_size: int = 256
@@ -82,13 +87,30 @@ class Args:
 
 
 def get_optimizer_config(name: str, seed: int, lr: float = 3e-4):
-    """Get optimizer config by name."""
+    """Get optimizer config by name.
+
+    Best parameters from MT1 sweep (window-close-v3):
+    - CCBP: 4414.9 return (best single run)
+    - S&P: 4377.8 return
+    - ReGraMa: 3466.9 return
+    - ReDo: Uses same params as ReGraMa
+    """
     optimizers = {
         "adam": AdamConfig(learning_rate=lr),
+        # ReGraMa: Best single run 3466.9
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=lr),
-            update_frequency=5000,
-            score_threshold=0.01,
+            update_frequency=100000,
+            score_threshold=0.0001,
+            max_reset_frac=0.02,
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        # ReDo: Using same params as ReGraMa (ReDo underperformed in sweep)
+        "redo": RedoConfig(
+            tx=AdamConfig(learning_rate=lr),
+            update_frequency=100000,
+            score_threshold=0.0001,
             max_reset_frac=0.02,
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -101,22 +123,24 @@ def get_optimizer_config(name: str, seed: int, lr: float = 3e-4):
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
+        # CCBP: Best single run 4414.9
         "ccbp": CcbpConfig(
             tx=AdamConfig(learning_rate=lr),
             seed=seed,
             decay_rate=0.99,
-            replacement_rate=0.001,
-            sharpness=8,
-            threshold=0.5,
-            update_frequency=5000,
-            transform_type="linear",
+            replacement_rate=0.15,
+            sharpness=16,
+            threshold=1.0,
+            update_frequency=1000,
+            transform_type="sigmoid",
         ),
+        # S&P: Best single run 4377.8
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             tx=AdamConfig(learning_rate=lr),
             seed=seed,
             shrink=0.9999,
             perturb=0.001,
-            every_n=5000,
+            every_n=1000,
             param_noise_fn=jax.nn.initializers.lecun_normal(),
         ),
     }
@@ -192,6 +216,7 @@ def run_metaworld_mt1():
     print(f"Optimizer: {args.optimizer}")
     print(f"Seed: {args.seed}")
     print(f"Total steps: {args.total_steps}")
+    print(f"Num envs: {args.num_envs} (async={args.async_envs})")
     print(f"Replay ratio: {args.replay_ratio}")
     print(f"{'='*60}")
 
@@ -199,8 +224,9 @@ def run_metaworld_mt1():
     print("Initializing environment...")
     env = MetaWorldSingleTaskEnv(
         task_name=args.task_name,
-        num_envs=1,
+        num_envs=args.num_envs,
         seed=args.seed,
+        async_envs=args.async_envs,
     )
     print(f"  Obs dim: {env.obs_dim}, Action dim: {env.action_dim}")
 
@@ -226,6 +252,8 @@ def run_metaworld_mt1():
             "optimizer": args.optimizer,
             "seed": args.seed,
             "total_steps": args.total_steps,
+            "num_envs": args.num_envs,
+            "async_envs": args.async_envs,
             "replay_ratio": args.replay_ratio,
             "buffer_size": args.buffer_size,
             "batch_size": args.batch_size,
@@ -264,8 +292,8 @@ def run_metaworld_mt1():
 
     episode_rewards: list[float] = []
     episode_lengths: list[int] = []
-    current_episode_reward = np.zeros(1)
-    current_episode_length = np.zeros(1, dtype=int)
+    current_episode_reward = np.zeros(args.num_envs)
+    current_episode_length = np.zeros(args.num_envs, dtype=int)
     episode_successes: list[bool] = []
 
     # Initialize environment
@@ -314,7 +342,7 @@ def run_metaworld_mt1():
                 total_episodes += 1
 
         obs = timestep.next_observation
-        total_steps += 1
+        total_steps += args.num_envs  # Count all env steps
 
         # Update SAC
         all_logs = []
@@ -411,6 +439,7 @@ def run_metaworld_mt1():
     print(f"{'='*60}")
 
     logger.close()
+    env.close()
 
 
 def evaluate(env, sac_state, key, num_episodes: int = 10):

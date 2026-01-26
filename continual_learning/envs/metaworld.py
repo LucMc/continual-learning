@@ -249,16 +249,36 @@ class MetaWorldMT10Benchmark(ContinualLearningEnv):
         self._current_task_idx = checkpoint.get("current_task_idx", 0)
 
 
-class MetaWorldSingleTaskEnv(VectorEnv):
-    """Wrapper for a single MetaWorld task (for debugging/testing)."""
+def _make_metaworld_env(task_name: str, seed: int, task_idx: int):
+    """Factory function for creating MetaWorld envs in subprocesses."""
+    import metaworld
 
-    def __init__(self, task_name: str, num_envs: int = 1, seed: int = 0):
+    ml1 = metaworld.ML1(task_name, seed=seed)
+    task_cls = ml1.train_classes[task_name]
+    tasks = ml1.train_tasks
+
+    env = task_cls()
+    env.set_task(tasks[task_idx % len(tasks)])
+    return env
+
+
+class MetaWorldSingleTaskEnv(VectorEnv):
+    """Wrapper for a single MetaWorld task with optional async parallelism."""
+
+    def __init__(
+        self,
+        task_name: str,
+        num_envs: int = 1,
+        seed: int = 0,
+        async_envs: bool = True,
+    ):
         """Initialize single task environment.
 
         Args:
             task_name: Name of the MetaWorld task
             num_envs: Number of parallel environments
             seed: Random seed
+            async_envs: If True, use multiprocessing for parallel env stepping
         """
         try:
             import metaworld
@@ -270,23 +290,37 @@ class MetaWorldSingleTaskEnv(VectorEnv):
         self.task_name = task_name
         self.num_envs = num_envs
         self.seed = seed
+        self._async = async_envs and num_envs > 1
 
-        # Create ML1 benchmark for single task
-        ml1 = metaworld.ML1(task_name, seed=seed)
-        self._task_cls = ml1.train_classes[task_name]
-        self._tasks = ml1.train_tasks
+        if self._async:
+            # Use gymnasium's AsyncVectorEnv for true parallelism
+            import gymnasium
+            from functools import partial
 
-        # Create environments
-        self._envs = []
-        for i in range(num_envs):
-            env = self._task_cls()
-            task_idx = i % len(self._tasks)
-            env.set_task(self._tasks[task_idx])
-            env.reset(seed=seed + i)
-            self._envs.append(env)
+            env_fns = [
+                partial(_make_metaworld_env, task_name, seed, i)
+                for i in range(num_envs)
+            ]
+            self._vec_env = gymnasium.vector.AsyncVectorEnv(env_fns)
+            self._obs_dim = self._vec_env.single_observation_space.shape[0]
+            self._action_dim = self._vec_env.single_action_space.shape[0]
+        else:
+            # Original sequential implementation
+            ml1 = metaworld.ML1(task_name, seed=seed)
+            self._task_cls = ml1.train_classes[task_name]
+            self._tasks = ml1.train_tasks
 
-        self._obs_dim = self._envs[0].observation_space.shape[0]
-        self._action_dim = self._envs[0].action_space.shape[0]
+            self._envs = []
+            for i in range(num_envs):
+                env = self._task_cls()
+                task_idx = i % len(self._tasks)
+                env.set_task(self._tasks[task_idx])
+                env.reset(seed=seed + i)
+                self._envs.append(env)
+
+            self._obs_dim = self._envs[0].observation_space.shape[0]
+            self._action_dim = self._envs[0].action_space.shape[0]
+
         self._current_obs: np.ndarray | None = None
 
     @property
@@ -299,53 +333,94 @@ class MetaWorldSingleTaskEnv(VectorEnv):
 
     def init(self) -> Observation:
         """Reset all environments."""
-        obs_list = []
-        for i, env in enumerate(self._envs):
-            obs, _ = env.reset(seed=self.seed + i)
-            obs_list.append(obs)
+        if self._async:
+            obs, _ = self._vec_env.reset(seed=self.seed)
+            self._current_obs = obs
+        else:
+            obs_list = []
+            for i, env in enumerate(self._envs):
+                obs, _ = env.reset(seed=self.seed + i)
+                obs_list.append(obs)
+            self._current_obs = np.stack(obs_list, axis=0)
 
-        self._current_obs = np.stack(obs_list, axis=0)
         return jnp.array(self._current_obs)
 
     def step(self, action: Action) -> Timestep:
         """Step environments."""
         actions_np = np.asarray(action)
 
-        next_obs_list = []
-        rewards_list = []
-        terminated_list = []
-        truncated_list = []
-        infos = {"success": []}
+        if self._async:
+            # AsyncVectorEnv handles auto-reset internally
+            next_obs, rewards, terminated, truncated, infos = self._vec_env.step(
+                actions_np
+            )
+            self._current_obs = next_obs
 
-        for i, env in enumerate(self._envs):
-            obs, reward, terminated, truncated, info = env.step(actions_np[i])
+            # Extract success from info dict (gymnasium vectorizes this differently)
+            if "success" in infos:
+                success_list = list(infos["success"])
+            elif "final_info" in infos:
+                # On auto-reset, success is in final_info
+                success_list = [
+                    fi.get("success", False) if fi else False
+                    for fi in infos.get("final_info", [{}] * self.num_envs)
+                ]
+            else:
+                success_list = [False] * self.num_envs
 
-            if terminated or truncated:
-                obs, _ = env.reset()
+            return Timestep(
+                next_observation=jnp.array(next_obs),
+                reward=jnp.array(rewards[:, None]),
+                terminated=jnp.array(terminated[:, None]),
+                truncated=jnp.array(truncated[:, None]),
+                info={"success": success_list},
+            )
+        else:
+            # Original sequential implementation
+            next_obs_list = []
+            rewards_list = []
+            terminated_list = []
+            truncated_list = []
+            infos = {"success": []}
 
-            next_obs_list.append(obs)
-            rewards_list.append(reward)
-            terminated_list.append(terminated)
-            truncated_list.append(truncated)
-            infos["success"].append(info.get("success", False))
+            for i, env in enumerate(self._envs):
+                obs, reward, terminated, truncated, info = env.step(actions_np[i])
 
-        next_obs = jnp.array(np.stack(next_obs_list, axis=0))
-        rewards = jnp.array(np.array(rewards_list)[:, None])
-        terminated = jnp.array(np.array(terminated_list)[:, None])
-        truncated = jnp.array(np.array(truncated_list)[:, None])
+                if terminated or truncated:
+                    obs, _ = env.reset()
 
-        self._current_obs = np.stack(next_obs_list, axis=0)
+                next_obs_list.append(obs)
+                rewards_list.append(reward)
+                terminated_list.append(terminated)
+                truncated_list.append(truncated)
+                infos["success"].append(info.get("success", False))
 
-        return Timestep(
-            next_observation=next_obs,
-            reward=rewards,
-            terminated=terminated,
-            truncated=truncated,
-            info=infos,
-        )
+            next_obs = jnp.array(np.stack(next_obs_list, axis=0))
+            rewards = jnp.array(np.array(rewards_list)[:, None])
+            terminated = jnp.array(np.array(terminated_list)[:, None])
+            truncated = jnp.array(np.array(truncated_list)[:, None])
+
+            self._current_obs = np.stack(next_obs_list, axis=0)
+
+            return Timestep(
+                next_observation=next_obs,
+                reward=rewards,
+                terminated=terminated,
+                truncated=truncated,
+                info=infos,
+            )
 
     def save(self) -> dict:
         return {"current_obs": self._current_obs}
 
     def load(self, checkpoint: dict):
         self._current_obs = checkpoint.get("current_obs")
+
+    def close(self):
+        """Clean up environments."""
+        if self._async:
+            self._vec_env.close()
+        else:
+            for env in self._envs:
+                if hasattr(env, "close"):
+                    env.close()
