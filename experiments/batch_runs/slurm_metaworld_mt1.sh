@@ -6,7 +6,7 @@
 #SBATCH --mem=32G
 #SBATCH --partition=2080ti
 #SBATCH --gpus=1
-#SBATCH --time=05-00:00:00
+#SBATCH --time=03-00:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
 #SBATCH --array=0-299   # 6 methods x 10 tasks x 5 seeds = 300 jobs

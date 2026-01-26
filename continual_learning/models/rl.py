@@ -1,3 +1,5 @@
+import math
+
 import distrax
 import flax.linen as nn
 import jax
@@ -15,7 +17,7 @@ LOG_STD_MIN = -10.0
 LOG_STD_MAX = 2.0
 
 
-def orthogonal_init(scale: float = jnp.sqrt(2)):
+def orthogonal_init(scale: float = math.sqrt(2)):
     """Orthogonal initialization as used in BRO."""
     return nn.initializers.orthogonal(scale)
 
