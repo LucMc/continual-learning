@@ -1,4 +1,4 @@
-"""Plot transformation functions used in CCBP."""
+"""Plot transformation functions used in CPR."""
 from pathlib import Path
 
 import numpy as np
@@ -58,7 +58,7 @@ def main() -> None:
 
     ax.set_xlabel("Utility", fontsize=base_fontsize, fontweight="bold")
     ax.set_ylabel("Transformed Utility", fontsize=base_fontsize, fontweight="bold")
-    ax.set_title("CCBP Transformation Functions", fontsize=base_fontsize + 1)
+    ax.set_title("CPR Transformation Functions", fontsize=base_fontsize + 1)
     ax.legend(title=None,
               fontsize=base_fontsize - 1,
               title_fontsize=base_fontsize,

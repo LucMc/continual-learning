@@ -256,32 +256,36 @@ def create_overall_collapse_chart(df: pd.DataFrame, title: str, algorithms: list
     if domain_max <= 0:
         domain_max = 1
 
+    # Use consistent color scheme based on algorithm legend order
+    legend_domain = build_algorithm_legend_domain(grouped['algorithm_display'])
+    color_scale = alt.Scale(domain=legend_domain) if legend_domain else alt.Undefined
+
     return (
         alt.Chart(grouped)
         .mark_bar()
         .encode(
-            x=alt.X('algorithm_display:N', title='Algorithm', sort=category_order),
+            x=alt.X('algorithm_display:N', title=None, sort=category_order),
             y=alt.Y(
                 'collapse_count:Q',
                 title='Collapse Frequency',
                 scale=alt.Scale(domain=(0, domain_max)),
                 axis=alt.Axis(values=axis_values),
             ),
-            color=alt.Color('algorithm_display:N', legend=None),
+            color=alt.Color('algorithm_display:N', legend=None, scale=color_scale),
             tooltip=[
                 alt.Tooltip('algorithm_display:N', title='Algorithm'),
                 alt.Tooltip('collapse_count:Q', title='Collapses'),
             ],
         )
-        .properties(width=800, height=400, title=title)
-        .configure_title(fontSize=24, font=ALT_FONT_FAMILY)
+        .properties(width=750, height=500, title=title)
+        .configure_title(fontSize=28, font=ALT_FONT_FAMILY)
         .configure_axis(
             grid=True,
             labelFont=ALT_FONT_FAMILY,
             titleFont=ALT_FONT_FAMILY,
         )
-        .configure_axisX(labelFontSize=24, titleFontSize=26)
-        .configure_axisY(labelFontSize=24, titleFontSize=26)
+        .configure_axisX(labelFontSize=28, titleFontSize=30, labelLimit=0)
+        .configure_axisY(labelFontSize=28, titleFontSize=30)
         .configure_legend(labelFont=ALT_FONT_FAMILY, titleFont=ALT_FONT_FAMILY)
     )
 
@@ -291,7 +295,7 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
          bin_size: int = 10_000_000, stack_by_algorithm: bool = True,
          min_consecutive_below: int = 3,
          output_dir: str = "./plots", save_html: bool = False, debug: bool = False,
-         overall: bool = False):
+         overall: bool = False, output_name: str | None = None):
 
     if debug:
         print("Debug mode enabled: using synthetic collapse events instead of querying Weights & Biases.")
@@ -331,7 +335,8 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
     ext = "html" if save_html else "png"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
     suffix = "overall" if overall else "binned"
-    outfile = Path(output_dir) / f"{group}_policy_collapses_{suffix}.{ext}"
+    name_prefix = output_name if output_name else group
+    outfile = Path(output_dir) / f"{name_prefix}_policy_collapses_{suffix}.{ext}"
     chart.save(str(outfile))
     print(f"Chart saved to: {outfile}")
 

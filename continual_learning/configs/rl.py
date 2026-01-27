@@ -54,7 +54,8 @@ class SACConfig(struct.PyTreeNode):
     # SAC hyperparameters
     gamma: float = 0.99
     tau: float = 0.005  # Soft target update coefficient
-    alpha: float = 0.2  # Entropy coefficient (initial value if auto-tuning)
+    alpha: float = 1.0  # Initial entropy coefficient
+    alpha_lr: float = 3e-4  # Learning rate for entropy coefficient
     auto_entropy: bool = True  # Whether to auto-tune entropy coefficient
     target_entropy: float | None = None  # Target entropy (None = -action_dim)
 

@@ -86,7 +86,7 @@ def main(
     if label_1 is None:
         label_1 = group_1.replace('_', ' ').title()
         if pattern_1:
-            label_1 += f" (CCBP)"
+            label_1 += f" (CPR)"
     if label_2 is None:
         label_2 = group_2.replace('_', ' ').title()
 

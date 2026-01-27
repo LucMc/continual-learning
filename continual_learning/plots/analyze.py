@@ -104,13 +104,13 @@ ALGORITHM_DISPLAY_NAMES = {
     "redo": "ReDo",
     "regrama": "ReGraMa",
     "cbp": "CBP",
-    "ccbp": "CCBP",
+    "ccbp": "CPR",
     "shrink_and_perturb": "Shrink & Perturb",
     "soft_shrink_and_perturb": "Soft Shrink & Perturb",
     "adam": "Adam",
     "standard": "Adam",
     # Humanoid
-    "ccbp_bigger_rollout_new_hparams": "CCBP",
+    "ccbp_bigger_rollout_new_hparams": "CPR",
     "regrama_bigger_rollout_new_hparams": "ReGraMa",
     "cbp_bigger_rollout": "CBP",
     "redo_bigger_rollout": "ReDo",
@@ -803,11 +803,11 @@ def fetch_and_process_data(
 def get_algorithm_render_order(algorithm: str) -> int:
     """Determine rendering order for algorithms. Higher values are drawn later (on top).
 
-    CCBP should always be drawn last to appear in the foreground.
+    CPR should always be drawn last to appear in the foreground.
     """
     algo_upper = algorithm.upper()
-    if "CCBP" in algo_upper:
-        return 1000  # Draw CCBP last (foreground)
+    if "CCBP" in algo_upper or "CPR" in algo_upper:
+        return 1000  # Draw CPR last (foreground)
     return 0  # Draw other algorithms first (background)
 
 
@@ -836,7 +836,7 @@ def create_chart(
     if isinstance(metrics, str):
         metrics = [metrics]
 
-    # Sort dataframe to ensure CCBP is drawn last (appears in foreground)
+    # Sort dataframe to ensure CPR is drawn last (appears in foreground)
     # Higher render_order values are drawn later (on top)
     df = df.copy()
     df["_render_order"] = df["algorithm"].apply(get_algorithm_render_order)
@@ -1185,7 +1185,7 @@ def create_peak_final_bar_chart(
     if "metric" not in df.columns:
         df["metric"] = metric_label
 
-    # Sort to ensure consistent ordering with line charts (CCBP last)
+    # Sort to ensure consistent ordering with line charts (CPR last)
     df["_render_order"] = df["algorithm"].apply(get_algorithm_render_order)
     df = df.sort_values(["_render_order", "algorithm"])
     df = df.drop(columns=["_render_order"])

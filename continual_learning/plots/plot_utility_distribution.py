@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Visualize CCBP utility distributions throughout training.
+Visualize CPR utility distributions throughout training.
 
 This script creates a multi-panel visualization showing how utility distributions
 evolve from initialization through training, demonstrating the gradient-based
@@ -71,7 +71,7 @@ def fetch_utility_statistics(
     api = wandb.Api()
     runs = api.runs(f"{entity}/{project}", filters={"group": group})
 
-    # Find CCBP runs matching pattern, sorted by creation time (newest first)
+    # Find CPR runs matching pattern, sorted by creation time (newest first)
     matching_runs = sorted(
         [r for r in runs if run_name_pattern in r.name and r.state == "finished"],
         key=lambda r: r.created_at,
@@ -243,11 +243,11 @@ def compute_reset_probability(
     """
     Compute reset probability from utility values.
 
-    Matches CCBP implementation exactly (ccbp.py lines 66-74).
+    Matches CPR implementation exactly (ccbp.py lines 66-74).
 
     Args:
         utility_values: Array of utility values
-        replacement_rate: Maximum reset probability (CCBP parameter)
+        replacement_rate: Maximum reset probability (CPR parameter)
         threshold: Utility threshold separating low/high utility (τ)
         sharpness: Steepness of transform curve
         transform_type: Transform function type ('exp', 'sigmoid', 'softplus', 'linear')
@@ -289,9 +289,9 @@ def plot_utility_panel(
     Args:
         ax: Matplotlib axes for the panel
         snapshot: Utility statistics for this time point
-        replacement_rate: CCBP replacement rate
-        threshold: CCBP threshold (τ)
-        sharpness: CCBP sharpness parameter
+        replacement_rate: CPR replacement rate
+        threshold: CPR threshold (τ)
+        sharpness: CPR sharpness parameter
         transform_type: Transform function type
         n_neurons: Number of neurons (for histogram scaling)
 
@@ -434,9 +434,9 @@ def create_utility_evolution_plot(
 
     Args:
         snapshots: List of 4 UtilitySnapshot objects (init, early, mid, late)
-        replacement_rate: CCBP replacement rate parameter
-        threshold: CCBP threshold parameter (τ)
-        sharpness: CCBP sharpness parameter
+        replacement_rate: CPR replacement rate parameter
+        threshold: CPR threshold parameter (τ)
+        sharpness: CPR sharpness parameter
         transform_type: Transform function type
         n_neurons: Number of neurons (for scaling)
         output_path: Where to save figure (if None, don't save)
@@ -462,7 +462,7 @@ def create_utility_evolution_plot(
 
     # Add overall figure title
     fig.suptitle(
-        "CCBP Utility Distribution Throughout Training",
+        "CPR Utility Distribution Throughout Training",
         fontsize=BASE_FONTSIZE + 4,
         fontweight="bold",
         y=0.98,
@@ -498,7 +498,7 @@ def main(
     show_plot: bool = False,
 ) -> None:
     """
-    Generate CCBP utility distribution visualization.
+    Generate CPR utility distribution visualization.
 
     Example usage:
         python plot_utility_distribution.py \\
@@ -517,9 +517,9 @@ def main(
         seeds: List of seeds to generate plots for
         network: Network to visualize ('actor' or 'value')
         target_steps: Training steps to visualize
-        replacement_rate: CCBP replacement rate
-        threshold: CCBP threshold τ
-        sharpness: CCBP sharpness parameter
+        replacement_rate: CPR replacement rate
+        threshold: CPR threshold τ
+        sharpness: CPR sharpness parameter
         transform_type: Transform function ('exp', 'sigmoid', 'softplus', 'linear')
         n_neurons: Approximate number of neurons (for scaling)
         output_dir: Output directory for plots
@@ -527,7 +527,7 @@ def main(
         show_plot: Whether to display plot interactively
     """
     print(f"\n{'='*60}")
-    print(f"CCBP Utility Distribution Visualization")
+    print(f"CPR Utility Distribution Visualization")
     print(f"{'='*60}")
     print(f"Fetching from: {wandb_entity}/{wandb_project}/{group}")
     print(f"Network: {network}")
@@ -555,7 +555,7 @@ def main(
 
             # Create visualization with run name in filename
             output_path = (
-                Path(output_dir) / ext / f"ccbp_utility_evolution_{run_name}_{network}.{ext}"
+                Path(output_dir) / ext / f"cpr_utility_evolution_{run_name}_{network}.{ext}"
             )
 
             print(f"\nGenerating visualization...")

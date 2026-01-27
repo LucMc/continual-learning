@@ -250,12 +250,13 @@ class TestSAC:
         new_state, logs = SAC.update(state, batch, sac_config, target_entropy)
 
         assert isinstance(new_state, SACTrainState)
-        assert "critic/loss" in logs
-        assert "actor/loss" in logs
-        assert "alpha/value" in logs
+        # Log keys match reference implementation
+        assert "losses/qf_loss" in logs
+        assert "losses/actor_loss" in logs
+        assert "alpha" in logs
 
     def test_soft_target_update(self, sac_config):
-        """Test soft target update."""
+        """Test that soft target update happens during update()."""
         key = jax.random.PRNGKey(0)
         state = SAC.init_state(
             key=key,
@@ -267,29 +268,29 @@ class TestSAC:
         # Store original target params
         original_target = jax.tree.map(lambda x: x.copy(), state.target_critic_params)
 
-        # Modify critic params
-        new_critic_params = jax.tree.map(
-            lambda x: x + 1.0, state.critic.params
-        )
-        state = state._replace(
-            critic=state.critic.replace(params=new_critic_params)
+        # Create batch and run update (target update happens inside)
+        batch = ReplayBatch(
+            observations=jax.random.normal(jax.random.PRNGKey(1), (32, 10)),
+            actions=jax.random.uniform(jax.random.PRNGKey(2), (32, 4), minval=-1, maxval=1),
+            rewards=jnp.ones((32, 1)),
+            next_observations=jax.random.normal(jax.random.PRNGKey(3), (32, 10)),
+            dones=jnp.zeros((32, 1), dtype=bool),
         )
 
-        # Apply soft update
-        tau = 0.5
-        new_state = SAC.soft_update_target(state, tau)
+        target_entropy = -4.0
+        new_state, _ = SAC.update(state, batch, sac_config, target_entropy)
 
-        # Check that target params moved towards critic params
-        def check_interpolation(target, orig, new):
-            expected = tau * new + (1 - tau) * orig
-            assert jnp.allclose(target, expected)
+        # Verify target params changed (soft update with tau should move them)
+        def check_moved(new_target, orig_target):
+            # Target should have moved (not exactly equal to original)
+            return not jnp.allclose(new_target, orig_target, atol=1e-6)
 
-        jax.tree.map(
-            check_interpolation,
-            new_state.target_critic_params,
-            original_target,
-            new_critic_params,
+        any_moved = any(
+            jax.tree.leaves(
+                jax.tree.map(check_moved, new_state.target_critic_params, original_target)
+            )
         )
+        assert any_moved, "Target params should have moved after update"
 
 
 class TestBROLearner:

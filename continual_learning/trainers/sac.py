@@ -1,17 +1,19 @@
 """Soft Actor-Critic (SAC) implementation for off-policy RL.
 
+Adapted from https://github.com/kevinzakka/robopianist-rl/blob/main/sac.py
+
 This module implements SAC with:
 - Twin Q-networks for reduced overestimation
 - Automatic entropy tuning
 - Soft target updates
 - Support for the custom optimizer pattern (returns params, not updates)
-- Numerical stability improvements (gradient clipping, NaN handling)
 """
 
 from functools import partial
 from typing import NamedTuple
 
 import jax
+import jax.flatten_util as flatten_util
 import jax.numpy as jnp
 import optax
 from flax.core.scope import DenyList
@@ -19,18 +21,11 @@ from jaxtyping import Array, Float, PRNGKeyArray
 
 from continual_learning.configs.rl import SACConfig
 from continual_learning.models import get_model_cls
-from continual_learning.models.rl import TanhPolicy, QNetwork
+from continual_learning.models.rl import QNetwork, TanhPolicy
 from continual_learning.optim import get_optimizer
 from continual_learning.types import LogDict
 from continual_learning.utils.replay_buffer import ReplayBatch
 from continual_learning.utils.training import TrainState
-
-
-# Numerical stability constants
-MAX_LOG_ALPHA = 2.0  # exp(2) ≈ 7.4
-MIN_LOG_ALPHA = -10.0  # exp(-10) ≈ 0.00005
-GRAD_CLIP_NORM = 1.0
-MAX_Q_VALUE = 1e6
 
 
 def flatten_activations(features: dict) -> dict:
@@ -63,7 +58,7 @@ class SACTrainState(NamedTuple):
     actor: TrainState
     critic: TrainState
     target_critic_params: optax.Params
-    log_alpha: Float[Array, ""]
+    log_alpha: Float[Array, "1"]
     alpha_optimizer_state: optax.OptState
     key: PRNGKeyArray
 
@@ -135,9 +130,9 @@ class SAC:
         # Initialize target critic (copy of critic)
         target_critic_params = jax.tree.map(lambda x: x.copy(), critic_params)
 
-        # Initialize entropy coefficient (log_alpha)
-        log_alpha = jnp.log(cfg.alpha).astype(jnp.float32)
-        alpha_optimizer = optax.adam(learning_rate=3e-4)
+        # Initialize entropy coefficient (log_alpha) - shape (1,) to match reference
+        log_alpha = jnp.full((1,), jnp.log(cfg.alpha), dtype=jnp.float32)
+        alpha_optimizer = optax.adam(learning_rate=cfg.alpha_lr)
         alpha_optimizer_state = alpha_optimizer.init(log_alpha)
 
         return SACTrainState(
@@ -150,295 +145,6 @@ class SAC:
         )
 
     @staticmethod
-    @partial(jax.jit, static_argnames=("cfg",))
-    def update_critic(
-        state: SACTrainState,
-        batch: ReplayBatch,
-        cfg: SACConfig,
-    ) -> tuple[SACTrainState, LogDict]:
-        """Update critic (Q-networks) using TD learning.
-
-        Args:
-            state: Current training state
-            batch: Batch of transitions from replay buffer
-            cfg: SAC configuration
-
-        Returns:
-            Updated state and log dictionary
-        """
-        key, action_key = jax.random.split(state.key)
-        alpha = jnp.exp(state.log_alpha)
-
-        # Compute target Q-values
-        # Sample actions from current policy for next states
-        next_dist = state.actor.apply_fn(state.actor.params, batch.next_observations)
-        next_actions = next_dist.sample(seed=action_key)
-
-        # Clip sampled actions for numerical stability
-        next_actions = jnp.clip(next_actions, -0.999, 0.999)
-
-        next_log_probs = next_dist.log_prob(next_actions)
-        # Clip log probs to avoid -inf
-        next_log_probs = jnp.clip(next_log_probs, -100.0, 100.0)
-
-        # Get target Q-values (minimum of two Q-networks)
-        next_q1, next_q2 = state.critic.apply_fn(
-            state.target_critic_params,
-            batch.next_observations,
-            next_actions,
-        )
-        next_q = jnp.minimum(next_q1, next_q2)
-        # Clip Q-values for stability
-        next_q = jnp.clip(next_q, -MAX_Q_VALUE, MAX_Q_VALUE)
-
-        # Compute target with entropy bonus
-        target_q = batch.rewards + cfg.gamma * (1 - batch.dones) * (
-            next_q - alpha * next_log_probs[..., None]
-        )
-        # Clip target Q-values
-        target_q = jnp.clip(target_q, -MAX_Q_VALUE, MAX_Q_VALUE)
-        target_q = jax.lax.stop_gradient(target_q)
-
-        def critic_loss_fn(critic_params):
-            # Get current Q-values with activation collection for reset methods
-            (q1, q2), intermediates = state.critic.apply_fn(
-                critic_params,
-                batch.observations,
-                batch.actions,
-                training=True,
-                mutable=("activations",),
-            )
-
-            # MSE loss for both Q-networks
-            q1_loss = jnp.mean(jnp.square(q1 - target_q))
-            q2_loss = jnp.mean(jnp.square(q2 - target_q))
-            total_loss = q1_loss + q2_loss
-
-            return total_loss, (q1, q2, intermediates)
-
-        (critic_loss, (q1, q2, intermediates)), critic_grads = jax.value_and_grad(
-            critic_loss_fn, has_aux=True
-        )(state.critic.params)
-
-        # Clip gradients for stability
-        critic_grads = jax.tree.map(
-            lambda g: jnp.clip(g, -GRAD_CLIP_NORM, GRAD_CLIP_NORM),
-            critic_grads,
-        )
-
-        # Replace NaN gradients with zeros
-        critic_grads = jax.tree.map(
-            lambda g: jnp.where(jnp.isnan(g), jnp.zeros_like(g), g),
-            critic_grads,
-        )
-
-        # Extract features for reset methods (flatten nested dict from twin Q-networks)
-        critic_feats = flatten_activations(intermediates.get("activations", {}))
-
-        # Update critic using custom optimizer pattern
-        new_critic = state.critic.apply_gradients(grads=critic_grads, features=critic_feats)
-
-        logs = {
-            "critic/loss": critic_loss,
-            "critic/q1_mean": q1.mean(),
-            "critic/q2_mean": q2.mean(),
-            "critic/target_q_mean": target_q.mean(),
-        }
-
-        new_state = SACTrainState(
-            actor=state.actor,
-            critic=new_critic,
-            target_critic_params=state.target_critic_params,
-            log_alpha=state.log_alpha,
-            alpha_optimizer_state=state.alpha_optimizer_state,
-            key=key,
-        )
-
-        return new_state, logs
-
-    @staticmethod
-    @partial(jax.jit, static_argnames=("cfg",))
-    def update_actor(
-        state: SACTrainState,
-        batch: ReplayBatch,
-        cfg: SACConfig,
-    ) -> tuple[SACTrainState, LogDict]:
-        """Update actor (policy) using reparameterization trick.
-
-        Args:
-            state: Current training state
-            batch: Batch of transitions from replay buffer
-            cfg: SAC configuration
-
-        Returns:
-            Updated state and log dictionary
-        """
-        key, action_key = jax.random.split(state.key)
-        alpha = jnp.exp(state.log_alpha)
-
-        def actor_loss_fn(actor_params):
-            # Sample actions from policy with activation collection
-            dist, intermediates = state.actor.apply_fn(
-                actor_params,
-                batch.observations,
-                training=True,
-                mutable=("activations",),
-            )
-            actions = dist.sample(seed=action_key)
-
-            # Clip actions for numerical stability in log_prob
-            actions = jnp.clip(actions, -0.999, 0.999)
-            log_probs = dist.log_prob(actions)
-            # Clip log probs
-            log_probs = jnp.clip(log_probs, -100.0, 100.0)
-
-            # Get Q-values for sampled actions
-            q1, q2 = state.critic.apply_fn(
-                state.critic.params,
-                batch.observations,
-                actions,
-            )
-            q_min = jnp.minimum(q1, q2)
-
-            # Policy loss: maximize Q - alpha * log_prob
-            actor_loss = jnp.mean(alpha * log_probs - q_min.squeeze(-1))
-
-            return actor_loss, (log_probs, intermediates)
-
-        (actor_loss, (log_probs, intermediates)), actor_grads = jax.value_and_grad(
-            actor_loss_fn, has_aux=True
-        )(state.actor.params)
-
-        # Clip gradients for stability
-        actor_grads = jax.tree.map(
-            lambda g: jnp.clip(g, -GRAD_CLIP_NORM, GRAD_CLIP_NORM),
-            actor_grads,
-        )
-
-        # Replace NaN gradients with zeros
-        actor_grads = jax.tree.map(
-            lambda g: jnp.where(jnp.isnan(g), jnp.zeros_like(g), g),
-            actor_grads,
-        )
-
-        # Extract features for reset methods (flatten nested dict from policy network)
-        actor_feats = flatten_activations(intermediates.get("activations", {}))
-
-        # Update actor using custom optimizer pattern
-        new_actor = state.actor.apply_gradients(grads=actor_grads, features=actor_feats)
-
-        logs = {
-            "actor/loss": actor_loss,
-            "actor/entropy": -log_probs.mean(),
-        }
-
-        new_state = SACTrainState(
-            actor=new_actor,
-            critic=state.critic,
-            target_critic_params=state.target_critic_params,
-            log_alpha=state.log_alpha,
-            alpha_optimizer_state=state.alpha_optimizer_state,
-            key=key,
-        )
-
-        return new_state, logs
-
-    @staticmethod
-    @partial(jax.jit, static_argnames=("target_entropy",))
-    def update_alpha(
-        state: SACTrainState,
-        batch: ReplayBatch,
-        target_entropy: float,
-    ) -> tuple[SACTrainState, LogDict]:
-        """Update entropy coefficient (alpha) for automatic entropy tuning.
-
-        Args:
-            state: Current training state
-            batch: Batch of transitions from replay buffer
-            target_entropy: Target entropy (typically -action_dim)
-
-        Returns:
-            Updated state and log dictionary
-        """
-        key, action_key = jax.random.split(state.key)
-
-        # Get log probs from current policy
-        dist = state.actor.apply_fn(state.actor.params, batch.observations)
-        actions = dist.sample(seed=action_key)
-
-        # Clip actions for numerical stability
-        actions = jnp.clip(actions, -0.999, 0.999)
-        log_probs = dist.log_prob(actions)
-        # Clip log probs
-        log_probs = jnp.clip(log_probs, -100.0, 100.0)
-
-        def alpha_loss_fn(log_alpha: Float[Array, ""]) -> Float[Array, ""]:
-            alpha = jnp.exp(log_alpha)
-            return -jnp.mean(alpha * (log_probs + target_entropy))
-
-        alpha_loss, alpha_grads = jax.value_and_grad(alpha_loss_fn)(state.log_alpha)
-
-        # Clip alpha gradients
-        alpha_grads = jnp.clip(alpha_grads, -GRAD_CLIP_NORM, GRAD_CLIP_NORM)
-        alpha_grads = jnp.where(jnp.isnan(alpha_grads), 0.0, alpha_grads)
-
-        # Standard optax update for alpha (not using custom pattern)
-        alpha_optimizer = optax.adam(learning_rate=3e-4)
-        updates, new_alpha_opt_state = alpha_optimizer.update(
-            alpha_grads, state.alpha_optimizer_state
-        )
-        new_log_alpha = jnp.asarray(optax.apply_updates(state.log_alpha, updates))
-
-        # Clip log_alpha to reasonable bounds
-        new_log_alpha = jnp.clip(new_log_alpha, MIN_LOG_ALPHA, MAX_LOG_ALPHA)
-
-        logs = {
-            "alpha/loss": alpha_loss,
-            "alpha/value": jnp.exp(new_log_alpha),
-        }
-
-        new_state = SACTrainState(
-            actor=state.actor,
-            critic=state.critic,
-            target_critic_params=state.target_critic_params,
-            log_alpha=new_log_alpha,
-            alpha_optimizer_state=new_alpha_opt_state,
-            key=key,
-        )
-
-        return new_state, logs
-
-    @staticmethod
-    @jax.jit
-    def soft_update_target(
-        state: SACTrainState,
-        tau: float,
-    ) -> SACTrainState:
-        """Perform soft update of target critic parameters.
-
-        Args:
-            state: Current training state
-            tau: Soft update coefficient (0 < tau <= 1)
-
-        Returns:
-            Updated state with new target parameters
-        """
-        new_target_params = jax.tree.map(
-            lambda target, source: tau * source + (1 - tau) * target,
-            state.target_critic_params,
-            state.critic.params,
-        )
-
-        return SACTrainState(
-            actor=state.actor,
-            critic=state.critic,
-            target_critic_params=new_target_params,
-            log_alpha=state.log_alpha,
-            alpha_optimizer_state=state.alpha_optimizer_state,
-            key=state.key,
-        )
-
-    @staticmethod
     @partial(jax.jit, static_argnames=("cfg", "target_entropy"))
     def update(
         state: SACTrainState,
@@ -448,11 +154,11 @@ class SAC:
     ) -> tuple[SACTrainState, LogDict]:
         """Perform a full SAC update step.
 
-        This includes:
-        1. Critic update (twin Q-networks)
-        2. Actor update (policy)
-        3. Alpha update (entropy coefficient, if auto-tuning)
-        4. Soft target update
+        Matches the reference implementation's update order:
+        1. Inside actor loss: update alpha, then critic (using new alpha)
+        2. Compute actor loss using updated critic
+        3. Update actor
+        4. Soft update target networks
 
         Args:
             state: Current training state
@@ -463,19 +169,214 @@ class SAC:
         Returns:
             Updated state and combined log dictionary
         """
-        # Update critic
-        state, critic_logs = SAC.update_critic(state, batch, cfg)
+        key, actor_loss_key, critic_loss_key = jax.random.split(state.key, 3)
 
-        # Update actor
-        state, actor_logs = SAC.update_actor(state, batch, cfg)
+        alpha_optimizer = optax.adam(learning_rate=cfg.alpha_lr)
 
-        # Update alpha (entropy coefficient)
-        alpha_logs = {}
-        if cfg.auto_entropy:
-            state, alpha_logs = SAC.update_alpha(state, batch, target_entropy)
+        def update_critic(
+            critic: TrainState,
+            alpha_val: Float[Array, "1"],
+        ) -> tuple[TrainState, LogDict]:
+            """Update critic using TD learning."""
+            # Sample a' from current policy for next states
+            # Use sample_and_log_prob for numerical stability (avoids atanh(tanh(z)))
+            next_dist = state.actor.apply_fn(state.actor.params, batch.next_observations)
+            next_actions, next_action_log_probs = next_dist.sample_and_log_prob(
+                seed=critic_loss_key
+            )
+
+            # Get target Q-values
+            next_q1, next_q2 = state.critic.apply_fn(
+                state.target_critic_params,
+                batch.next_observations,
+                next_actions,
+            )
+
+            # Stack and take min over critics
+            q_values = jnp.stack([next_q1, next_q2], axis=0)
+            min_qf_next_target = (
+                jnp.min(q_values, axis=0) - alpha_val * next_action_log_probs.reshape(-1, 1)
+            )
+
+            next_q_value = jax.lax.stop_gradient(
+                batch.rewards + (1 - batch.dones) * cfg.gamma * min_qf_next_target
+            )
+
+            def critic_loss_fn(params):
+                # Get current Q-values with activation collection for reset methods
+                (q1, q2), intermediates = critic.apply_fn(
+                    params,
+                    batch.observations,
+                    batch.actions,
+                    training=True,
+                    mutable=("activations",),
+                )
+                q_pred = jnp.stack([q1, q2], axis=0)
+
+                # 0.5 * MSE loss, mean over batch, sum over critics
+                loss = 0.5 * ((q_pred - next_q_value) ** 2).mean(axis=1).sum()
+                return loss, (q_pred.mean(), intermediates)
+
+            (critic_loss_value, (qf_values, intermediates)), critic_grads = jax.value_and_grad(
+                critic_loss_fn, has_aux=True
+            )(critic.params)
+
+            # Extract features for reset methods
+            critic_feats = flatten_activations(intermediates.get("activations", {}))
+
+            # Update critic using custom optimizer pattern
+            new_critic = critic.apply_gradients(grads=critic_grads, features=critic_feats)
+
+            flat_grads, _ = flatten_util.ravel_pytree(critic_grads)
+
+            return new_critic, {
+                "losses/qf_values": qf_values,
+                "losses/qf_loss": critic_loss_value,
+                "metrics/critic_grad_magnitude": jnp.linalg.norm(flat_grads),
+            }
+
+        def update_alpha(
+            log_alpha: Float[Array, "1"],
+            alpha_opt_state: optax.OptState,
+            log_probs: Float[Array, " batch"],
+        ) -> tuple[Float[Array, "1"], optax.OptState, Float[Array, "1"], LogDict]:
+            """Update entropy coefficient."""
+
+            def alpha_loss_fn(log_alpha_param):
+                return (-log_alpha_param * (log_probs.reshape(-1, 1) + target_entropy)).mean()
+
+            alpha_loss_value, alpha_grads = jax.value_and_grad(alpha_loss_fn)(log_alpha)
+            updates, new_alpha_opt_state = alpha_optimizer.update(alpha_grads, alpha_opt_state)
+            new_log_alpha = optax.apply_updates(log_alpha, updates)
+            alpha_val = jnp.exp(new_log_alpha)
+
+            return (
+                new_log_alpha,
+                new_alpha_opt_state,
+                alpha_val,
+                {
+                    "losses/alpha_loss": alpha_loss_value,
+                    "alpha": alpha_val.sum(),
+                },
+            )
+
+        def actor_loss_fn(actor_params):
+            """Compute actor loss, also triggers alpha and critic updates."""
+            # Sample actions from policy with activation collection
+            # Use sample_and_log_prob for numerical stability (avoids atanh(tanh(z)))
+            dist, intermediates = state.actor.apply_fn(
+                actor_params,
+                batch.observations,
+                training=True,
+                mutable=("activations",),
+            )
+            action_samples, log_probs = dist.sample_and_log_prob(seed=actor_loss_key)
+
+            # Update alpha first (using log_probs from current policy) if auto_entropy enabled
+            if cfg.auto_entropy:
+                new_log_alpha, new_alpha_opt_state, alpha_val, alpha_logs = update_alpha(
+                    state.log_alpha, state.alpha_optimizer_state, log_probs
+                )
+            else:
+                # Fixed alpha - no update
+                new_log_alpha = state.log_alpha
+                new_alpha_opt_state = state.alpha_optimizer_state
+                alpha_val = jnp.exp(state.log_alpha)
+                alpha_logs = {"losses/alpha_loss": jnp.array(0.0), "alpha": alpha_val.sum()}
+            alpha_val = jax.lax.stop_gradient(alpha_val)
+
+            # Update critic (using new alpha)
+            new_critic, critic_logs = update_critic(state.critic, alpha_val)
+            logs = {**alpha_logs, **critic_logs}
+
+            # Compute actor loss using updated critic's Q-values
+            q1, q2 = new_critic.apply_fn(new_critic.params, batch.observations, action_samples)
+            q_values = jnp.stack([q1, q2], axis=0)
+            min_qf_values = jnp.min(q_values, axis=0)
+
+            loss = (alpha_val * log_probs.reshape(-1, 1) - min_qf_values).mean()
+
+            return loss, (new_log_alpha, new_alpha_opt_state, new_critic, logs, intermediates)
+
+        (
+            actor_loss_value,
+            (new_log_alpha, new_alpha_opt_state, new_critic, logs, intermediates),
+        ), actor_grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(state.actor.params)
+
+        # Extract features for reset methods
+        actor_feats = flatten_activations(intermediates.get("activations", {}))
+
+        # Update actor using custom optimizer pattern
+        new_actor = state.actor.apply_gradients(grads=actor_grads, features=actor_feats)
+
+        flat_grads, _ = flatten_util.ravel_pytree(actor_grads)
+        logs["metrics/actor_grad_magnitude"] = jnp.linalg.norm(flat_grads)
+
+        flat_params_act, _ = flatten_util.ravel_pytree(state.actor.params)
+        logs["metrics/actor_params_norm"] = jnp.linalg.norm(flat_params_act)
+
+        flat_params_crit, _ = flatten_util.ravel_pytree(state.critic.params)
+        logs["metrics/critic_params_norm"] = jnp.linalg.norm(flat_params_crit)
 
         # Soft update target networks
-        state = SAC.soft_update_target(state, cfg.tau)
+        new_target_critic_params = optax.incremental_update(
+            new_critic.params,
+            state.target_critic_params,
+            cfg.tau,
+        )
 
-        logs = {**critic_logs, **actor_logs, **alpha_logs}
-        return state, logs
+        new_state = SACTrainState(
+            actor=new_actor,
+            critic=new_critic,
+            target_critic_params=new_target_critic_params,
+            log_alpha=new_log_alpha,
+            alpha_optimizer_state=new_alpha_opt_state,
+            key=key,
+        )
+
+        return new_state, {**logs, "losses/actor_loss": actor_loss_value}
+
+    @staticmethod
+    @jax.jit
+    def sample_action(
+        state: SACTrainState,
+        observation: Float[Array, "... obs_dim"],
+    ) -> tuple[SACTrainState, Float[Array, "... action_dim"]]:
+        """Sample action from policy.
+
+        Args:
+            state: Current training state
+            observation: Environment observation
+
+        Returns:
+            Tuple of (updated state with new key, sampled action)
+        """
+        key, action_key = jax.random.split(state.key)
+        dist = state.actor.apply_fn(state.actor.params, observation)
+        action = dist.sample(seed=action_key)
+        new_state = state._replace(key=key)
+        return new_state, action
+
+    @staticmethod
+    @jax.jit
+    def eval_action(
+        state: SACTrainState,
+        observation: Float[Array, "... obs_dim"],
+    ) -> Float[Array, "... action_dim"]:
+        """Get deterministic action (mode) from policy.
+
+        For TanhNormal distributions, mode = tanh(mean) since:
+        1. The mode of Normal(mean, std) is mean
+        2. Tanh is monotonically increasing
+
+        Args:
+            state: Current training state
+            observation: Environment observation
+
+        Returns:
+            Deterministic action (mode of the policy distribution)
+        """
+        dist = state.actor.apply_fn(state.actor.params, observation)
+        # Access the mean from the base MultivariateNormalDiag distribution
+        mean = dist.distribution.loc
+        return jnp.tanh(mean)

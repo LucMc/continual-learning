@@ -61,8 +61,8 @@ PARAMETER_SYMBOLS = {
 }
 
 ALGORITHM_LEGEND_ORDER = [
-    "CCBP",
-    "CCBP",
+    "CPR",
+    "CPR",
     "CBP",
     "ReGraMa",
     "ReDo",
