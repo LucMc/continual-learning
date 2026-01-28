@@ -58,8 +58,9 @@ ALGORITHM_DISPLAY_NAMES = {
     "standard": "Adam",
     "cbp": "CBP",
     "ccbp": "CCBP",
-    "ccbp2": "CPR2",
-    "cpr": "CPR",
+    "ccbp2": "CCBP2",
+    # "cpr": "CPR",
+    "ccbp3": "CPR",
     "redo": "ReDo",
     "regrama": "ReGraMa",
     "shrink_and_perturb": "Shrink & Perturb",
@@ -69,7 +70,8 @@ ALGORITHM_DISPLAY_NAMES = {
 }
 
 ALGORITHM_LEGEND_ORDER = [
-    "CPR2",
+    "CPR",
+    "CCBP2",
     "CCBP",
     "CBP",
     "ReGraMa",
@@ -79,6 +81,9 @@ ALGORITHM_LEGEND_ORDER = [
     "SAC",
     "Adam",
 ]
+
+# Algorithms to exclude from plots
+EXCLUDED_ALGORITHMS = {"ccbp2"}
 
 
 def normalize_algorithm_name(name: str) -> str:
@@ -248,7 +253,7 @@ def list_available_groups(entity: str, project: str) -> List[str]:
 def fetch_mt1_data(
     entity: str,
     project: str,
-    metric: str = "charts/mean_episodic_return",
+    metric: str = "charts/mean_episode_return",
     tasks: Optional[List[str]] = None,
     group_filter: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
@@ -283,6 +288,11 @@ def fetch_mt1_data(
             continue
 
         algo = extract_algorithm_from_run(run)
+
+        # Skip excluded algorithms
+        if normalize_algorithm_name(algo) in EXCLUDED_ALGORITHMS:
+            continue
+
         seed = extract_seed_from_run(run)
         display_algo = display_algorithm_name(algo)
 
@@ -567,8 +577,8 @@ def create_combined_chart(
 
 def main(
     wandb_entity: str,
-    wandb_project: str = "MT1 results",
-    metric: str = "charts/mean_episodic_return",
+    wandb_project: str = "MT1 results2",
+    metric: str = "charts/mean_episode_return",
     tasks: Optional[List[str]] = None,
     group_filter: Optional[str] = None,
     output_dir: str = "./plots/mt1",
