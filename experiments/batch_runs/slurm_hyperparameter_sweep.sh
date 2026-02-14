@@ -12,10 +12,10 @@
 
 # Usage: sbatch --array=0-N slurm_hyperparameter_sweep.sh <algo> [wandb_entity] [wandb_project] [seed]
 # To get N, run: ./get_sweep_size.sh <algo>
-# Example: sbatch --array=0-159 slurm_hyperparameter_sweep.sh ccbp lucmc crl_experiments 42
+# Example: sbatch --array=0-159 slurm_hyperparameter_sweep.sh cpr lucmc crl_experiments 42
 
 VENV_DIR="../../../.venv"
-algo="${1:-ccbp}"
+algo="${1:-cpr}"
 script="${2:-perm_mnist}"
 wandb_entity="${3:-lucmc}"
 wandb_project="${4:-crl_experiments}"

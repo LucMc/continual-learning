@@ -16,7 +16,7 @@ VENV_DIR="../../../.venv"
 script_name="${1:-slippery_ant.py}"   # defaults to slippery_ant.py if not provided
 
 # Algorithms and seeds
-algos=("redo" "regrama" "adam" "cbp" "ccbp")
+algos=("redo" "regrama" "adam" "cbp" "cpr")
 seeds=(0)
 
 num_algos=${#algos[@]}

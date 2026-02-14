@@ -178,7 +178,7 @@ def create_ablation_chart(df: pd.DataFrame, metric: str, title: str = "", use_sh
     ).configure_axis(grid=True, gridOpacity=0.3).interactive()
 
 
-def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str = "slippery_ant_ccbp_sweep",
+def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str = "slippery_ant_cpr_sweep",
          metric: str = "charts/mean_episodic_return", split_by: Optional[str] = None,
          grouping_mode: Literal["parameter", "seed", "config"] = "parameter", top_k: Optional[int] = None,
          ranking_criteria: Literal["final", "peak", "average", "auc"] = "final", short_labels: bool = True,

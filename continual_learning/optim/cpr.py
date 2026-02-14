@@ -20,7 +20,7 @@ import continual_learning.utils.optim as utils
 from continual_learning.optim.cbp import CbpOptimState
 
 
-class CcbpOptimState(CbpOptimState):
+class CprOptimState(CbpOptimState):
     time_step: int = 0
     logs: FrozenDict = FrozenDict(
         {"std_util": 0.0, "nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
@@ -122,7 +122,7 @@ def continuous_reset_weights(
     return weights, logs
 
 
-def ccbp(
+def cpr(
     seed: int,
     replacement_rate: float = 0.012,
     sharpness: float = 16,
@@ -133,14 +133,14 @@ def ccbp(
     out_layer_name: str = "output",
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
 ) -> GradientTransformationExtraArgsReset:
-    """Continuous Continual Backpropergation (CCBP)"""
+    """Continuous Partial Resets (CPR)"""
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
         biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
         biases.pop(out_layer_name)
 
-        return CcbpOptimState(
+        return CprOptimState(
             # initial_weights=deepcopy(weights),
             utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
@@ -157,11 +157,11 @@ def ccbp(
     @jax.jit
     def update(
         updates: optax.Updates,  # Gradients
-        state: CcbpOptimState,
+        state: CprOptimState,
         params: optax.Params,
         features: PyTree,
         tx_state: optax.OptState,
-    ) -> tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
+    ) -> tuple[optax.Updates, CprOptimState, optax.OptState | None]:
         del features
 
         def no_update(updates):
@@ -189,9 +189,9 @@ def ccbp(
 
             return params, new_state, tx_state
 
-        def _ccbp(
+        def _cpr(
             updates: optax.Updates,
-        ) -> Tuple[optax.Updates, CcbpOptimState, optax.OptState | None]:
+        ) -> Tuple[optax.Updates, CprOptimState, optax.OptState | None]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
             weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
@@ -273,6 +273,6 @@ def ccbp(
         condition = jnp.logical_and(
             state.time_step > 0, (state.time_step % update_frequency == 0)
         )
-        return jax.lax.cond(condition, _ccbp, no_update, updates)
+        return jax.lax.cond(condition, _cpr, no_update, updates)
 
     return GradientTransformationExtraArgsReset(init=init, update=update)  # pyright: ignore[reportArgumentType]

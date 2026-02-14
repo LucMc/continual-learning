@@ -76,7 +76,7 @@ class CbpConfig(ResetMethodConfig):
 
 
 @dataclass(frozen=True)
-class CcbpConfig(ResetMethodConfig):
+class CprConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
     replacement_rate: float = 0.01

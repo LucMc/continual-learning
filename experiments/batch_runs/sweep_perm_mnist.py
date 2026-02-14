@@ -22,7 +22,7 @@ from continual_learning.trainers.continual_supervised_learning import (
 #     "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
 #     "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None, 0.1], "update_frequency": [50, 100, 1000, 10_000], "score_threshold": [0.001, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
 #     "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
-#     "ccbp": {"tx_lr": [1e-3], "decay_rate": [0., 0.99], "replacement_rate": [0.01, 0.05, 0.2], "update_frequency": [100, 1000]},
+#     "cpr": {"tx_lr": [1e-3], "decay_rate": [0., 0.99], "replacement_rate": [0.01, 0.05, 0.2], "update_frequency": [100, 1000]},
 #     "shrink_and_perturb": {"tx_lr": [1e-3], "shrink": [1-1e-3, 1-1e-4, 1-1e-5], "perturb": [1e-3, 1e-4, 1e-5], "every_n": [1, 10, 100]},
 # }
 
@@ -34,7 +34,7 @@ SWEEP_RANGES = {
     "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
     "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
     "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
-    "ccbp_exp": {
+    "cpr_exp": {
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [6.0, 8.0, 12.0, 16.0],
@@ -43,7 +43,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["exp"],
     },
-    "ccbp_sigmoid": {
+    "cpr_sigmoid": {
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [12.0, 16.0, 24.0, 32.0],
@@ -52,7 +52,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01, 0.02, 0.03],
         "transform_type": ["sigmoid"],
     },
-    "ccbp_softplus": {
+    "cpr_softplus": {
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [8.0, 12.0, 16.0, 20.0],
@@ -61,7 +61,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01, 0.02, 0.03],
         "transform_type": ["softplus"],
     },
-    "ccbp_linear": {
+    "cpr_linear": {
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
         "sharpness": [6.0, 8.0, 12.0, 16.0],
@@ -104,7 +104,7 @@ SWEEP_RANGES = {
         "replacement_rate": [1e-6, 1e-5, 1e-4],
         "maturity_threshold": [100, 1000],
     },
-    "ccbp": {
+    "cpr": {
         "tx_lr": [1e-3],
         "decay_rate": [0.0, 0.99],
         "replacement_rate": [0.01, 0.05, 0.2],
@@ -142,8 +142,8 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
 
     tx = AdamConfig(learning_rate=params.get("tx_lr", 1e-3))
 
-    if algo in ("ccbp", "ccbp_exp", "ccbp_sigmoid", "ccbp_softplus", "ccbp_linear"):
-        return CcbpConfig(
+    if algo in ("cpr", "cpr_exp", "cpr_sigmoid", "cpr_softplus", "cpr_linear"):
+        return CprConfig(
             tx=tx,
             decay_rate=params["decay_rate"],
             replacement_rate=params.get("replacement_rate"),
@@ -177,7 +177,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             seed=seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": lambda: CcbpConfig(
+        "cpr": lambda: CprConfig(
             tx=tx,
             decay_rate=params["decay_rate"],
             replacement_rate=params["replacement_rate"],

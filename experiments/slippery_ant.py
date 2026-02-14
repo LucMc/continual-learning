@@ -9,7 +9,7 @@ from chex import dataclass
 from continual_learning.configs import (
     AdamConfig,
     CbpConfig,
-    CcbpConfig,
+    CprConfig,
     RegramaConfig,
     LoggingConfig,
     RedoConfig,
@@ -58,7 +58,7 @@ def run_all_slippery_ant():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
-        "ccbp": CcbpConfig(
+        "cpr": CprConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
             decay_rate=0.9,

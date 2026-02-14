@@ -4,7 +4,7 @@ from continual_learning.configs.optim import (
     AdamwConfig,
     MuonConfig,
     CbpConfig,
-    CcbpConfig,
+    CprConfig,
     RedoConfig,
     RegramaConfig,
     ResetMethodConfig,
@@ -15,7 +15,7 @@ from continual_learning.utils.optim import attach_reset_method
 
 from .redo import redo
 from .regrama import regrama
-from .ccbp import ccbp
+from .cpr import cpr
 from .shrink_perturb import shrink_perturb
 from .cbp import cbp
 from .identity_reset import identity_reset
@@ -93,10 +93,10 @@ def get_optimizer(config: OptimizerConfig | ResetMethodConfig, is_inner=False):
             reset_method=cbp(**rm_config),
         )
 
-    elif isinstance(config, CcbpConfig):
+    elif isinstance(config, CprConfig):
         return attach_reset_method(
             tx=get_optimizer(rm_config.pop("tx"), is_inner=True),
-            reset_method=ccbp(**rm_config),
+            reset_method=cpr(**rm_config),
         )
     else:
         raise ValueError(f"Unsupported optimizer config type: {type(config)}")

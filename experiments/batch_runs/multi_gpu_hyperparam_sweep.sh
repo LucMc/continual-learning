@@ -9,7 +9,7 @@ set -euo pipefail
 PYTHON_BIN="${PYTHON_BIN:-}"                 # Optional: export PYTHON_BIN=python to override
 SCRIPT_PATH="sweep_slippery_ant.py"          # Default Python entrypoint
 GPUS_CSV=""                                  # e.g. "0,1,3"
-ALGOS_DEFAULT=("adam" "regrama" "redo" "cbp" "ccbp" "shrink_and_perturb")
+ALGOS_DEFAULT=("adam" "regrama" "redo" "cbp" "cpr" "shrink_and_perturb")
 ALGOS=()
 SEEDS=("42")                                 # default seed list
 CONFIG_IDS_STR=""                            # e.g. "0-7,9,12" (applies to all algos); if empty we enumerate all configs for each algo

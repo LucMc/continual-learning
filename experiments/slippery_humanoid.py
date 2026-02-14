@@ -10,7 +10,7 @@ from chex import dataclass
 from continual_learning.configs import (
     AdamConfig,
     CbpConfig,
-    CcbpConfig,
+    CprConfig,
     LoggingConfig,
     RedoConfig,
     RegramaConfig,
@@ -60,7 +60,7 @@ def run_all_slippery_humanoid():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
-        "ccbp": CcbpConfig(
+        "cpr": CprConfig(
             tx=base_optim,
             seed=args.seed,
             replacement_rate=0.015,

@@ -18,7 +18,7 @@ from continual_learning.types import Activation, StdType
 from continual_learning.configs import (
     AdamConfig,
     CbpConfig,
-    CcbpConfig,
+    CprConfig,
     RegramaConfig,
     LoggingConfig,
     RedoConfig,
@@ -54,7 +54,7 @@ SWEEP_RANGES = {
         "maturity_threshold": [10, 100, 1000, 10_000],
     },
 
- "ccbp_exp": {
+ "cpr_exp": {
         "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -64,7 +64,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01, 0.1],
         "transform_type": ["exp"],
     },
-    "ccbp_sigmoid": {
+    "cpr_sigmoid": {
         "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -74,7 +74,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["sigmoid"],
     },
-    "ccbp_softplus": {
+    "cpr_softplus": {
         "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -84,7 +84,7 @@ SWEEP_RANGES = {
         "replacement_rate": [0.01],
         "transform_type": ["softplus"],
     },
-    "ccbp_linear": {
+    "cpr_linear": {
         "seeds": [0, 1, 2, 3, 4],
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -130,8 +130,8 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
 
     tx = AdamConfig(learning_rate=params.get("tx_lr", 1e-3))
 
-    if algo in ("ccbp", "ccbp_exp", "ccbp_sigmoid", "ccbp_softplus", "ccbp_linear"):
-        return CcbpConfig(
+    if algo in ("cpr", "cpr_exp", "cpr_sigmoid", "cpr_softplus", "cpr_linear"):
+        return CprConfig(
             tx=tx,
             decay_rate=params["decay_rate"],
             replacement_rate=params.get("replacement_rate"),
@@ -168,7 +168,7 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
-        # "ccbp": lambda: CcbpConfig(
+        # "cpr": lambda: CprConfig(
         #     tx=tx,
         #     decay_rate=params["decay_rate"],
         #     sharpness=params["sharpness"],

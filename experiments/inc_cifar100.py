@@ -14,7 +14,7 @@ from continual_learning.configs import (
     CbpConfig,
     RedoConfig,
     RegramaConfig,
-    CcbpConfig,
+    CprConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
     LoggingConfig,
@@ -62,7 +62,7 @@ def run_all_inc_cifar100():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CcbpConfig(
+        "cpr": CprConfig(
             tx=base_optim,
             seed=args.seed,
             decay_rate=0.99,

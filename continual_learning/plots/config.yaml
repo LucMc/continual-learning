@@ -9,7 +9,7 @@ _wandb:
                     - -sp
                     - crl_final
                     - --src-group
-                    - ccbp_server
+                    - cpr_server
                     - --dst-group
                     - new_group
                 codePath: continual_learning/plots/copy_runs.py

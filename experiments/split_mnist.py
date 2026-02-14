@@ -13,7 +13,7 @@ from continual_learning.configs import (
     MuonConfig,
     CbpConfig,
     RedoConfig,
-    CcbpConfig,
+    CprConfig,
     RegramaConfig,
     ShrinkAndPerterbConfig,
     DatasetConfig,
@@ -62,7 +62,7 @@ def run_all_mnist():
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.he_uniform(),
         ),
-        "ccbp": CcbpConfig(
+        "cpr": CprConfig(
             tx=base_optim,
             seed=args.seed,
             decay_rate=0.99,

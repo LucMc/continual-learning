@@ -11,7 +11,7 @@ from .optim import (
     RedoConfig,
     RegramaConfig,
     CbpConfig,
-    CcbpConfig,
+    CprConfig,
     OptimizerConfig,
     ResetMethodConfig,
 )
@@ -29,7 +29,7 @@ __all__ = [
     "ShrinkAndPerterbConfig",
     "RedoConfig",
     "CbpConfig",
-    "CcbpConfig",
+    "CprConfig",
     "RegramaConfig",
     "OptimizerConfig",
     "ResetMethodConfig",
