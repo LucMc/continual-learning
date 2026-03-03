@@ -144,15 +144,17 @@ def detect_collapses_for_run(
 
 
 def build_events_df(entity: str, project: str, group: str, metric: str, collapse_threshold: float,
-                   bin_size: int, min_consecutive_below: int) -> tuple[pd.DataFrame, list[str]]:
+                   bin_size: int, min_consecutive_below: int) -> tuple[pd.DataFrame, list[str], dict[str, int]]:
     runs = fetch_runs(entity, project, group)
     all_events = []
     algorithms: set[str] = set()
+    runs_per_algorithm: dict[str, int] = {}
 
     for run in runs:
         algo_name, _ = parse_algo_and_seed(run.name)
         display_algo = resolve_algorithm_display(algo_name)
         algorithms.add(display_algo)
+        runs_per_algorithm[display_algo] = runs_per_algorithm.get(display_algo, 0) + 1
         try:
             if run.history(keys=[metric]).empty: continue
             events = detect_collapses_for_run(
@@ -167,6 +169,7 @@ def build_events_df(entity: str, project: str, group: str, metric: str, collapse
         except: continue
 
     print(f"Total collapse events: {len(all_events)}")
+    print(f"Runs per algorithm: {runs_per_algorithm}")
     events_df = (
         pd.DataFrame(all_events).sort_values(["algorithm", "run_name", "step"])
         if all_events
@@ -175,7 +178,7 @@ def build_events_df(entity: str, project: str, group: str, metric: str, collapse
     if not events_df.empty and "algorithm_display" not in events_df.columns:
         events_df["algorithm_display"] = events_df["algorithm"].map(resolve_algorithm_display)
 
-    return events_df, build_algorithm_legend_domain(algorithms)
+    return events_df, build_algorithm_legend_domain(algorithms), runs_per_algorithm
 
 
 def create_collapse_chart(df: pd.DataFrame, title: str, bin_size: int, stack_by_algorithm: bool = True) -> alt.Chart:
@@ -220,7 +223,13 @@ def create_collapse_chart(df: pd.DataFrame, title: str, bin_size: int, stack_by_
     )
 
 
-def create_overall_collapse_chart(df: pd.DataFrame, title: str, algorithms: list[str]) -> alt.Chart:
+def create_overall_collapse_chart(
+    df: pd.DataFrame,
+    title: str,
+    algorithms: list[str],
+    runs_per_algorithm: dict[str, int] | None = None,
+    show_percentage: bool = False,
+) -> alt.Chart:
     grouped = df.groupby('algorithm_display', as_index=False).agg(collapse_count=('run_name', 'nunique'))
     if grouped.empty and algorithms:
         grouped = pd.DataFrame({
@@ -243,22 +252,60 @@ def create_overall_collapse_chart(df: pd.DataFrame, title: str, algorithms: list
     if grouped.empty:
         return alt.Chart(grouped).mark_bar()
 
-    category_order = grouped['algorithm_display'].tolist()
-
-    max_collapse_count = int(grouped['collapse_count'].max())
-    if max_collapse_count <= 5:
-        axis_values = list(range(0, max_collapse_count + 1))
+    # Calculate percentage if requested
+    if show_percentage and runs_per_algorithm:
+        grouped['total_runs'] = grouped['algorithm_display'].map(
+            lambda x: runs_per_algorithm.get(x, 1)
+        )
+        grouped['collapse_percentage'] = (grouped['collapse_count'] / grouped['total_runs']) * 100
+        grouped = grouped.sort_values('collapse_percentage', ascending=False)
+        y_field = 'collapse_percentage'
+        y_title = 'Collapse Rate (%)'
+        tooltip_field = alt.Tooltip('collapse_percentage:Q', title='Collapse %', format='.1f')
+        max_value = float(grouped['collapse_percentage'].max())
+        # For percentage, use nice round numbers
+        if max_value <= 25:
+            domain_max = 25
+            axis_values = [0, 5, 10, 15, 20, 25]
+        elif max_value <= 50:
+            domain_max = 50
+            axis_values = [0, 10, 20, 30, 40, 50]
+        elif max_value <= 75:
+            domain_max = 75
+            axis_values = [0, 15, 30, 45, 60, 75]
+        else:
+            domain_max = 100
+            axis_values = [0, 20, 40, 60, 80, 100]
     else:
-        tick_step = max(1, int(np.ceil(max_collapse_count / 5)))
-        axis_values = list(range(0, max_collapse_count + tick_step, tick_step))
+        y_field = 'collapse_count'
+        y_title = 'Collapse Frequency'
+        tooltip_field = alt.Tooltip('collapse_count:Q', title='Collapses')
+        max_value = int(grouped['collapse_count'].max())
+        if max_value <= 5:
+            axis_values = list(range(0, max_value + 1))
+        else:
+            tick_step = max(1, int(np.ceil(max_value / 5)))
+            axis_values = list(range(0, max_value + tick_step, tick_step))
+        domain_max = axis_values[-1] if axis_values else max_value
 
-    domain_max = axis_values[-1] if axis_values else max_collapse_count
     if domain_max <= 0:
-        domain_max = 1
+        domain_max = 1 if not show_percentage else 100
+
+    category_order = grouped['algorithm_display'].tolist()
 
     # Use consistent color scheme based on algorithm legend order
     legend_domain = build_algorithm_legend_domain(grouped['algorithm_display'])
     color_scale = alt.Scale(domain=legend_domain) if legend_domain else alt.Undefined
+
+    tooltips = [
+        alt.Tooltip('algorithm_display:N', title='Algorithm'),
+        tooltip_field,
+    ]
+    if show_percentage and runs_per_algorithm:
+        tooltips.extend([
+            alt.Tooltip('collapse_count:Q', title='Collapses'),
+            alt.Tooltip('total_runs:Q', title='Total Runs'),
+        ])
 
     return (
         alt.Chart(grouped)
@@ -266,16 +313,13 @@ def create_overall_collapse_chart(df: pd.DataFrame, title: str, algorithms: list
         .encode(
             x=alt.X('algorithm_display:N', title=None, sort=category_order),
             y=alt.Y(
-                'collapse_count:Q',
-                title='Collapse Frequency',
+                f'{y_field}:Q',
+                title=y_title,
                 scale=alt.Scale(domain=(0, domain_max)),
                 axis=alt.Axis(values=axis_values),
             ),
             color=alt.Color('algorithm_display:N', legend=None, scale=color_scale),
-            tooltip=[
-                alt.Tooltip('algorithm_display:N', title='Algorithm'),
-                alt.Tooltip('collapse_count:Q', title='Collapses'),
-            ],
+            tooltip=tooltips,
         )
         .properties(width=750, height=500, title=title)
         .configure_title(fontSize=28, font=ALT_FONT_FAMILY)
@@ -295,7 +339,8 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
          bin_size: int = 10_000_000, stack_by_algorithm: bool = True,
          min_consecutive_below: int = 3,
          output_dir: str = "./plots", save_html: bool = False, debug: bool = False,
-         overall: bool = False, output_name: str | None = None):
+         overall: bool = False, output_name: str | None = None,
+         percentage: bool = False):
 
     if debug:
         print("Debug mode enabled: using synthetic collapse events instead of querying Weights & Biases.")
@@ -306,8 +351,9 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
         ])
         df_events['algorithm_display'] = df_events['algorithm'].map(resolve_algorithm_display)
         algorithms = sorted(df_events['algorithm_display'].unique())
+        runs_per_algorithm = {"alg_a": 5, "alg_b": 5}
     else:
-        df_events, algorithms = build_events_df(
+        df_events, algorithms, runs_per_algorithm = build_events_df(
             wandb_entity,
             wandb_project,
             group,
@@ -324,9 +370,19 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
             return print(f"No collapse events found for group='{group}'")
 
     if overall:
-        print("Generating overall collapse frequency chart (one collapse per run).")
-        title = f"Collapse Frequency"
-        chart = create_overall_collapse_chart(df_events, title, algorithms if algorithms else [])
+        if percentage:
+            print("Generating overall collapse percentage chart (percentage of runs collapsed).")
+            title = f"Collapse Rate"
+        else:
+            print("Generating overall collapse frequency chart (one collapse per run).")
+            title = f"Collapse Frequency"
+        chart = create_overall_collapse_chart(
+            df_events,
+            title,
+            algorithms if algorithms else [],
+            runs_per_algorithm=runs_per_algorithm,
+            show_percentage=percentage,
+        )
     else:
         print("Generating collapse timeline chart (binned by training steps).")
         title = f"{group.replace('_', ' ').title()}: Policy Collapses Over Time"
@@ -334,7 +390,10 @@ def main(wandb_entity: str, wandb_project: str = "crl_experiments", group: str =
 
     ext = "html" if save_html else "png"
     Path(output_dir).mkdir(exist_ok=True, parents=True)
-    suffix = "overall" if overall else "binned"
+    if percentage:
+        suffix = "overall_percentage" if overall else "binned"
+    else:
+        suffix = "overall" if overall else "binned"
     name_prefix = output_name if output_name else group
     outfile = Path(output_dir) / f"{name_prefix}_policy_collapses_{suffix}.{ext}"
     chart.save(str(outfile))

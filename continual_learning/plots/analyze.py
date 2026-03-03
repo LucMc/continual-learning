@@ -319,6 +319,8 @@ def normalize_algorithm_name(name: str) -> str:
     normalized = name or ""
     normalized = re.sub(r'(^|[,_])seed=[^,_]+', _seed_repl, normalized)
     normalized = re.sub(r'_s\d+$', '', normalized)
+    # Strip -copy suffix (from wandb run copies)
+    normalized = re.sub(r'-copy$', '', normalized)
     normalized = re.sub(r'[,_-]+$', '', normalized)
     return normalized or "unknown_algorithm"
 
@@ -330,6 +332,8 @@ def display_algorithm_name(name: str) -> str:
 
 def extract_run_identity(run) -> Tuple[str, str]:
     run_name = getattr(run, "name", "") or ""
+    # Strip -copy suffix early (from wandb run copies) before seed extraction
+    run_name = re.sub(r'-copy$', '', run_name)
     algo_name = run_name
     seed_id: Optional[str] = None
 
@@ -1166,6 +1170,8 @@ def create_peak_final_bar_chart(
     base_text_size: float = 20.0,
     log_scale: bool = False,
     show_iqr: bool = True,
+    y_min: Optional[float] = None,
+    legend_inside: bool = False,
 ) -> alt.Chart:
     """
     Grouped bar chart (Final vs Peak IQM) with robust y-axis:
@@ -1251,9 +1257,14 @@ def create_peak_final_bar_chart(
         ).dropna()
         baseline_map[metric_name] = float(candidates.min()) if not candidates.empty else 0.0
 
-    chart_df["baseline"] = chart_df["metric"].map(baseline_map)
-    baseline_floor = float(chart_df["baseline"].min()) if not chart_df.empty else 0.0
-    baseline_floor = -2001
+    if y_min is not None:
+        # Use y_min as baseline for all bars
+        chart_df["baseline"] = y_min
+        baseline_floor = y_min
+    else:
+        chart_df["baseline"] = chart_df["metric"].map(baseline_map)
+        baseline_floor = float(chart_df["baseline"].min()) if not chart_df.empty else 0.0
+        baseline_floor = -2001
 
     # --- explicit, robust y-domain (single metric => global domain)
     metric_count = chart_df["metric"].nunique()
@@ -1278,19 +1289,37 @@ def create_peak_final_bar_chart(
         axis_label = f"{axis_label} (IQM)"
 
     color_scale = alt.Scale(domain=["Final", "Peak"], range=["#1f77b4", "#ff7f0e"])
-    legend = alt.Legend(
-        title=None,
-        orient="top",
-        direction="horizontal",
-        padding=10,
-        labelFontSize=legend_label_size,
-        labelFontWeight="bold",
-        symbolSize=legend_symbol_size,
-        values=["Final", "Peak"],
-        labelLimit=legend_label_limit,
-        labelPadding=8,
-        labelFont=ALT_FONT_FAMILY,
-    )
+    if legend_inside:
+        legend = alt.Legend(
+            title=None,
+            orient="top-right",
+            direction="vertical",
+            padding=10,
+            fillColor="white",
+            strokeColor="#ccc",
+            cornerRadius=4,
+            labelFontSize=legend_label_size,
+            labelFontWeight="bold",
+            symbolSize=legend_symbol_size,
+            values=["Final", "Peak"],
+            labelLimit=legend_label_limit,
+            labelPadding=8,
+            labelFont=ALT_FONT_FAMILY,
+        )
+    else:
+        legend = alt.Legend(
+            title=None,
+            orient="top",
+            direction="horizontal",
+            padding=10,
+            labelFontSize=legend_label_size,
+            labelFontWeight="bold",
+            symbolSize=legend_symbol_size,
+            values=["Final", "Peak"],
+            labelLimit=legend_label_limit,
+            labelPadding=8,
+            labelFont=ALT_FONT_FAMILY,
+        )
 
     x = alt.X(
         "algorithm:N",
@@ -1447,6 +1476,7 @@ def main(
     y_min: Optional[float] = None,
     y_max: Optional[float] = None,
     log_scale: bool = False,
+    legend_inside: bool = False,
 ):
     if not metrics:
         metrics = [metric] if metric else ["eval_loss"]
@@ -1568,6 +1598,8 @@ def main(
                 base_text_size=base_text_size,
                 log_scale=log_scale,
                 show_iqr=show_iqr,
+                y_min=y_min,
+                legend_inside=legend_inside,
             )
             bar_filename_stem = (
                 f"{slugged_title}_peak_vs_final_bar"

@@ -27,6 +27,7 @@ try:
         scaled_font_size,
         coerce_numeric_value,
         _enable_times_new_roman_theme,
+        build_algorithm_legend_domain,
     )
 except ImportError:
     from .ablation_plot import (
@@ -34,6 +35,7 @@ except ImportError:
         scaled_font_size,
         coerce_numeric_value,
         _enable_times_new_roman_theme,
+        build_algorithm_legend_domain,
     )
 
 _enable_times_new_roman_theme()
@@ -52,34 +54,45 @@ MT1_TASKS = [
     "push",
 ]
 
-# Algorithm display names for consistent legend ordering
+# Algorithm display names for consistent legend ordering (matches analyze.py)
 ALGORITHM_DISPLAY_NAMES = {
+    # Standard names
     "adam": "Adam",
     "standard": "Adam",
     "cbp": "CBP",
-    "ccbp": "CCBP",
+    "ccbp": "CPR",
     "ccbp2": "CCBP2",
-    # "cpr": "CPR",
     "ccbp3": "CPR",
+    "cpr": "CPR",
     "redo": "ReDo",
     "regrama": "ReGraMa",
     "shrink_and_perturb": "Shrink & Perturb",
+    "soft_shrink_and_perturb": "Soft Shrink & Perturb",
     "sp": "Shrink & Perturb",
     "bro": "BRO",
     "sac": "SAC",
+    # Humanoid variants (from analyze.py)
+    "ccbp_bigger_rollout_new_hparams": "CPR",
+    "regrama_bigger_rollout_new_hparams": "ReGraMa",
+    "cbp_bigger_rollout": "CBP",
+    "redo_bigger_rollout": "ReDo",
+    "shrink_and_perturb_bigger_rollout": "Shrink & Perturb",
+    "soft_shrink_and_perturb_bigger_rollout": "Soft Shrink & Perturb",
+    "shrink_and_perturb_br_adam_sb_lr_smaller_net": "Soft Shrink & Perturb",
+    "shrink_and_perturb_smaller": "Soft Shrink & Perturb",
+    "standard_bigger_rollout": "Adam",
 }
 
 ALGORITHM_LEGEND_ORDER = [
     "CPR",
-    "CCBP2",
-    "CCBP",
     "CBP",
     "ReGraMa",
     "ReDo",
     "Shrink & Perturb",
+    "Soft Shrink & Perturb",
+    "Adam",
     "BRO",
     "SAC",
-    "Adam",
 ]
 
 # Algorithms to exclude from plots
@@ -152,30 +165,33 @@ def extract_task_from_run(run) -> Optional[str]:
 
 
 def extract_algorithm_from_run(run) -> str:
-    """Extract algorithm/optimizer name from run config or name.
+    """Extract algorithm/optimizer name from run name first, then config.
 
     For MT1 runs, the format is typically: sac_{task}_{optimizer}_{seed}
-    We want to extract the optimizer (adam, ccbp, cbp, redo, etc.)
+    We want to extract the optimizer (adam, ccbp, cbp, redo, shrink_and_perturb, etc.)
     """
-    config = getattr(run, "config", {}) or {}
-
-    # First try the 'optimizer' config key (specific to MT1 runs)
-    if "optimizer" in config:
-        return str(config["optimizer"])
-
-    # Try common config keys for algorithm/method
-    for key in ["algorithm", "algo", "method", "agent"]:
-        if key in config:
-            return str(config[key])
-
-    # Try to extract from run name
-    # MT1 format: sac_{task}_{optimizer}_{seed}
     run_name = getattr(run, "name", "") or ""
 
-    # Pattern: sac_taskname-v3_optimizer_seed
-    match = re.match(r'^sac_[^_]+-v\d+_([^_]+)_\d+$', run_name)
+    # Known multi-word algorithm names (with underscores) - check these first
+    known_algorithms = [
+        "shrink_and_perturb",
+        "soft_shrink_and_perturb",
+    ]
+
+    run_name_lower = run_name.lower()
+    for algo in known_algorithms:
+        if algo in run_name_lower:
+            return algo
+
+    # Try run name pattern: sac_taskname-v3_optimizer_seed
+    # Capture everything between task and final seed number
+    match = re.match(r'^sac_[^_]+-v\d+_(.+)_\d+$', run_name)
     if match:
-        return match.group(1)
+        algo_part = match.group(1)
+        # If this is a known algorithm key, return it
+        if algo_part.lower() in ALGORITHM_DISPLAY_NAMES:
+            return algo_part
+        return algo_part
 
     # Fallback: try splitting and getting second-to-last part
     parts = run_name.split("_")
@@ -184,6 +200,13 @@ def extract_algorithm_from_run(run) -> str:
         if parts[-1].isdigit():
             return parts[-2]
 
+    # Fallback to config
+    config = getattr(run, "config", {}) or {}
+    for key in ["optimizer", "algorithm", "algo", "method", "agent"]:
+        if key in config:
+            return str(config[key])
+
+    # Last resort
     if parts:
         return parts[0]
 
@@ -398,8 +421,8 @@ def create_task_chart(
     if x_axis_max is None:
         x_axis_max = float(df["step"].max()) * 1.02
 
-    # Sort algorithms for consistent ordering
-    algorithms = sorted(df["algorithm"].unique(), key=algorithm_sort_key)
+    # Sort algorithms for consistent ordering using shared function
+    algorithms = build_algorithm_legend_domain(df["algorithm"].unique())
 
     # Build color scale
     color_scale = alt.Scale(domain=algorithms)
@@ -493,7 +516,7 @@ def create_task_chart(
             width=chart_width,
             height=chart_height,
             title=alt.TitleParams(
-                text=f"MT1: {title}",
+                text=title,
                 fontSize=chart_title_size,
                 fontWeight="bold",
                 font=ALT_FONT_FAMILY,
@@ -575,6 +598,208 @@ def create_combined_chart(
     return alt.vconcat(*rows).resolve_scale(color="shared")
 
 
+def compute_summary_stats(
+    task_dfs: Dict[str, pd.DataFrame],
+    use_peak: bool = False,
+) -> pd.DataFrame:
+    """Compute summary statistics across tasks for each algorithm.
+
+    For each algorithm, collects the final (or peak) value from each task,
+    then computes mean and 95% CI across tasks.
+
+    Args:
+        task_dfs: Dictionary mapping task names to aggregated DataFrames
+        use_peak: If True, use peak value; otherwise use final value
+
+    Returns:
+        DataFrame with columns: algorithm, mean, ci_lower, ci_upper, std, n_tasks
+    """
+    from scipy import stats
+
+    # Collect final/peak values per algorithm per task
+    algo_task_values: Dict[str, Dict[str, float]] = defaultdict(dict)
+
+    for task, df in task_dfs.items():
+        if df.empty:
+            continue
+        for algo in df["algorithm"].unique():
+            algo_df = df[df["algorithm"] == algo]
+            if algo_df.empty:
+                continue
+            if use_peak:
+                value = float(algo_df["iqm"].max())
+            else:
+                # Final value (last step) - sort by step and take last
+                sorted_df = algo_df.sort_values("step")
+                value = float(sorted_df.iloc[-1]["iqm"])
+            algo_task_values[algo][task] = value
+
+    # Compute statistics across tasks
+    summary_records = []
+    for algo, task_vals in algo_task_values.items():
+        values = np.array(list(task_vals.values()))
+        n_tasks = len(values)
+
+        if n_tasks == 0:
+            continue
+
+        mean_val = np.mean(values)
+        std_val = np.std(values, ddof=1) if n_tasks > 1 else 0.0
+
+        # 95% CI using t-distribution
+        if n_tasks > 1:
+            sem = std_val / np.sqrt(n_tasks)
+            t_crit = stats.t.ppf(0.975, df=n_tasks - 1)
+            ci_half = t_crit * sem
+        else:
+            ci_half = 0.0
+
+        summary_records.append({
+            "algorithm": algo,
+            "mean": mean_val,
+            "ci_lower": mean_val - ci_half,
+            "ci_upper": mean_val + ci_half,
+            "std": std_val,
+            "n_tasks": n_tasks,
+            "sort_key": algorithm_sort_key(algo)[0],
+        })
+
+    return pd.DataFrame(summary_records)
+
+
+def create_summary_bar_chart(
+    summary_df: pd.DataFrame,
+    title: str = "Mean Success Rate Across MT1 Tasks",
+    y_axis_label: str = "Success Rate",
+    base_text_size: float = 20.0,
+    chart_width: int = 600,
+    chart_height: int = 400,
+    show_ci: bool = True,
+) -> alt.Chart:
+    """Create a bar chart summarizing performance across all tasks.
+
+    Args:
+        summary_df: DataFrame from compute_summary_stats
+        title: Chart title
+        y_axis_label: Y-axis label
+        base_text_size: Base font size
+        chart_width: Chart width in pixels
+        chart_height: Chart height in pixels
+        show_ci: Show 95% CI error bars
+
+    Returns:
+        Altair chart object
+    """
+    if summary_df.empty:
+        raise ValueError("No data for summary chart")
+
+    axis_label_size = scaled_font_size(base_text_size, 1.2)
+    axis_title_size = scaled_font_size(base_text_size, 1.3)
+    chart_title_size = scaled_font_size(base_text_size, 1.4)
+
+    # Sort by our predefined order
+    summary_df = summary_df.sort_values("sort_key")
+    algorithms = summary_df["algorithm"].tolist()
+
+    base = alt.Chart(summary_df)
+
+    x = alt.X(
+        "algorithm:N",
+        sort=algorithms,
+        title=None,
+        axis=alt.Axis(
+            labelAngle=-30,
+            labelPadding=8,
+            labelFontSize=axis_label_size,
+            labelBaseline="top",
+            labelAlign="right",
+            labelLimit=200,
+            labelFont=ALT_FONT_FAMILY,
+        ),
+    )
+
+    y_axis = alt.Axis(
+        title=y_axis_label,
+        titlePadding=10,
+        titleFontSize=axis_title_size,
+        labelFontSize=axis_label_size,
+        titleFont=ALT_FONT_FAMILY,
+        labelFont=ALT_FONT_FAMILY,
+        tickCount=6,
+        format=".2f",
+    )
+
+    # Bars
+    bars = base.mark_bar(size=50).encode(
+        x=x,
+        y=alt.Y(
+            "mean:Q",
+            title=y_axis_label,
+            axis=y_axis,
+            scale=alt.Scale(domain=[0, min(1.0, summary_df["ci_upper"].max() * 1.1)]),
+        ),
+        color=alt.Color(
+            "algorithm:N",
+            sort=algorithms,
+            legend=None,
+        ),
+        tooltip=[
+            alt.Tooltip("algorithm:N", title="Method"),
+            alt.Tooltip("mean:Q", title="Mean", format=".3f"),
+            alt.Tooltip("ci_lower:Q", title="CI Lower", format=".3f"),
+            alt.Tooltip("ci_upper:Q", title="CI Upper", format=".3f"),
+            alt.Tooltip("n_tasks:Q", title="Tasks"),
+        ],
+    )
+
+    if show_ci:
+        # Error bars (rules)
+        rules = base.mark_rule(color="black", strokeWidth=1.5).encode(
+            x=x,
+            y=alt.Y("ci_lower:Q"),
+            y2=alt.Y2("ci_upper:Q"),
+        )
+
+        # Caps
+        tick_size = 12
+        lower_caps = base.mark_tick(
+            thickness=2, size=tick_size, color="black"
+        ).encode(
+            x=x,
+            y=alt.Y("ci_lower:Q"),
+        )
+
+        upper_caps = base.mark_tick(
+            thickness=2, size=tick_size, color="black"
+        ).encode(
+            x=x,
+            y=alt.Y("ci_upper:Q"),
+        )
+
+        chart = bars + rules + lower_caps + upper_caps
+    else:
+        chart = bars
+
+    return (
+        chart.properties(
+            width=chart_width,
+            height=chart_height,
+            title=alt.TitleParams(
+                text=title,
+                fontSize=chart_title_size,
+                fontWeight="bold",
+                font=ALT_FONT_FAMILY,
+            ),
+        )
+        .configure_axis(
+            grid=True,
+            gridOpacity=0.3,
+            labelFont=ALT_FONT_FAMILY,
+            titleFont=ALT_FONT_FAMILY,
+        )
+    )
+
+
 def main(
     wandb_entity: str,
     wandb_project: str = "MT1 results2",
@@ -592,6 +817,8 @@ def main(
     combined: bool = False,
     combined_columns: int = 2,
     list_groups: bool = False,
+    summary: bool = False,
+    use_peak: bool = False,
 ):
     """Generate MT1 plots from wandb data.
 
@@ -612,6 +839,8 @@ def main(
         combined: Create a single combined plot with all tasks
         combined_columns: Number of columns in combined plot
         list_groups: Just list available groups without plotting
+        summary: Create summary bar chart showing mean ± 95% CI across all tasks
+        use_peak: For summary chart, use peak value instead of final value
     """
 
     if list_groups:
@@ -677,7 +906,39 @@ def main(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if combined:
+    if summary:
+        # Create summary bar chart showing mean ± 95% CI across all tasks
+        print("\nCreating summary bar chart...")
+        summary_df = compute_summary_stats(aggregated_data, use_peak=use_peak)
+
+        if summary_df.empty:
+            print("No summary data!")
+            return
+
+        # Print summary table
+        print("\nSummary statistics across tasks:")
+        print(f"{'Method':<20} {'Mean':>8} {'CI Lower':>10} {'CI Upper':>10} {'N Tasks':>8}")
+        print("-" * 60)
+        for _, row in summary_df.sort_values("sort_key").iterrows():
+            print(f"{row['algorithm']:<20} {row['mean']:>8.3f} {row['ci_lower']:>10.3f} {row['ci_upper']:>10.3f} {row['n_tasks']:>8}")
+
+        stage_label = "Peak" if use_peak else "Final"
+        chart = create_summary_bar_chart(
+            summary_df,
+            title=f"{stage_label} {y_axis_label} Across MT1 Tasks (Mean ± 95% CI)",
+            y_axis_label=y_axis_label,
+            base_text_size=base_text_size,
+            chart_width=chart_width,
+            chart_height=chart_height,
+            show_ci=show_iqr,
+        )
+
+        stage_suffix = "_peak" if use_peak else "_final"
+        save_path = output_path / f"mt1_summary{stage_suffix}.{ext}"
+        chart.save(str(save_path))
+        print(f"\nSaved: {save_path}")
+
+    elif combined:
         # Create single combined chart
         print("\nCreating combined chart...")
         chart = create_combined_chart(
