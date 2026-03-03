@@ -59,12 +59,13 @@ class Args:
     # SAC settings
     replay_ratio: int = 4  # Gradient updates per env step
     buffer_size: int = 1_000_000
-    batch_size: int = 256
+    batch_size: int = 512
     learning_starts: int = 5_000
     steps_per_task: int = 500_000
+    num_envs: int = 10  # Match MT1 async envs for more transitions per step
 
     # Network architecture
-    hidden_size: int = 256
+    hidden_size: int = 512
     num_layers: int = 3
 
 
@@ -196,7 +197,7 @@ def run_metaworld_sac():
             sac_config=sac_config,
             env_cfg=EnvConfig(
                 name="metaworld_mt10",
-                num_envs=1,
+                num_envs=args.num_envs,
                 num_tasks=10,
                 episode_length=500,
             ),

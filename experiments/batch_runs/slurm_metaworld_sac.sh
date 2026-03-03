@@ -35,19 +35,12 @@ seed="${seeds[$seed_idx]}"
 output_filename="sac_${algo}_seed_${seed}_job_${SLURM_JOB_ID}.out"
 
 # --- Setup environment ---
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-
-if [ ! -d "$VENV_DIR" ]; then
-    uv venv "$VENV_DIR" --python 3.12
-fi
+PROJECT_ROOT="$(cd "$VENV_DIR/.." && pwd)"
 source "$VENV_DIR/bin/activate"
 
 # --- Run SAC experiment ---
 echo "Running SAC on MetaWorld MT10 with algo=$algo seed=$seed"
-python -m experiments.metaworld_sac \
+python "$PROJECT_ROOT/experiments/metaworld_sac.py" \
     --include "$algo" \
     --seed "$seed" \
     --wandb-entity "$wandb_entity" \

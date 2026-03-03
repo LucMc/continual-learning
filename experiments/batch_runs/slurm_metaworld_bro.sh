@@ -39,16 +39,12 @@ seed="${seeds[$seed_idx]}"
 output_filename="bro_${optimizer}_seed_${seed}_job_${SLURM_JOB_ID}.out"
 
 # --- Setup environment ---
-# Change to project root (2 levels up from batch_runs/)
+PROJECT_ROOT="$(cd "$VENV_DIR/.." && pwd)"
 source "$VENV_DIR/bin/activate"
-
-# --- Install package ---
-# uv pip install -e ".[cuda12]"
 
 # --- Run BRO experiment ---
 echo "Running BRO on MetaWorld MT10 with optimizer=$optimizer, seed=$seed"
-cd "$SLURM_SUBMIT_DIR"
-python ../metaworld_mt10.py \
+python "$PROJECT_ROOT/experiments/metaworld_mt10.py" \
     --seed "$seed" \
     --optimizer "$optimizer" \
     --wandb-entity "$wandb_entity" \

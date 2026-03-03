@@ -58,13 +58,14 @@ class Args:
     # BRO hyperparameters
     updates_per_step: int = 10  # High replay ratio (BRO default)
     buffer_size: int = 1_000_000
-    batch_size: int = 256
+    batch_size: int = 512
     learning_starts: int = 5_000
     steps_per_task: int = 500_000  # Steps per MetaWorld task
+    num_envs: int = 10  # Match MT1 async envs for more transitions per step
 
     # Network architecture
-    hidden_dims: int = 256
-    depth: int = 1  # BRO uses depth 1 by default
+    hidden_dims: int = 512
+    depth: int = 2  # Increased from 1 for more capacity
 
     # BRO-specific
     distributional: bool = True
@@ -183,7 +184,7 @@ def run_metaworld_mt10():
         bro_config=bro_config,
         env_cfg=EnvConfig(
             name="metaworld_mt10",
-            num_envs=1,  # MetaWorld typically uses single env
+            num_envs=args.num_envs,
             num_tasks=10,  # MT10 has 10 tasks
             episode_length=500,  # MetaWorld default
         ),
