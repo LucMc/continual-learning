@@ -59,9 +59,9 @@ class Args:
     # SAC settings
     replay_ratio: int = 4  # Gradient updates per env step
     buffer_size: int = 1_000_000
-    batch_size: int = 512
+    batch_size: int = 256
     learning_starts: int = 5_000
-    steps_per_task: int = 500_000
+    steps_per_task: int = 5_000_000
     num_envs: int = 10  # Match MT1 async envs for more transitions per step
 
     # Network architecture
@@ -84,16 +84,16 @@ def run_metaworld_sac():
         "adam": AdamConfig(learning_rate=lr),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=lr),
-            update_frequency=5000,
-            score_threshold=0.01,
+            update_frequency=100000,
+            score_threshold=0.0001,
             max_reset_frac=0.02,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=lr),
-            update_frequency=5000,
-            score_threshold=0.01,
+            update_frequency=100000,
+            score_threshold=0.0001,
             max_reset_frac=0.02,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -110,18 +110,18 @@ def run_metaworld_sac():
             tx=AdamConfig(learning_rate=lr),
             seed=args.seed,
             decay_rate=0.99,
-            replacement_rate=0.001,
-            sharpness=8,
-            threshold=0.5,
-            update_frequency=5000,
-            transform_type="linear",
+            replacement_rate=0.15,
+            sharpness=16,
+            threshold=1.0,
+            update_frequency=1000,
+            transform_type="sigmoid",
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             tx=AdamConfig(learning_rate=lr),
             seed=args.seed,
             shrink=0.9999,
             perturb=0.001,
-            every_n=5000,
+            every_n=1000,
             param_noise_fn=jax.nn.initializers.lecun_normal(),
         ),
     }
