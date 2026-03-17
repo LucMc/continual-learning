@@ -9,18 +9,18 @@
 #SBATCH --time=03-00:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
-#SBATCH --array=0-29   # 6 algos * 5 seeds = 30 jobs
+#SBATCH --array=0-31   # 16 algos * 2 seeds = 32 jobs
 
 # Usage: sbatch slurm_metaworld_sac.sh [wandb_entity] [wandb_project]
-# Example: sbatch --array=0-29 slurm_metaworld_sac.sh lucmc metaworld_sac
+# Example: sbatch --array=0-31 slurm_metaworld_sac.sh lucmc metaworld_sac
 
 VENV_DIR="../../.venv"
 wandb_entity="${1:-lucmc}"
 wandb_project="${2:-metaworld_sac}"
 
 # Algorithms and seeds
-algos=("adam" "redo" "regrama" "cbp" "ccbp" "shrink_and_perturb")
-seeds=(0 1 2 3 4)
+algos=("adam" "redo" "regrama" "cbp" "ccbp" "ccbpl" "ccbph" "shrink_and_perturb" "muon" "muon_redo" "muon_regrama" "muon_cbp" "muon_ccbp" "muon_ccbpl" "muon_ccbph" "muon_shrink_and_perturb")
+seeds=(0 1)
 
 num_algos=${#algos[@]}
 num_seeds=${#seeds[@]}
