@@ -84,6 +84,7 @@ class SACTrainer:
 
         self._episode_rewards: list[float] = []
         self._episode_lengths: list[int] = []
+        self._episode_successes: list[float] = []
         self._current_episode_reward = np.zeros(env_cfg.num_envs)
         self._current_episode_length = np.zeros(env_cfg.num_envs, dtype=int)
 
@@ -125,6 +126,9 @@ class SACTrainer:
 
         rewards_np = np.asarray(timestep.reward).squeeze(-1)
         dones_np = np.asarray(timestep.terminated | timestep.truncated).squeeze(-1)
+        success_flags = timestep.info.get(
+            "success", [False] * self.benchmark.num_envs
+        )
 
         self._current_episode_reward += rewards_np
         self._current_episode_length += 1
@@ -133,17 +137,14 @@ class SACTrainer:
             if done:
                 self._episode_rewards.append(float(self._current_episode_reward[i]))
                 self._episode_lengths.append(int(self._current_episode_length[i]))
+                self._episode_successes.append(float(success_flags[i]))
                 self._current_episode_reward[i] = 0
                 self._current_episode_length[i] = 0
                 self.total_episodes += 1
 
         self.total_steps += self.benchmark.num_envs
 
-        info = {
-            "success": timestep.info.get("success", [False] * self.benchmark.num_envs),
-        }
-
-        return timestep.next_observation, info
+        return timestep.next_observation, {}
 
     def update(self) -> LogDict:
         self.key, sample_key = jax.random.split(self.key)
@@ -199,6 +200,7 @@ class SACTrainer:
 
         self._episode_rewards = []
         self._episode_lengths = []
+        self._episode_successes = []
         self._current_episode_reward = np.zeros(self.benchmark.num_envs)
         self._current_episode_length = np.zeros(self.benchmark.num_envs, dtype=int)
 
@@ -208,13 +210,9 @@ class SACTrainer:
         last_eval_step = self.total_steps
 
         all_logs: list[LogDict] = []
-        task_successes: list[float] = []
 
         while self.total_steps - task_start_step < steps_per_task:
-            obs, info = self.collect_step(envs, obs)
-
-            if info.get("success"):
-                task_successes.extend(info["success"])
+            obs, _ = self.collect_step(envs, obs)
 
             if self.total_steps >= self.cfg.learning_starts:
                 all_logs = []
@@ -244,9 +242,10 @@ class SACTrainer:
                         self._episode_lengths[-100:]
                     ))
 
-                recent_successes = info.get("success", [])
-                if recent_successes:
-                    log_dict["charts/success_rate"] = float(np.mean(recent_successes))
+                if self._episode_successes:
+                    log_dict["charts/success_rate"] = float(
+                        np.mean(self._episode_successes[-100:])
+                    )
 
                 if all_logs:
                     avg_logs: dict[str, float] = {}
@@ -270,11 +269,8 @@ class SACTrainer:
                 self._log_cl_metrics()
                 last_eval_step = self.total_steps
 
-        if task_successes:
-            final_success = float(np.mean(task_successes[-1000:]))
-        else:
-            eval_metrics = self.evaluate(envs, num_episodes=20)
-            final_success = eval_metrics["success_rate"]
+        eval_metrics = self.evaluate(envs, num_episodes=20)
+        final_success = eval_metrics["success_rate"]
 
         self._final_success_rates[task_name] = final_success
         self._best_success_rates[task_name] = max(
