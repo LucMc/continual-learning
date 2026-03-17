@@ -9,6 +9,7 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 
 from continual_learning.configs.envs import EnvConfig
 from continual_learning.configs.logging import LoggingConfig
@@ -41,7 +42,7 @@ class SACTrainer:
         self.logger = Logger(
             logs_cfg,
             run_config={
-                "algorithm": "sac",
+                "algorithm": sac_config,
                 "benchmark": env_cfg,
                 "training": train_cfg,
             },
@@ -163,8 +164,36 @@ class SACTrainer:
         self.total_gradient_steps += 1
         return logs
 
+    def _reset_on_task_change(self):
+        """Reset replay buffer and optimizer states at task boundaries.
+
+        Follows the Continual World paper convention (reset_buffer_on_task_change=True,
+        reset_optimizer_on_task_change=True) to prevent cross-task contamination.
+        """
+        # Clear replay buffer — prevents task 1 data from crowding out task 2 learning
+        self.buffer_state = self.replay_buffer.init()
+
+        # Reset actor and critic optimizer states (zero out Adam momentum/variance)
+        new_actor_opt_state = self.sac_state.actor.tx.init(self.sac_state.actor.params)
+        new_critic_opt_state = self.sac_state.critic.tx.init(self.sac_state.critic.params)
+
+        # Reset alpha (entropy coefficient) and its optimizer to initial values
+        new_log_alpha = jnp.full((1,), jnp.log(self.cfg.alpha), dtype=jnp.float32)
+        alpha_optimizer = optax.adam(learning_rate=self.cfg.alpha_lr)
+        new_alpha_opt_state = alpha_optimizer.init(new_log_alpha)
+
+        self.sac_state = self.sac_state._replace(
+            actor=self.sac_state.actor.replace(opt_state=new_actor_opt_state),
+            critic=self.sac_state.critic.replace(opt_state=new_critic_opt_state),
+            log_alpha=new_log_alpha,
+            alpha_optimizer_state=new_alpha_opt_state,
+        )
+
     def train_on_task(self, envs: VectorEnv, task_name: str, steps_per_task: int):
         self._current_task_name = task_name
+
+        if self._completed_task_names:
+            self._reset_on_task_change()
 
         obs = envs.init()
 
@@ -323,6 +352,8 @@ class SACTrainer:
         mt10 = self.benchmark._mt10
         task_cls = mt10.train_classes[task_name]
         task_instances = [t for t in mt10.train_tasks if t.env_name == task_name]
+        task_names = self.benchmark.task_names
+        task_idx = task_names.index(task_name)
 
         return MetaWorldVectorEnv(
             task_name=task_name,
@@ -330,6 +361,8 @@ class SACTrainer:
             tasks=task_instances,
             num_envs=self.benchmark.num_envs,
             seed=self.seed + 1000,
+            task_idx=task_idx,
+            num_tasks=len(task_names),
         )
 
     def evaluate_all_tasks(self, num_episodes: int = 10) -> dict[str, float]:

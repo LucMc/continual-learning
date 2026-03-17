@@ -209,7 +209,7 @@ def fetch_runs(entity: str, project: str, group: str, created_after: Optional[st
 
     # Filter by state
     if include_failed:
-        valid_runs = [r for r in runs if r.state in ["finished", "failed"]]
+        valid_runs = [r for r in runs if r.state in ["finished", "failed", "crashed", "running"]]
     else:
         valid_runs = [r for r in runs if r.state == "finished"]
 

@@ -14,6 +14,7 @@ Key components:
 This trainer wraps the BROLearner for continual learning on MetaWorld MT10.
 """
 
+import dataclasses
 import time
 from typing import NamedTuple
 
@@ -30,6 +31,36 @@ from continual_learning.trainers.bro_learner import BROLearner, BROConfig
 from continual_learning.types import LogDict, Observation
 from continual_learning.utils.monitoring import Logger, prefix_dict
 from continual_learning.utils.replay_buffer import ReplayBuffer, ReplayBufferState
+
+
+def _serialize_config(obj):
+    """Convert a config object to a wandb-serializable dict.
+
+    Includes the class name as 'type' and skips non-serializable fields (callables).
+    Recurses into nested dataclass/NamedTuple configs.
+    """
+    if isinstance(obj, dict):
+        return {k: _serialize_config(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)) and not hasattr(obj, '_fields'):
+        return [_serialize_config(v) for v in obj]
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        d = {"type": type(obj).__name__}
+        for f in dataclasses.fields(obj):
+            val = getattr(obj, f.name)
+            if callable(val) and not isinstance(val, (int, float, str, bool)):
+                d[f.name] = str(val)
+            else:
+                d[f.name] = _serialize_config(val)
+        return d
+    if hasattr(obj, '_asdict'):
+        d = {"type": type(obj).__name__}
+        for k, v in obj._asdict().items():
+            if callable(v) and not isinstance(v, (int, float, str, bool)):
+                d[k] = str(v)
+            else:
+                d[k] = _serialize_config(v)
+        return d
+    return obj
 
 
 class BROTrainer:
@@ -66,9 +97,9 @@ class BROTrainer:
         self.logger = Logger(
             logs_cfg,
             run_config={
-                "algorithm": bro_config._asdict(),
-                "benchmark": env_cfg,
-                "training": train_cfg,
+                "algorithm": _serialize_config(bro_config),
+                "benchmark": _serialize_config(env_cfg),
+                "training": _serialize_config(train_cfg),
             },
         )
 

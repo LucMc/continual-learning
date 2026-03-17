@@ -33,6 +33,7 @@ from continual_learning.configs import (
     CbpConfig,
     CcbpConfig,
     LoggingConfig,
+    MuonConfig,
     RedoConfig,
     RegramaConfig,
     ShrinkAndPerterbConfig,
@@ -61,7 +62,7 @@ class Args:
     buffer_size: int = 1_000_000
     batch_size: int = 512
     learning_starts: int = 5_000
-    steps_per_task: int = 500_000
+    steps_per_task: int = 1_000_000
     num_envs: int = 10  # Match MT1 async envs for more transitions per step
 
     # Network architecture
@@ -78,6 +79,7 @@ def run_metaworld_sac():
         assert args.wandb_entity, "wandb_entity required when wandb is enabled"
 
     lr = 3e-4
+    muon_lr = 0.01
 
     # Define optimizers with conservative hyperparameters
     optimizers = {
@@ -118,6 +120,50 @@ def run_metaworld_sac():
         ),
         "shrink_and_perturb": ShrinkAndPerterbConfig(
             tx=AdamConfig(learning_rate=lr),
+            seed=args.seed,
+            shrink=0.9999,
+            perturb=0.001,
+            every_n=5000,
+            param_noise_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        # Muon-based optimizers
+        "muon": MuonConfig(learning_rate=muon_lr),
+        "muon_redo": RedoConfig(
+            tx=MuonConfig(learning_rate=muon_lr),
+            update_frequency=5000,
+            score_threshold=0.01,
+            max_reset_frac=0.02,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        "muon_regrama": RegramaConfig(
+            tx=MuonConfig(learning_rate=muon_lr),
+            update_frequency=5000,
+            score_threshold=0.01,
+            max_reset_frac=0.02,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        "muon_cbp": CbpConfig(
+            tx=MuonConfig(learning_rate=muon_lr),
+            replacement_rate=1e-5,
+            decay_rate=0.999,
+            maturity_threshold=1000,
+            seed=args.seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        "muon_ccbp": CcbpConfig(
+            tx=MuonConfig(learning_rate=muon_lr),
+            seed=args.seed,
+            decay_rate=0.99,
+            replacement_rate=0.001,
+            sharpness=8,
+            threshold=0.5,
+            update_frequency=5000,
+            transform_type="linear",
+        ),
+        "muon_shrink_and_perturb": ShrinkAndPerterbConfig(
+            tx=MuonConfig(learning_rate=muon_lr),
             seed=args.seed,
             shrink=0.9999,
             perturb=0.001,
