@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G
-#SBATCH --partition=3090
+#SBATCH --partition=2080ti
 #SBATCH --gpus=1
 #SBATCH --time=03-00:00:00
 #SBATCH -o slurm.%N.%j.out

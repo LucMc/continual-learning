@@ -28,6 +28,7 @@ from chex import dataclass
 
 from continual_learning.configs import (
     AdamConfig,
+    MuonConfig,
     CbpConfig,
     CcbpConfig,
     LoggingConfig,
@@ -50,6 +51,10 @@ SWEEP_RANGES = {
     "adam": {
         "seeds": [0, 1, 2, 3, 4],
         "learning_rate": [3e-4, 1e-4, 1e-3],
+    },
+    "muon": {
+        "seeds": [0, 1, 2],
+        "learning_rate": [1e-4, 1e-3, 1e-2],
     },
     "redo": {
         "seeds": [0, 1, 2, 3, 4],
@@ -123,6 +128,9 @@ def build_sac_optimizer(algo: str, params: Dict[str, Any], seed: int):
     """Build optimizer config for SAC-based experiments."""
     if algo == "adam":
         return AdamConfig(learning_rate=params["learning_rate"])
+
+    if algo == "muon":
+        return MuonConfig(learning_rate=params["learning_rate"])
 
     tx = AdamConfig(learning_rate=params.get("tx_lr", 3e-4))
 
@@ -241,7 +249,7 @@ def run_sac_config(
         ),
         train_cfg=RLTrainingConfig(
             resume=False,
-            steps_per_task=500_000,
+            steps_per_task=1_000_000,
         ),
         logs_cfg=LoggingConfig(
             run_name=f"sac_{algo}_{tag}_s{seed}",
@@ -400,7 +408,7 @@ def run_all_configs(
 
 @dataclass
 class Args:
-    algo: Literal["adam", "redo", "regrama", "cbp", "ccbp", "shrink_and_perturb", "bro"]
+    algo: Literal["adam", "muon", "redo", "regrama", "cbp", "ccbp", "shrink_and_perturb", "bro"]
     config_id: Optional[int] = None
     seed: int = 0
     wandb_entity: Optional[str] = None
