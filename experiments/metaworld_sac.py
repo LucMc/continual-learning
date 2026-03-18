@@ -79,7 +79,7 @@ def run_metaworld_sac():
         assert args.wandb_entity, "wandb_entity required when wandb is enabled"
 
     lr = 3e-4
-    muon_lr = 0.01
+    muon_lr = 0.0001
 
     # Define optimizers with conservative hyperparameters
     optimizers = {
