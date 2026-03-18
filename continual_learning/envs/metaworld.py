@@ -161,6 +161,12 @@ class MetaWorldVectorEnv(VectorEnv):
         """Load environment state (limited support)."""
         self._current_obs = checkpoint.get("current_obs")
 
+    def close(self):
+        """Clean up MuJoCo environments."""
+        for env in self._envs:
+            if hasattr(env, "close"):
+                env.close()
+
 
 class MetaWorldMT10Benchmark(ContinualLearningEnv):
     """MetaWorld MT10 multi-task benchmark.
