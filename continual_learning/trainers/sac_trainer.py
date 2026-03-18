@@ -367,7 +367,10 @@ class SACTrainer:
 
         for task_name in self._completed_task_names:
             env = self._create_task_env(task_name)
-            metrics = self.evaluate(env, num_episodes)
+            try:
+                metrics = self.evaluate(env, num_episodes)
+            finally:
+                env.close()
             success_rate = metrics["success_rate"]
 
             results[f"eval/{task_name}/success_rate"] = success_rate
@@ -381,7 +384,10 @@ class SACTrainer:
 
         if self._current_task_name and self._current_task_name not in self._completed_task_names:
             env = self._create_task_env(self._current_task_name)
-            metrics = self.evaluate(env, num_episodes)
+            try:
+                metrics = self.evaluate(env, num_episodes)
+            finally:
+                env.close()
             success_rate = metrics["success_rate"]
 
             results[f"eval/{self._current_task_name}/success_rate"] = success_rate

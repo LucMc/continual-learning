@@ -84,6 +84,15 @@ ALGO_DISPLAY: Dict[str, str] = {
     "sp": "Shrink & Perturb",
     "bro": "BRO",
     "sac": "SAC",
+    # Muon variants
+    "muon": "Muon",
+    "muon_redo": "Muon+ReDo",
+    "muon_regrama": "Muon+ReGraMa",
+    "muon_cbp": "Muon+CBP",
+    "muon_ccbp": "Muon+CPR",
+    "muon_ccbph": "Muon+CPR-H",
+    "muon_ccbpl": "Muon+CPR-L",
+    "muon_shrink_and_perturb": "Muon+S&P",
 }
 
 EXCLUDED_ALGORITHMS = {"ccbp2"}
@@ -114,8 +123,8 @@ def _extract_algo_from_run(run) -> str:
     run_name = getattr(run, "name", "") or ""
     run_lower = run_name.lower()
 
-    # Check multi-word algorithms first
-    for mw in ("shrink_and_perturb", "soft_shrink_and_perturb"):
+    # Check multi-word algorithms first (longest match first to avoid partial matches)
+    for mw in ("muon_shrink_and_perturb", "soft_shrink_and_perturb", "muon_soft_shrink_and_perturb", "shrink_and_perturb"):
         if mw in run_lower:
             return mw
 
@@ -765,6 +774,168 @@ def create_summary_chart(
     )
 
 
+def compute_boundary_performance(
+    raw_df: pd.DataFrame,
+    steps_per_task: int = 1_000_000,
+    num_tasks: int = 10,
+    window: int = 50_000,
+    metric: str = "charts/success_rate",
+) -> pd.DataFrame:
+    """Extract current-task success rate just BEFORE each task boundary.
+
+    Measures peak/end-of-task performance by sampling [boundary - window, boundary].
+    Uses charts/success_rate (current task only) rather than eval/average_success_rate
+    (which divides by tasks_seen and has denominator artifacts at boundaries).
+
+    Returns DataFrame[algorithm, boundary_task, boundary_step_m, iqm, q25, q75].
+    Also includes a row with boundary_task='Mean' for the average across boundaries.
+    """
+    if raw_df.empty:
+        return pd.DataFrame()
+
+    boundaries = [i * steps_per_task for i in range(1, num_tasks + 1)]
+    records: List[dict] = []
+
+    for algo, algo_df in raw_df.groupby("algorithm"):
+        boundary_vals: List[float] = []
+        for i, b in enumerate(boundaries):
+            # Sample just BEFORE boundary — end-of-task performance
+            near = algo_df[
+                (algo_df["step"] >= b - window) &
+                (algo_df["step"] <= b)
+            ]
+            if near.empty:
+                continue
+            vals = near.groupby("seed")["value"].mean().values
+            iqm_val = compute_iqm(vals)
+            q25, q75 = (np.percentile(vals, [25, 75]) if len(vals) > 1 else (iqm_val, iqm_val))
+            records.append({
+                "algorithm": algo,
+                "boundary_task": f"Task {i + 1}",
+                "boundary_step_m": b / 1e6,
+                "iqm": iqm_val,
+                "q25": q25,
+                "q75": q75,
+            })
+            boundary_vals.append(iqm_val)
+
+        # Mean across all boundaries
+        if boundary_vals:
+            mean_val = float(np.mean(boundary_vals))
+            records.append({
+                "algorithm": algo,
+                "boundary_task": "Mean",
+                "boundary_step_m": 0.0,
+                "iqm": mean_val,
+                "q25": mean_val,
+                "q75": mean_val,
+            })
+
+    return pd.DataFrame(records)
+
+
+def create_boundary_bar_chart(
+    boundary_df: pd.DataFrame,
+    title: str = "Average Success at Task Boundaries",
+    base_text_size: float = 22.0,
+    chart_width: int = 800,
+    chart_height: int = 400,
+) -> alt.Chart:
+    """Grouped bar chart: performance at each task boundary per algorithm."""
+    if boundary_df.empty:
+        raise ValueError("No boundary data")
+
+    # Exclude 'Mean' row for the grouped chart — we'll make a separate mean chart
+    task_df = boundary_df[boundary_df["boundary_task"] != "Mean"].copy()
+    mean_df = boundary_df[boundary_df["boundary_task"] == "Mean"].copy()
+
+    legend_domain = build_algorithm_legend_domain(task_df["algorithm"].unique())
+    axis_label = scaled_font_size(base_text_size, 1.1)
+    axis_title_sz = scaled_font_size(base_text_size, 1.3)
+    chart_title_sz = scaled_font_size(base_text_size, 1.4)
+
+    # Sort tasks naturally
+    task_order = sorted(task_df["boundary_task"].unique(),
+                        key=lambda t: int(t.split()[-1]))
+
+    bars = alt.Chart(task_df).mark_bar().encode(
+        x=alt.X("algorithm:N", sort=legend_domain, title=None,
+                 axis=alt.Axis(labelAngle=-30, labelFontSize=axis_label,
+                               labelFont=ALT_FONT_FAMILY, labelLimit=200)),
+        y=alt.Y("iqm:Q", title="Avg Success Rate at Boundary",
+                 scale=alt.Scale(domain=[0, 1]),
+                 axis=alt.Axis(titleFontSize=axis_title_sz, labelFontSize=axis_label,
+                               titleFont=ALT_FONT_FAMILY, labelFont=ALT_FONT_FAMILY,
+                               format=".2f", tickCount=6)),
+        color=alt.Color("algorithm:N", sort=legend_domain, legend=None),
+        column=alt.Column("boundary_task:N", sort=task_order, title=None,
+                          header=alt.Header(labelFont=ALT_FONT_FAMILY,
+                                            labelFontSize=axis_label,
+                                            labelFontWeight="bold")),
+        tooltip=[
+            alt.Tooltip("algorithm:N", title="Method"),
+            alt.Tooltip("boundary_task:N", title="Boundary"),
+            alt.Tooltip("iqm:Q", title="Success", format=".3f"),
+        ],
+    ).properties(
+        width=max(40, chart_width // max(len(task_order), 1) - 30),
+        height=chart_height,
+        title=alt.TitleParams(text=title, font=ALT_FONT_FAMILY,
+                              fontSize=chart_title_sz, fontWeight="bold"),
+    ).configure_axis(
+        grid=True, gridOpacity=0.3,
+        labelFont=ALT_FONT_FAMILY, titleFont=ALT_FONT_FAMILY,
+    )
+
+    return bars
+
+
+def create_boundary_mean_chart(
+    boundary_df: pd.DataFrame,
+    title: str = "Mean Success Rate at Task Boundaries",
+    base_text_size: float = 22.0,
+    chart_width: int = 600,
+    chart_height: int = 400,
+) -> alt.Chart:
+    """Single bar chart: mean performance across all task boundaries per algorithm."""
+    mean_df = boundary_df[boundary_df["boundary_task"] == "Mean"].copy()
+    if mean_df.empty:
+        raise ValueError("No mean boundary data")
+
+    legend_domain = build_algorithm_legend_domain(mean_df["algorithm"].unique())
+    axis_label = scaled_font_size(base_text_size, 1.2)
+    axis_title_sz = scaled_font_size(base_text_size, 1.3)
+    chart_title_sz = scaled_font_size(base_text_size, 1.4)
+
+    base = alt.Chart(mean_df)
+
+    bars = base.mark_bar(size=45).encode(
+        x=alt.X("algorithm:N", sort=legend_domain, title=None,
+                 axis=alt.Axis(labelAngle=-30, labelFontSize=axis_label,
+                               labelFont=ALT_FONT_FAMILY, labelLimit=200)),
+        y=alt.Y("iqm:Q", title="Mean Boundary Success Rate",
+                 scale=alt.Scale(domain=[0, min(1.0, max(0.3, mean_df["iqm"].max() * 1.3))]),
+                 axis=alt.Axis(titleFontSize=axis_title_sz, labelFontSize=axis_label,
+                               titleFont=ALT_FONT_FAMILY, labelFont=ALT_FONT_FAMILY,
+                               format=".2f", tickCount=6)),
+        color=alt.Color("algorithm:N", sort=legend_domain, legend=None),
+        tooltip=[
+            alt.Tooltip("algorithm:N", title="Method"),
+            alt.Tooltip("iqm:Q", title="Mean Success", format=".3f"),
+        ],
+    )
+
+    return (
+        bars.properties(
+            width=chart_width, height=chart_height,
+            title=alt.TitleParams(text=title, font=ALT_FONT_FAMILY,
+                                  fontSize=chart_title_sz, fontWeight="bold"),
+        )
+        .configure_axis(grid=True, gridOpacity=0.3,
+                         labelFont=ALT_FONT_FAMILY, titleFont=ALT_FONT_FAMILY)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sweep top-K (reuses ablation_plot infrastructure)
 # ---------------------------------------------------------------------------
@@ -839,7 +1010,7 @@ def main(
     wandb_entity: str,
     wandb_project: str = "metaworld_sac",
     group: Optional[str] = None,
-    plot_type: Literal["all", "average", "per_task", "current", "summary", "forgetting", "sweep", "class_incremental"] = "all",
+    plot_type: Literal["all", "average", "per_task", "current", "summary", "forgetting", "sweep", "class_incremental", "boundary"] = "all",
     metric_average: str = "eval/average_success_rate",
     metric_current: str = "charts/success_rate",
     steps_per_task: int = 500_000,
@@ -926,11 +1097,12 @@ def main(
     do_summary = plot_type in ("all", "summary", "class_incremental")
     do_forgetting = plot_type in ("all", "forgetting")
     do_class_incr = plot_type in ("all", "class_incremental")
+    do_boundary = plot_type in ("all", "boundary")
 
-    # Fetch average success data (used by average, summary, class_incremental)
+    # Fetch average success data (used by average, summary, class_incremental, boundary)
     avg_df = pd.DataFrame()
     avg_agg = pd.DataFrame()
-    if do_avg or do_summary:
+    if do_avg or do_summary or do_boundary:
         print(f"\nFetching {metric_average} ...")
         avg_df = fetch_continual_data(wandb_entity, wandb_project, metric_average,
                                       group=group, include_failed=include_failed,
@@ -1067,6 +1239,59 @@ def main(
         path = out / f"{slug}_forgetting.{ext}"
         chart.save(str(path))
         print(f"Saved: {path}")
+
+    # Fetch current-task success for boundary analysis (if not already fetched)
+    boundary_cur_df = pd.DataFrame()
+    if do_boundary:
+        print(f"\nFetching {metric_current} for boundary analysis ...")
+        boundary_cur_df = fetch_continual_data(
+            wandb_entity, wandb_project, metric_current,
+            group=group, include_failed=include_failed,
+            run_prefix=run_prefix,
+            filter_steps_per_task=filter_steps_per_task,
+        )
+
+    if do_boundary and not boundary_cur_df.empty:
+        print("\nComputing end-of-task performance (avg final performance) ...")
+        boundary_df = compute_boundary_performance(
+            boundary_cur_df, steps_per_task=steps_per_task, num_tasks=num_tasks,
+        )
+        if not boundary_df.empty:
+            # Print boundary summary
+            task_rows = boundary_df[boundary_df["boundary_task"] != "Mean"]
+            mean_rows = boundary_df[boundary_df["boundary_task"] == "Mean"]
+            print("\n  End-of-task performance (charts/success_rate, avg over last 50K steps):")
+            for _, row in mean_rows.sort_values("iqm", ascending=False).iterrows():
+                print(f"    {row['algorithm']:20s}  mean={row['iqm']:.3f}")
+            print()
+            for _, row in task_rows.sort_values(["boundary_task", "iqm"], ascending=[True, False]).iterrows():
+                print(f"    {row['boundary_task']:8s}  {row['algorithm']:20s}  {row['iqm']:.3f}")
+
+            # Grouped bar chart per boundary
+            try:
+                chart = create_boundary_bar_chart(
+                    boundary_df, title=plot_title or "End-of-Task Success Rate",
+                    base_text_size=base_text_size,
+                    chart_width=chart_width, chart_height=chart_height,
+                )
+                path = out / f"{slug}_boundary_per_task{file_suffix}.{ext}"
+                chart.save(str(path))
+                print(f"\nSaved: {path}")
+            except Exception as e:
+                print(f"  Skipped boundary per-task chart: {e}")
+
+            # Mean boundary bar chart
+            try:
+                chart = create_boundary_mean_chart(
+                    boundary_df, title=plot_title or "Average Final Performance",
+                    base_text_size=base_text_size,
+                    chart_width=600, chart_height=chart_height,
+                )
+                path = out / f"{slug}_boundary_mean{file_suffix}.{ext}"
+                chart.save(str(path))
+                print(f"Saved: {path}")
+            except Exception as e:
+                print(f"  Skipped boundary mean chart: {e}")
 
     print(f"\nDone! Charts saved to {out}")
 

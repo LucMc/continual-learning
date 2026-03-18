@@ -87,7 +87,6 @@ class Args:
 
     # Environment settings
     num_envs: int = 10
-    async_envs: bool = True  # Use multiprocessing for parallel env stepping
 
     # Network architecture (match MT10 SAC)
     hidden_size: int = 256
@@ -224,7 +223,7 @@ def run_metaworld_mt1():
     print(f"Optimizer: {args.optimizer}")
     print(f"Seed: {args.seed}")
     print(f"Total steps: {args.total_steps}")
-    print(f"Num envs: {args.num_envs} (async={args.async_envs})")
+    print(f"Num envs: {args.num_envs}")
     print(f"Replay ratio: {args.replay_ratio}")
     print(f"{'='*60}")
 
@@ -234,7 +233,6 @@ def run_metaworld_mt1():
         task_name=args.task_name,
         num_envs=args.num_envs,
         seed=args.seed,
-        async_envs=args.async_envs,
     )
     print(f"  Obs dim: {env.obs_dim}, Action dim: {env.action_dim}")
 
@@ -261,7 +259,6 @@ def run_metaworld_mt1():
             "seed": args.seed,
             "total_steps": args.total_steps,
             "num_envs": args.num_envs,
-            "async_envs": args.async_envs,
             "replay_ratio": args.replay_ratio,
             "buffer_size": args.buffer_size,
             "batch_size": args.batch_size,
