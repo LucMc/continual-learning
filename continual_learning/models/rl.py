@@ -3,7 +3,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from continual_learning.configs.rl import PolicyNetworkConfig
+from continual_learning.configs.rl import PolicyNetworkConfig, QNetworkConfig
 from continual_learning.types import StdType
 
 
@@ -36,3 +36,70 @@ class Policy(nn.Module):
 
         std = (jax.nn.softplus(std) + self.config.min_std) * self.config.var_scale
         return distrax.MultivariateNormalDiag(mean, std)
+
+
+class QNetwork(nn.Module):
+    """Twin Q-network for SAC with optional layer normalization.
+
+    This implements the critic for SAC, consisting of two separate Q-networks
+    (Q1 and Q2) that take (observation, action) pairs and output Q-values.
+    The minimum of the two Q-values is used for updates to reduce overestimation.
+    """
+
+    network: type[nn.Module]
+    config: QNetworkConfig
+
+    @nn.compact
+    def __call__(
+        self, obs: jax.Array, action: jax.Array, training: bool = False
+    ) -> tuple[jax.Array, jax.Array]:
+        """Forward pass through both Q-networks.
+
+        Args:
+            obs: Observations of shape (batch, obs_dim)
+            action: Actions of shape (batch, action_dim)
+            training: Whether in training mode (for dropout)
+
+        Returns:
+            Tuple of (q1_values, q2_values), each of shape (batch, 1)
+        """
+        # Concatenate observation and action
+        x = jnp.concatenate([obs, action], axis=-1)
+
+        # Q1 network - modify config to output scalar
+        q1_config = self.config.network.replace(output_size=1)
+        q1 = self.network(config=q1_config, name="q1")(x, training=training)
+
+        # Q2 network - separate parameters
+        q2_config = self.config.network.replace(output_size=1)
+        q2 = self.network(config=q2_config, name="q2")(x, training=training)
+
+        return q1, q2
+
+
+class TanhPolicy(nn.Module):
+    """SAC-style policy with tanh squashing for bounded action spaces."""
+
+    network: type[nn.Module]
+    config: PolicyNetworkConfig
+
+    @nn.compact
+    def __call__(self, x: jax.Array, training: bool = False) -> distrax.Distribution:
+        network_config = self.config.network
+        # Always use MLP head for mean and log_std
+        network_config = network_config.replace(output_size=network_config.output_size * 2)
+
+        x = self.network(config=network_config, name="main")(x, training=training)
+
+        mean, log_std = jnp.split(x, 2, axis=-1)
+        mean, log_std = mean.astype(jnp.float32), log_std.astype(jnp.float32)
+
+        # Clamp log_std for stability
+        log_std = jnp.clip(log_std, -20.0, 2.0)
+        std = jnp.exp(log_std)
+
+        # Create base normal distribution
+        base_dist = distrax.MultivariateNormalDiag(mean, std)
+
+        # Apply tanh squashing
+        return distrax.Transformed(base_dist, distrax.Block(distrax.Tanh(), ndims=1))
