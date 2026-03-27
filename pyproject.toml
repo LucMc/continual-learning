@@ -27,6 +27,8 @@ dependencies = [
     "grain>=0.2.10b1",
     "dm-pix>=0.4.4",
     "brax>=0.12.4",
+    "envpool",
+    "minatar>=1.0.15",
 ]
 
 [project.optional-dependencies]
