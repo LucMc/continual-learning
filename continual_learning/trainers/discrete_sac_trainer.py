@@ -390,7 +390,12 @@ class DiscreteSACTrainer:
         self.max_n_actions = benchmark.action_dim             # MAX_N_ACTIONS
 
         # target_entropy updated per task; initialise from MAX_N_ACTIONS
-        self.target_entropy = float(0.98 * np.log(self.max_n_actions))
+        self._target_entropy_override = sac_config.target_entropy
+        self.target_entropy = float(
+            sac_config.target_entropy
+            if sac_config.target_entropy is not None
+            else 0.5 * np.log(self.max_n_actions)
+        )
 
         # valid_action_mask: True for valid actions; updated per task
         self._valid_action_mask = jnp.ones(self.max_n_actions, dtype=bool)
@@ -503,6 +508,9 @@ class DiscreteSACTrainer:
         self.sac_state = self.sac_state._replace(
             actor=self.sac_state.actor.replace(opt_state=new_actor_opt_state),
             critic=self.sac_state.critic.replace(opt_state=new_critic_opt_state),
+            target_critic_params=jax.tree.map(
+                lambda x: x.copy(), self.sac_state.critic.params
+            ),
             log_alpha=new_log_alpha,
             alpha_optimizer_state=new_alpha_opt_state,
         )
@@ -514,7 +522,11 @@ class DiscreteSACTrainer:
         # Update action mask and target entropy for this task's action space
         n_actions = getattr(envs, "n_actions", self.max_n_actions)
         self._valid_action_mask = jnp.arange(self.max_n_actions) < n_actions
-        self.target_entropy = float(0.98 * np.log(n_actions))
+        self.target_entropy = float(
+            self._target_entropy_override
+            if self._target_entropy_override is not None
+            else 0.5 * np.log(n_actions)
+        )
 
         if self._completed_task_names:
             self._reset_on_task_change()

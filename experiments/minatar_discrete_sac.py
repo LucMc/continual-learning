@@ -2,7 +2,7 @@
 
 Chains 3 tasks: SpaceInvaders-MinAtar → Asterix-MinAtar → Seaquest-MinAtar
 Observations padded to (10, 10, 10), flattened to 1000 dims.
-Total training: 1.5M steps = 500K per task (default).
+Total training: 4.5M steps = 1.5M per task (default, matches reference).
 """
 
 import time
@@ -48,8 +48,8 @@ class Args:
     buffer_size: int = 200_000
     batch_size: int = 256
     learning_starts: int = 5_000
-    # 3 tasks × 500K = 1.5M total
-    steps_per_task: int = 500_000
+    # 3 tasks × 1.5M = 4.5M total (matches reference budget)
+    steps_per_task: int = 1_500_000
     num_envs: int = 4
 
     # Network architecture

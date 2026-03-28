@@ -1,0 +1,48 @@
+resources:
+  infra: vast
+  accelerators: RTX5090:1
+  disk_size: 50
+
+workdir: .
+
+envs:
+  ALGO: null
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+  SEEDS: "0 1 2 3 4"
+
+setup: |
+  # Install uv
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  # Create venv and install deps
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  # Verify GPU
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running MinAtar: algo=$ALGO seeds=$SEEDS"
+
+  for SEED in $SEEDS; do
+    echo "============================================"
+    echo "Starting $ALGO seed=$SEED"
+    echo "============================================"
+    python experiments/minatar_discrete_sac.py \
+      --include "$ALGO" \
+      --seed "$SEED" \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  done
+
+  echo "All seeds complete for $ALGO"

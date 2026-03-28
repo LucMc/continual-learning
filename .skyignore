@@ -1,0 +1,26 @@
+# Virtual environments
+.venv/
+python=3.12/
+
+# WandB local logs
+wandb/
+
+# Build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Git
+.git/
+
+# Test/IDE artifacts
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.claude/
+
+# Large data directories
+checkpoints/
+results/
+logs*/
+videos/

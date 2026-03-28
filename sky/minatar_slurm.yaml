@@ -1,0 +1,46 @@
+resources:
+  infra: slurm/aisurrey
+  accelerators: RTX3090:1
+  cpus: 10
+  memory: 24
+
+workdir: .
+
+envs:
+  ALGO: null
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+  SEEDS: "0 1 2 3 4"
+
+setup: |
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running MinAtar: algo=$ALGO seeds=$SEEDS"
+
+  for SEED in $SEEDS; do
+    echo "============================================"
+    echo "Starting $ALGO seed=$SEED"
+    echo "============================================"
+    python experiments/minatar_discrete_sac.py \
+      --include "$ALGO" \
+      --seed "$SEED" \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  done
+
+  echo "All seeds complete for $ALGO"
