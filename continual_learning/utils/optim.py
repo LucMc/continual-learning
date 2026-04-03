@@ -9,7 +9,39 @@ import optax
 from typing import Callable
 from copy import deepcopy
 
+import flax.traverse_util
+from flax.core import FrozenDict, freeze
+
 from continual_learning.types import GradientTransformationExtraArgsReset
+
+
+def split_by_chain(full_dict):
+    """Split a dict with tuple keys into per-chain dicts with string keys.
+
+    Example: {('q1', 'conv'): v1, ('q1', 'dense'): v2, ('q2', 'conv'): v3}
+    → {('q1',): {'conv': v1, 'dense': v2}, ('q2',): {'conv': v3}}
+    """
+    chains = {}
+    for key, value in full_dict.items():
+        prefix = key[:-1]
+        layer = key[-1]
+        if prefix not in chains:
+            chains[prefix] = {}
+        chains[prefix][layer] = value
+    return chains
+
+
+def reconstruct_params(params, weight_chains, bias_chains):
+    """Rebuild full param tree from per-chain weight/bias dicts."""
+    flat_full = flax.traverse_util.flatten_dict(params)
+    for prefix, chain_w in weight_chains.items():
+        for layer, kernel in chain_w.items():
+            flat_full[("params",) + prefix + (layer, "kernel")] = kernel
+    for prefix, chain_b in bias_chains.items():
+        for layer, bias in chain_b.items():
+            flat_full[("params",) + prefix + (layer, "bias")] = bias
+    sorted_keys = sorted(flat_full.keys())
+    return jax.tree.unflatten(jax.tree.structure(params), [flat_full[k] for k in sorted_keys])
 
 
 def get_out_weights_mag(weights):
@@ -174,104 +206,101 @@ def reset_weights(
 
 
 def reset_optim_params(tx_state, reset_mask):
-    """Reset optimizer params using reset_mask"""
+    """Reset optimizer momentum/variance for neurons identified by reset_mask.
 
-    def reset_params(tx_state):
-        def map_fn(momentum):
-            all_layer_names = list(momentum.keys())
-            momentum = deepcopy(momentum)
-            for idx, layer_name in enumerate(list(momentum.keys())[:-1]):  # momentum is mu/nu
-                in_mask_1d = reset_mask[layer_name]
+    Handles arbitrarily nested param structures (e.g., twin Q-networks)
+    by iterating sub-network chains independently.
 
-                in_momentum_mask = expand_mask_for_weights(
-                    in_mask_1d, momentum[layer_name]["kernel"].shape, mask_type="incoming"
-                )
+    Args:
+        tx_state: Base optimizer state tuple (e.g., (EmptyState(), ScaleByAdamState(...))).
+        reset_mask: Dict with string keys {layer_name: bool_mask}.
+    """
 
-                # Zero the incoming momentums
-                momentum[layer_name]["kernel"] = jnp.where(
-                    in_momentum_mask,
-                    jnp.zeros_like(momentum[layer_name]["kernel"]),
-                    momentum[layer_name]["kernel"],
-                )
+    def _process_chain(layers):
+        """Reset momentum for a single sub-network chain (string-keyed layer dict)."""
+        new_layers = {}
+        all_layer_names = list(layers.keys())
 
-                # Reset outgoing momentum
-                if idx + 1 < len(all_layer_names):
-                    next_layer = all_layer_names[idx + 1]
-                    out_momentum_shape = momentum[next_layer]["kernel"].shape
-
-                    if len(out_momentum_shape) == 2:  # Dense layer
-                        if (
-                            len(momentum[layer_name]["kernel"].shape) == 4
-                        ):  # Check if previous layer was conv
-                            spatial_size = out_momentum_shape[0] // in_mask_1d.size
-                            out_mask_1d = jnp.tile(in_mask_1d, spatial_size)
-                        else:  # Dense -> Dense
-                            out_mask_1d = in_mask_1d
-
-                    elif len(out_momentum_shape) == 4:  # Conv layer
-                        out_mask_1d = in_mask_1d
-                    else:
-                        raise ValueError(f"Unsupported weight shape: {out_momentum_shape}")
-
-                    # Apply outgoing mask
-                    out_momentum_mask = expand_mask_for_weights(
-                        out_mask_1d, out_momentum_shape, mask_type="outgoing"
-                    )
-
-                    momentum[next_layer]["kernel"] = jnp.where(
-                        out_momentum_mask,
-                        jnp.zeros_like(momentum[next_layer]["kernel"]),
-                        momentum[next_layer]["kernel"],
-                    )
-                    # Reset bias too
-                    momentum[layer_name]["bias"] = jnp.where(
-                        reset_mask[layer_name][None:],
-                        jnp.zeros_like(momentum[layer_name]["bias"]),
-                        momentum[layer_name]["bias"],
-                    )
-
-            return momentum
-
-        new_state_dict = {}
-
-        if isinstance(tx_state, dict):
-            return {
-                "reset_method": tx_state["reset_method"],
-                "tx": (reset_params(tx_state["tx"][0]),) + tx_state["tx"][1:],
+        # Copy all layers first
+        for layer_name in all_layer_names:
+            new_layers[layer_name] = {
+                "kernel": layers[layer_name]["kernel"],
+                "bias": layers[layer_name]["bias"],
             }
 
-        elif isinstance(tx_state, tuple) and len(tx_state) == 2:
-            new_elems = []
-            for state in tx_state:
-                if isinstance(state, optax.EmptyState):
-                    new_elems.append(state)
+        # Apply incoming + bias + outgoing resets
+        for idx, layer_name in enumerate(all_layer_names[:-1]):
+            if layer_name not in reset_mask:
+                continue
+            in_mask_1d = reset_mask[layer_name]
+
+            # Zero incoming kernel momentum
+            in_mask = expand_mask_for_weights(
+                in_mask_1d, new_layers[layer_name]["kernel"].shape, mask_type="incoming"
+            )
+            new_layers[layer_name]["kernel"] = jnp.where(
+                in_mask, jnp.zeros_like(new_layers[layer_name]["kernel"]),
+                new_layers[layer_name]["kernel"],
+            )
+
+            # Zero bias momentum
+            new_layers[layer_name]["bias"] = jnp.where(
+                in_mask_1d, jnp.zeros_like(new_layers[layer_name]["bias"]),
+                new_layers[layer_name]["bias"],
+            )
+
+            # Zero outgoing kernel momentum (next layer in chain)
+            next_layer = all_layer_names[idx + 1]
+            out_shape = new_layers[next_layer]["kernel"].shape
+
+            if len(out_shape) == 2:  # Dense
+                if len(new_layers[layer_name]["kernel"].shape) == 4:  # Conv → Dense
+                    out_mask_1d = jnp.tile(in_mask_1d, out_shape[0] // in_mask_1d.size)
                 else:
-                    new_elems.append(reset_params(state))  # transformed namedtuple
+                    out_mask_1d = in_mask_1d
+            elif len(out_shape) == 4:  # Conv
+                out_mask_1d = in_mask_1d
+            else:
+                continue
 
-            return tuple(new_elems)
-            # return (reset_params(tx_state[0]),) + tx_state[1:]
+            out_mask = expand_mask_for_weights(out_mask_1d, out_shape, mask_type="outgoing")
+            new_layers[next_layer]["kernel"] = jnp.where(
+                out_mask, jnp.zeros_like(new_layers[next_layer]["kernel"]),
+                new_layers[next_layer]["kernel"],
+            )
 
-        if hasattr(tx_state, "mu"):
-            new_state_dict["mu"] = {
-                "params": map_fn(
-                    tx_state.mu["params"]  # pyright: ignore[reportAttributeAccessIssue]
-                )  # flax.traverse_util.path_aware_map(map_fn, tx_state.mu["params"])
-            }
+        return new_layers
 
-        if hasattr(tx_state, "nu"):
-            new_state_dict["nu"] = {
-                "params": map_fn(tx_state.nu["params"])  # pyright: ignore[reportAttributeAccessIssue]
-                # "params": flax.traverse_util.path_aware_map(map_fn, tx_state.nu["params"])
-            }
+    def _map_fn(momentum_params):
+        """Apply reset across all sub-network chains in momentum dict."""
+        result = {}
+        for subnetwork_name in momentum_params:
+            result[subnetwork_name] = _process_chain(momentum_params[subnetwork_name])
+        if isinstance(momentum_params, FrozenDict):
+            return freeze(result)
+        return result
 
-        # copy other attributes
-        for attr in tx_state._fields:  # pyright: ignore[reportAttributeAccessIssue]
-            if attr not in ["mu", "nu"] and hasattr(tx_state, attr):
-                new_state_dict[attr] = getattr(tx_state, attr)
+    def _process_optimizer_state(state):
+        """Process a single optimizer sub-state (e.g., ScaleByAdamState)."""
+        if isinstance(state, optax.EmptyState):
+            return state
+        if not hasattr(state, "_fields"):
+            return state
+        new_fields = {}
+        for attr in state._fields:
+            val = getattr(state, attr)
+            if attr in ("mu", "nu") and isinstance(val, (dict, FrozenDict)) and "params" in val:
+                new_val = {"params": _map_fn(val["params"])}
+                if isinstance(val, FrozenDict):
+                    new_val = freeze(new_val)
+                new_fields[attr] = new_val
+            else:
+                new_fields[attr] = val
+        return type(state)(**new_fields)
 
-        return type(tx_state)(**new_state_dict)
-
-    return reset_params(tx_state)
+    if isinstance(tx_state, tuple):
+        return tuple(_process_optimizer_state(s) for s in tx_state)
+    return _process_optimizer_state(tx_state)
 
 
 def gen_key_tree(key: PRNGKeyArray, tree: PyTree):

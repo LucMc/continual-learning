@@ -89,58 +89,49 @@ def regrama(
         ) -> Tuple[optax.Updates, RegramaOptimState, optax.OptState]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
+
+            # String-keyed scores (q2 overwrites q1 for twin-Q — fine for gradient scoring)
             weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
-
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-
             scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
             reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
 
-            _rng, key = random.split(state.rng)
-            key_tree = utils.gen_key_tree(key, weights)
+            # Tuple-keyed dicts preserve sub-network structure (q1/q2)
+            weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            weight_chains = utils.split_by_chain(weights_full)
+            bias_chains = utils.split_by_chain(biases_full)
 
-            # reset weights given mask
-            _weights, reset_logs = utils.reset_weights(
-                key_tree,
-                reset_mask,
-                weights,
-                weight_init_fn,  # state.initial_weights
-            )
+            _rng = state.rng
+            _logs = {k: 0 for k in state.logs}
 
-            # Update bias
+            for prefix in sorted(weight_chains.keys()):
+                chain_w = weight_chains[prefix]
+                chain_b = bias_chains[prefix]
 
-            _biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                reset_mask,
-                biases,
-            )
+                _rng, key = random.split(_rng)
+                key_tree = utils.gen_key_tree(key, chain_w)
 
-            new_params = {}
-            _logs = {k: 0 for k in state.logs}  # TODO: Could be improved
+                chain_w, reset_logs = utils.reset_weights(
+                    key_tree, reset_mask, chain_w, weight_init_fn,
+                )
+                chain_b = jax.tree.map(
+                    lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
+                    reset_mask, chain_b,
+                )
 
-            for layer_name in biases.keys():
-                new_params[layer_name] = {
-                    "kernel": _weights[layer_name],
-                    "bias": _biases[layer_name],
-                }
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+                weight_chains[prefix] = chain_w
+                bias_chains[prefix] = chain_b
+                for layer_name in reset_logs:
+                    _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
                 logs=FrozenDict(_logs), time_step=state.time_step + 1, rng=_rng
             )
-            # new_params.update(excluded)  # TODO:
-
-            # Reset optim, i.e. Adamw params
+            new_params = utils.reconstruct_params(params, weight_chains, bias_chains)
             _tx_state = utils.reset_optim_params(tx_state, reset_mask)
-            flat_new_params, _ = jax.tree.flatten(new_params)
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                _tx_state,
-            )
+            return new_params, new_state, _tx_state
 
         condition = jnp.logical_and(
             state.time_step > 0, (state.time_step % update_frequency == 0)

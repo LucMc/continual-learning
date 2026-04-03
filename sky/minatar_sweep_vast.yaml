@@ -1,0 +1,42 @@
+resources:
+  infra: vast
+  accelerators: RTX5090:1
+  disk_size: 50
+
+workdir: .
+
+envs:
+  ALGO: null
+  SEED: "0"
+  CONFIG_START: null
+  CONFIG_END: null
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+
+setup: |
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running MinAtar sweep: algo=$ALGO seed=$SEED configs=$CONFIG_START..$CONFIG_END"
+  python experiments/batch_runs/sweep_minatar.py \
+    --algo "$ALGO" \
+    --run-all \
+    --seed "$SEED" \
+    --config-start "$CONFIG_START" \
+    --config-end "$CONFIG_END" \
+    --wandb-entity "$WANDB_ENTITY" \
+    --wandb-project "$WANDB_PROJECT"

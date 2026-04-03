@@ -48,7 +48,7 @@ SEEDS="${SEEDS_STR//,/ }"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 YAML_PATH="$SCRIPT_DIR/minatar.yaml"
 
-echo "Launching ${#ALGOS[@]} MinAtar jobs on Vast.ai RTX5090"
+echo "Launching ${#ALGOS[@]} MinAtar jobs on Vast.ai RTX5060"
 echo "  Entity:  $WANDB_ENTITY"
 echo "  Project: $WANDB_PROJECT"
 echo "  Algos:   ${ALGOS[*]}"

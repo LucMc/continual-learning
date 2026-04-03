@@ -71,6 +71,12 @@ def bias_correction(weights, biases, mean_feature_act, ages, reset_mask, decay_r
             mask, mean_feature_act[layer_name] / jnp.maximum(bias_correction_factor, 1e-6), 0.0
         )
 
+        # Tile for conv→dense transition (spatial flattening)
+        curr_weights = weights[layer_name]
+        if len(curr_weights.shape) == 4 and len(next_weights.shape) == 2:
+            spatial_size = next_weights.shape[0] // correction_term.size
+            correction_term = jnp.tile(correction_term, spatial_size)
+
         expanded_correction_term = utils.expand_mask_for_weights(
             correction_term, next_weights.shape, mask_type="outgoing"
         )
@@ -109,11 +115,12 @@ def get_reset_mask(
         top_up = jnp.where(random.uniform(key, shape=()) < remainder, 1.0, 0.0)
         remainder = jnp.zeros_like(remainder)
     else:
-        ideally = n_mature * replacement_rate          # ← no carry
+        n_mature = jnp.sum(maturity_mask)
+        ideally = n_mature * replacement_rate
         n_to_replace = jnp.floor(ideally).astype(jnp.int32)
         frac = ideally - n_to_replace
         top_up = (random.uniform(key, ()) < frac).astype(jnp.int32)
-        new_remainder = 0.0                             # ← don’t carry over
+        remainder = jnp.zeros_like(remainder)
 
     masked_utility = jnp.where(
         maturity_mask, updated_utility, jnp.inf
@@ -162,30 +169,27 @@ def cbp(
         ) -> Tuple[optax.Updates, CbpOptimState, optax.OptState]:
             del updates
 
-            # Separate weights and biases
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
             flat_feats, _ = jax.tree.flatten(features)
 
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-            out_w_mag = utils.get_out_weights_mag(weights)
+            # String-keyed dicts for scoring (q2 overwrites q1 for twin-Q)
+            weights_str = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            out_w_mag = utils.get_out_weights_mag(weights_str)
 
             new_rng, util_key, acc_key = random.split(state.rng, 3)
-            key_tree = utils.gen_key_tree(util_key, weights)
-            acc_tree = utils.gen_key_tree(acc_key, weights)
-            acc_tree.pop(out_layer_name)  # Add this line to remove the output layer
+
+            # Build acc_tree matching state utilities (string-keyed, no output)
+            util_keys = {k: v for k, v in weights_str.items() if k != out_layer_name}
+            acc_tree = utils.gen_key_tree(acc_key, util_keys)
 
             # Features arrive as tuple so we have to restructure
             w_mag_tdef = jax.tree.structure(out_w_mag)
-
-            # Don't need out_layer feats and normalises layer names
             _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
 
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 out_w_mag,
                 state.utilities,
-                # _mean_feature_act,
                 _features,
             )
             bias_corrected_utility = jax.tree.map(
@@ -219,59 +223,69 @@ def cbp(
                 reset_mask,
             )
 
-            # reset weights given mask
-            _weights, reset_logs = utils.reset_weights(
-                key_tree,
-                reset_mask,  # No out_layer
-                weights,  # Yes out_layer
-                weight_init_fn,  # state.initial_weights
-            )
-
             _mean_feature_act = jax.tree.map(
                 partial(get_updated_mfa, decay_rate=decay_rate),
                 state.mean_feature_act,
                 _features,
             )
 
-            _utility = jax.tree.map(lambda u, m: jnp.where(m, 0.0, u), _utility, reset_mask)
-            _mean_feature_act = jax.tree.map(lambda mfa, m: jnp.where(m, 0.0, mfa), _mean_feature_act, reset_mask)
+            # Apply resets per sub-network chain
+            weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            weight_chains = utils.split_by_chain(weights_full)
+            bias_chains = utils.split_by_chain(biases_full)
 
-
-            # zero biases of reset nodes (unchanged)
-            zeroed_biases = jax.tree.map(
-                lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                reset_mask | {out_layer_name: jnp.zeros_like(biases[out_layer_name])},  # pyright: ignore[reportArgumentType]
-                biases,
-            )
-
-            corrected_biases = bias_correction(
-                weights,                  # original weights
-                zeroed_biases,
-                _mean_feature_act,
-                state.ages,  # 2 Uses pre-reset post-increment in official code
-                reset_mask,
-                decay_rate,
-            )
-            new_params = {}
             _logs = {k: 0 for k in state.logs}
+            _rng = util_key
 
+            for prefix in sorted(weight_chains.keys()):
+                chain_w = weight_chains[prefix]
+                chain_b = bias_chains[prefix]
+
+                _rng, key = random.split(_rng)
+                key_tree = utils.gen_key_tree(key, chain_w)
+
+                # reset_weights modifies chain_w in place
+                chain_w, reset_logs = utils.reset_weights(
+                    key_tree, reset_mask, chain_w, weight_init_fn,
+                )
+
+                # Zero biases of reset nodes
+                mask_with_output = dict(reset_mask)
+                mask_with_output[out_layer_name] = jnp.zeros_like(
+                    chain_b[out_layer_name], dtype=bool
+                )
+                zeroed_chain_b = jax.tree.map(
+                    lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
+                    mask_with_output, chain_b,
+                )
+
+                # Bias correction (uses post-reset chain weights)
+                corrected_chain_b = bias_correction(
+                    chain_w, zeroed_chain_b, _mean_feature_act,
+                    state.ages, reset_mask, decay_rate,
+                )
+
+                weight_chains[prefix] = chain_w
+                bias_chains[prefix] = corrected_chain_b
+                for layer_name in reset_logs:
+                    _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
+
+            # Reset utility and MFA for reset neurons
+            _utility = jax.tree.map(lambda u, m: jnp.where(m, 0.0, u), _utility, reset_mask)
+            _mean_feature_act = jax.tree.map(
+                lambda mfa, m: jnp.where(m, 0.0, mfa), _mean_feature_act, reset_mask
+            )
+
+            # Logging
             avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
             avg_util = jax.tree.map(lambda v: v.mean(), bias_corrected_utility)
             std_util = jax.tree.map(lambda v: v.std(), bias_corrected_utility)
-
-            # Logging
-            for layer_name in weights.keys():  # Exclude output layer
-                new_params[layer_name] = {
-                    "kernel": _weights[layer_name],
-                    "bias": corrected_biases[layer_name],
-                }
 
             for layer_name in reset_mask.keys():
                 _logs["avg_age"] += avg_ages[layer_name]
                 _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
-
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
 
             new_state = state.replace(
                 ages=_ages,
@@ -281,15 +295,11 @@ def cbp(
                 mean_feature_act=_mean_feature_act,
                 remainder=remainder,
             )
-            # Reset optim, i.e. Adamw params
-            _tx_state = utils.reset_optim_params(tx_state, reset_mask)
-            flat_new_params, _ = jax.tree.flatten(new_params)
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                _tx_state,
-            )
+            new_params = utils.reconstruct_params(params, weight_chains, bias_chains)
+            _tx_state = utils.reset_optim_params(tx_state, reset_mask)
+
+            return new_params, new_state, _tx_state
 
         return _cbp(updates)
 
