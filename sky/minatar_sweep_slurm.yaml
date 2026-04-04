@@ -1,8 +1,8 @@
 resources:
   infra: slurm/aisurrey
   accelerators: RTX3090:1
-  cpus: 10
-  memory: 24
+  cpus: 10+
+  memory: 24+
 
 workdir: .
 

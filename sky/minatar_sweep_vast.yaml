@@ -1,6 +1,6 @@
 resources:
   infra: vast
-  accelerators: RTX5090:1
+  accelerators: RTX4090:1
   disk_size: 50
 
 workdir: .

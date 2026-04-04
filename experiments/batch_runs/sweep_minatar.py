@@ -45,32 +45,32 @@ from continual_learning.types import Activation
 # ---------------------------------------------------------------------------
 SWEEP_RANGES = {
     # adam default: lr=3e-4
-    "adam": {
-        "learning_rate": [1e-3, 3e-4, 1e-4, 3e-5],
-    },  # 4 configs
+    # "adam": {
+    #     "learning_rate": [1e-3, 3e-4, 1e-4, 3e-5],
+    # },  # 4 configs
     # muon default: lr=1e-4
-    "muon": {
-        "learning_rate": [3e-4, 1e-4, 3e-5],
-    },  # 3 configs
+    # "muon": {
+    #     "learning_rate": [3e-4, 1e-4, 3e-5],
+    # },  # 3 configs
     # redo defaults: lr=3e-4, update_frequency=50000, score_threshold=0.0001, max_reset_frac=0.02
     "redo": {
         "tx_lr": [3e-4],
         "update_frequency": [10_000, 50_000, 100_000],
         "score_threshold": [0.00005, 0.0001, 0.0005],
-        "max_reset_frac": [0.01, 0.02, 0.05],
+        "max_reset_frac": [None, 0.02],
     },  # 27 configs
     # regrama defaults: same as redo
     "regrama": {
         "tx_lr": [3e-4],
         "update_frequency": [10_000, 50_000, 100_000],
         "score_threshold": [0.00005, 0.0001, 0.0005],
-        "max_reset_frac": [0.01, 0.02, 0.05],
+        "max_reset_frac": [None, 0.02],
     },  # 27 configs
     # cbp defaults: lr=3e-4, replacement_rate=1e-5, decay_rate=0.999, maturity_threshold=1000
     "cbp": {
         "tx_lr": [3e-4],
         "replacement_rate": [1e-6, 1e-5, 1e-4],
-        "decay_rate": [0.99, 0.999, 0.9999],
+        "decay_rate": [0.99],
         "maturity_threshold": [500, 1000, 5000],
     },  # 27 configs
     # cpr defaults: lr=3e-4, replacement_rate=0.005, decay_rate=0.99,
@@ -80,7 +80,7 @@ SWEEP_RANGES = {
     "cpr": {
         "tx_lr": [3e-4],
         "replacement_rate": [0.001, 0.003, 0.005, 0.01, 0.02],
-        "decay_rate": [0.99, 0.999],
+        "decay_rate": [0.99],
         "update_frequency": [500, 1000, 5000],
     },  # 30 configs
     # shrink_and_perturb defaults: lr=3e-4, shrink=0.9999, perturb=0.001, every_n=1000
