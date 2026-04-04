@@ -29,6 +29,7 @@ fi
 
 [ ! -d "$VENV_DIR" ] && uv venv "$VENV_DIR" --python 3.12
 source "$VENV_DIR/bin/activate"
+uv pip install -e "../../.[cuda12]"
 
 # Run hyperparameter configuration
 echo "Running $algo config $SLURM_ARRAY_TASK_ID seed $seed"

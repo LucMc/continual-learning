@@ -55,14 +55,14 @@ SWEEP_RANGES = {
     # redo defaults: lr=3e-4, update_frequency=50000, score_threshold=0.0001, max_reset_frac=0.02
     "redo": {
         "tx_lr": [3e-4],
-        "update_frequency": [10_000, 50_000, 100_000],
+        "update_frequency": [1_000, 10_000, 100_000],
         "score_threshold": [0.00005, 0.0001, 0.0005],
         "max_reset_frac": [None, 0.02],
     },  # 27 configs
     # regrama defaults: same as redo
     "regrama": {
         "tx_lr": [3e-4],
-        "update_frequency": [10_000, 50_000, 100_000],
+        "update_frequency": [1000, 10_000, 100_000],
         "score_threshold": [0.00005, 0.0001, 0.0005],
         "max_reset_frac": [None, 0.02],
     },  # 27 configs
@@ -71,7 +71,7 @@ SWEEP_RANGES = {
         "tx_lr": [3e-4],
         "replacement_rate": [1e-6, 1e-5, 1e-4],
         "decay_rate": [0.99],
-        "maturity_threshold": [500, 1000, 5000],
+        "maturity_threshold": [1000, 10000, 100000],
     },  # 27 configs
     # cpr defaults: lr=3e-4, replacement_rate=0.005, decay_rate=0.99,
     #   sharpness=16 (FIXED), threshold=1.0 (FIXED), update_frequency=1000,
@@ -79,16 +79,17 @@ SWEEP_RANGES = {
     # More replacement_rate values as requested
     "cpr": {
         "tx_lr": [3e-4],
-        "replacement_rate": [0.001, 0.003, 0.005, 0.01, 0.02],
+        "replacement_rate": [0.001, 0.003, 0.005, 0.01, 0.015, 0.02],
         "decay_rate": [0.99],
-        "update_frequency": [500, 1000, 5000],
+        "update_frequency": [1000, 5000, 10000, 100000],
+        "transform_type": "sigmoid"
     },  # 30 configs
     # shrink_and_perturb defaults: lr=3e-4, shrink=0.9999, perturb=0.001, every_n=1000
     "shrink_and_perturb": {
         "tx_lr": [3e-4],
         "shrink": [0.999, 0.9999, 0.99999],
         "perturb": [0.0005, 0.001, 0.005],
-        "every_n": [500, 1000, 5000],
+        "every_n": [1000, 10000, 100000],
     },  # 27 configs
 }
 
