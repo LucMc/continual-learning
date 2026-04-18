@@ -79,11 +79,10 @@ SWEEP_RANGES = {
     # More replacement_rate values as requested
     "cpr": {
         "tx_lr": [3e-4],
-        "replacement_rate": [0.001, 0.003, 0.005, 0.01, 0.015, 0.02],
+        "replacement_rate": [0.02, 0.05, 0.075, 0.1, 0.25],
         "decay_rate": [0.99],
-        "update_frequency": [1000, 5000, 10000, 100000],
-        "transform_type": "sigmoid"
-    },  # 30 configs
+        "update_frequency": [100, 1000, 10000, 100000],
+    },  # 20 configs
     # shrink_and_perturb defaults: lr=3e-4, shrink=0.9999, perturb=0.001, every_n=1000
     "shrink_and_perturb": {
         "tx_lr": [3e-4],

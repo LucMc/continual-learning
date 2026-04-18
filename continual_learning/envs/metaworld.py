@@ -287,6 +287,13 @@ class MetaWorldSingleTaskEnv(VectorEnv):
         task_name: str,
         num_envs: int = 1,
         seed: int = 0,
+        apply_delay_wrapper: bool = False,
+        max_obs_delay: int = 0,
+        max_act_delay: int = 0,
+        delay_mode: str = "fixed",
+        resample_every: int | None = None,
+        interval_emb_type: str | None = None,
+        delay_emb_type: str = "one_hot",
     ):
         """Initialize single task environment.
 
@@ -294,6 +301,15 @@ class MetaWorldSingleTaskEnv(VectorEnv):
             task_name: Name of the MetaWorld task
             num_envs: Number of parallel environments
             seed: Random seed
+            apply_delay_wrapper: If True, wrap each env with
+                ContinualRandomIntervalDelayWrapper.
+            max_obs_delay: Max observation delay (inclusive). 0 = always 0 delay.
+            max_act_delay: Max action delay (inclusive). 0 = always 0 delay.
+            delay_mode: "fixed", "multi-task", or "continual".
+            resample_every: For "continual" mode, step period between resamples.
+            interval_emb_type: Delay-interval embedding type (None, "two_hot",
+                "float", "scalar"). Must be None when max_*_delay == 0.
+            delay_emb_type: Delay embedding type ("one_hot", "float", "scalar").
         """
         try:
             import metaworld
@@ -316,6 +332,21 @@ class MetaWorldSingleTaskEnv(VectorEnv):
             task_idx = i % len(self._tasks)
             env.set_task(self._tasks[task_idx])
             env.reset(seed=seed + i)
+            if apply_delay_wrapper:
+                from continual_learning.utils.continual_delay_wrapper import (
+                    ContinualRandomIntervalDelayWrapper,
+                )
+                env = ContinualRandomIntervalDelayWrapper(
+                    env,
+                    obs_delay_range=range(0, max_obs_delay + 1),
+                    act_delay_range=range(0, max_act_delay + 1),
+                    mode=delay_mode,
+                    resample_every=resample_every,
+                    interval_emb_type=interval_emb_type,
+                    delay_emb_type=delay_emb_type,
+                    output="standard",
+                    give_kappa=False,
+                )
             self._envs.append(env)
 
         self._obs_dim = self._envs[0].observation_space.shape[0]
