@@ -24,6 +24,7 @@ max_obs_delay="${2:-0}"
 max_act_delay="${3:-0}"
 delay_mode="${4:-fixed}"
 resample_every="${5:-10000}"
+total_steps="${6:-2000000}"   # match MT1 baseline horizon (2M)
 
 # MT1 tasks, optimizers, seeds
 tasks=("reach-v3" "push-v3" "pick-place-v3" "door-open-v3" "drawer-open-v3" \
@@ -73,6 +74,7 @@ python "../$script_name" \
        --max-act-delay "$max_act_delay" \
        --delay-mode "$delay_mode" \
        --resample-every "$resample_every" \
+       --total-steps "$total_steps" \
        --wandb-entity "$wandb_entity" \
        --wandb-project "$wandb_project" \
        > "$output_filename" 2>&1
