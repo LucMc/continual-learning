@@ -170,7 +170,6 @@ class SAC:
     ) -> tuple[SACTrainState, LogDict]:
         """Perform a full SAC update step.
 
-        Matches the reference implementation's update order:
         1. Inside actor loss: update alpha, then critic (using new alpha)
         2. Compute actor loss using updated critic
         3. Update actor

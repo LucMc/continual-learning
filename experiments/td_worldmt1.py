@@ -229,7 +229,7 @@ def run_td_metaworld_mt1():
             run_name=run_name,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group=args.task_name,
+            group=f"{args.max_act_delay}act{args.max_obs_delay}obs_{args.delay_mode}",
             save=False,
             wandb_mode=args.wandb_mode,
         ),
