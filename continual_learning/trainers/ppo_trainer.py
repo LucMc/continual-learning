@@ -313,6 +313,7 @@ class JittedContinualPPOTrainer(PPO):
         env_cfg: EnvConfig,
         train_cfg: RLTrainingConfig,
         logs_cfg: LoggingConfig,
+        benchmark: JittableContinualLearningEnv | None = None,
     ):
         self.key, policy_init_key, vf_init_key = jax.random.split(jax.random.PRNGKey(seed), 3)
         self.cfg = ppo_config
@@ -324,11 +325,13 @@ class JittedContinualPPOTrainer(PPO):
                 "training": train_cfg,
             },
         )
-        benchmark = get_benchmark(seed, env_cfg)
-        if not isinstance(benchmark, JittableContinualLearningEnv):
-            raise ValueError(
-                "Benchmark must be an end-to-end JAX environment. Use ContinualPPOTrainer otherwise."
-            )
+        if benchmark is None:
+            resolved = get_benchmark(seed, env_cfg)
+            if not isinstance(resolved, JittableContinualLearningEnv):
+                raise ValueError(
+                    "Benchmark must be an end-to-end JAX environment. Use ContinualPPOTrainer otherwise."
+                )
+            benchmark = resolved
 
         self.benchmark = benchmark
         self.train_cfg = train_cfg
@@ -433,6 +436,7 @@ class JittedContinualPPOTrainer(PPO):
             agent_state, observation, env_states = state
 
             normalizer = agent_state.normalizer
+            bootstrap_obs = observation
             if self.cfg.normalize_observations:
                 assert normalizer is not None
                 normalizer = running_statistics.update(normalizer, data.observations)
@@ -444,13 +448,14 @@ class JittedContinualPPOTrainer(PPO):
                     ),
                 )
                 agent_state = agent_state._replace(normalizer=normalizer)
+                bootstrap_obs = running_statistics.normalize(observation, normalizer)  # pyright: ignore[reportArgumentType]
 
             key, policy, vf, logs = self.update(
                 agent_state.key,
                 agent_state.policy,
                 agent_state.vf,
                 data._replace(infos={}),
-                next_obs=observation,
+                next_obs=bootstrap_obs,
                 cfg=self.cfg,
             )
 
@@ -506,6 +511,20 @@ class JittedContinualPPOTrainer(PPO):
                     "charts/mean_episodic_length": infos["steps"][dones].mean(),
                     "charts/mean_episodic_return": episode_infos["sum_reward"][dones].mean(),
                 }
+                if "realised_obs_delay" in infos:
+                    episode_logs["delay/realised_obs_delay_mean"] = (
+                        infos["realised_obs_delay"].mean()
+                    )
+                    episode_logs["delay/realised_act_delay_mean"] = (
+                        infos["realised_act_delay"].mean()
+                    )
+                if "current_obs_interval" in infos:
+                    obs_int = infos["current_obs_interval"]
+                    act_int = infos["current_act_interval"]
+                    episode_logs["delay/current_obs_lo"] = obs_int[..., 0].mean()
+                    episode_logs["delay/current_obs_hi"] = obs_int[..., 1].mean()
+                    episode_logs["delay/current_act_lo"] = act_int[..., 0].mean()
+                    episode_logs["delay/current_act_hi"] = act_int[..., 1].mean()
                 sps = {
                     "charts/SPS": (self.total_steps - self.start_step)
                     / (time.time() - start_time)

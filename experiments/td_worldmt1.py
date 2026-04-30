@@ -74,6 +74,7 @@ class Args:
     max_act_delay: int = 0
     delay_mode: Literal["fixed", "multi-task", "continual"] = "fixed"
     resample_every: int | None = None
+    delay_emb_type: Literal["one_hot", "none"] = "one_hot"
 
 
 def get_optimizer_config(name: str, seed: int, lr: float = 3e-4):
@@ -197,6 +198,7 @@ def run_td_metaworld_mt1():
     print(f"Max act delay: {args.max_act_delay}")
     print(f"Delay mode: {args.delay_mode}")
     print(f"Resample every: {args.resample_every}")
+    print(f"Delay emb type: {args.delay_emb_type}")
     print(f"{'='*60}")
 
     print("Initializing environment...")
@@ -210,7 +212,7 @@ def run_td_metaworld_mt1():
         delay_mode=args.delay_mode,
         resample_every=args.resample_every,
         interval_emb_type=None,
-        delay_emb_type="one_hot",
+        delay_emb_type=None if args.delay_emb_type == "none" else args.delay_emb_type,
     )
     print(f"  Obs dim: {env.obs_dim}, Action dim: {env.action_dim}")
 
@@ -221,7 +223,7 @@ def run_td_metaworld_mt1():
     run_name = (
         f"td_sac_{args.task_name}_{args.optimizer}"
         f"_obs{args.max_obs_delay}_act{args.max_act_delay}"
-        f"_{args.delay_mode}_{args.seed}"
+        f"_{args.delay_mode}_{args.delay_emb_type}_{args.seed}"
     )
 
     logger = Logger(
@@ -229,7 +231,7 @@ def run_td_metaworld_mt1():
             run_name=run_name,
             wandb_entity=args.wandb_entity,
             wandb_project=args.wandb_project,
-            group=f"{args.max_act_delay}act{args.max_obs_delay}obs_{args.delay_mode}",
+            group=f"{args.max_act_delay}act{args.max_obs_delay}obs_{args.delay_mode}_{args.delay_emb_type}",
             save=False,
             wandb_mode=args.wandb_mode,
         ),
@@ -250,6 +252,7 @@ def run_td_metaworld_mt1():
             "max_act_delay": args.max_act_delay,
             "delay_mode": args.delay_mode,
             "resample_every": args.resample_every,
+            "delay_emb_type": args.delay_emb_type,
         },
     )
 
@@ -281,6 +284,10 @@ def run_td_metaworld_mt1():
     current_episode_reward = np.zeros(args.num_envs)
     current_episode_length = np.zeros(args.num_envs, dtype=int)
     episode_successes: list[bool] = []
+
+    recent_obs_delays: list[int] = []
+    recent_act_delays: list[int] = []
+    latest_intervals: dict = {}
 
     obs = env.init()
     start_time = time.time()
@@ -322,6 +329,17 @@ def run_td_metaworld_mt1():
                 current_episode_reward[i] = 0
                 current_episode_length[i] = 0
                 total_episodes += 1
+
+        if timestep.info.get("realised_obs_delay"):
+            recent_obs_delays.extend(timestep.info["realised_obs_delay"])
+            recent_act_delays.extend(timestep.info["realised_act_delay"])
+        if "current_obs_interval" in timestep.info:
+            latest_intervals = {
+                "current_obs": timestep.info["current_obs_interval"],
+                "current_act": timestep.info["current_act_interval"],
+                "overall_obs": timestep.info["overall_obs_interval"],
+                "overall_act": timestep.info["overall_act_interval"],
+            }
 
         obs = timestep.next_observation
         total_steps += args.num_envs
@@ -369,15 +387,48 @@ def run_td_metaworld_mt1():
                         avg_logs[log_key] = float(np.mean(values))
                 log_dict.update(prefix_dict("train", avg_logs))
 
+            obs_delay_mean = act_delay_mean = None
+            if recent_obs_delays:
+                obs_delay_mean = float(np.mean(recent_obs_delays))
+                act_delay_mean = float(np.mean(recent_act_delays))
+                log_dict["delay/realised_obs_delay_mean"] = obs_delay_mean
+                log_dict["delay/realised_act_delay_mean"] = act_delay_mean
+                log_dict["delay/realised_obs_delay_max"] = float(np.max(recent_obs_delays))
+                log_dict["delay/realised_act_delay_max"] = float(np.max(recent_act_delays))
+                recent_obs_delays.clear()
+                recent_act_delays.clear()
+
+            if latest_intervals:
+                co_lo, co_hi = latest_intervals["current_obs"]
+                ca_lo, ca_hi = latest_intervals["current_act"]
+                _, oo_hi = latest_intervals["overall_obs"]
+                _, oa_hi = latest_intervals["overall_act"]
+                log_dict["delay/current_obs_interval_lo"] = co_lo
+                log_dict["delay/current_obs_interval_hi"] = co_hi
+                log_dict["delay/current_act_interval_lo"] = ca_lo
+                log_dict["delay/current_act_interval_hi"] = ca_hi
+                log_dict["delay/overall_obs_interval_hi"] = oo_hi
+                log_dict["delay/overall_act_interval_hi"] = oa_hi
+
             logger.log(log_dict, step=total_steps)
             last_log_step = total_steps
 
             mean_return = log_dict.get("charts/mean_episode_return", 0)
             success_rate = log_dict.get("charts/success_rate", 0)
+            delay_str = ""
+            if obs_delay_mean is not None and latest_intervals:
+                co_lo, co_hi = latest_intervals["current_obs"]
+                ca_lo, ca_hi = latest_intervals["current_act"]
+                _, oo_hi = latest_intervals["overall_obs"]
+                _, oa_hi = latest_intervals["overall_act"]
+                delay_str = (
+                    f"  | obs μ={obs_delay_mean:.2f} [{co_lo},{co_hi}]/[0,{oo_hi}]"
+                    f"  act μ={act_delay_mean:.2f} [{ca_lo},{ca_hi}]/[0,{oa_hi}]"
+                )
             print(
                 f"Step {total_steps:>7}, Eps: {total_episodes:>4}, "
                 f"Return: {mean_return:>7.2f}, Success: {success_rate:>5.2%}, "
-                f"SPS: {sps:>6.1f}",
+                f"SPS: {sps:>6.1f}{delay_str}",
                 flush=True,
             )
 

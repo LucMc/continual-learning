@@ -293,7 +293,7 @@ class MetaWorldSingleTaskEnv(VectorEnv):
         delay_mode: str = "fixed",
         resample_every: int | None = None,
         interval_emb_type: str | None = None,
-        delay_emb_type: str = "one_hot",
+        delay_emb_type: str | None = "one_hot",
     ):
         """Initialize single task environment.
 
@@ -378,7 +378,11 @@ class MetaWorldSingleTaskEnv(VectorEnv):
         rewards_list = []
         terminated_list = []
         truncated_list = []
-        infos = {"success": []}
+        infos: dict = {
+            "success": [],
+            "realised_obs_delay": [],
+            "realised_act_delay": [],
+        }
 
         for i, env in enumerate(self._envs):
             obs, reward, terminated, truncated, info = env.step(actions_np[i])
@@ -391,6 +395,16 @@ class MetaWorldSingleTaskEnv(VectorEnv):
             terminated_list.append(terminated)
             truncated_list.append(truncated)
             infos["success"].append(info.get("success", False))
+
+            if "realised_obs_delay" in info:
+                infos["realised_obs_delay"].append(info["realised_obs_delay"])
+                infos["realised_act_delay"].append(info["realised_act_delay"])
+                # Intervals are diagnostic — take env 0 as representative.
+                if i == 0:
+                    infos["current_obs_interval"] = info["current_obs_interval"]
+                    infos["current_act_interval"] = info["current_act_interval"]
+                    infos["overall_obs_interval"] = info["overall_obs_interval"]
+                    infos["overall_act_interval"] = info["overall_act_interval"]
 
         next_obs = jnp.array(np.stack(next_obs_list, axis=0))
         rewards = jnp.array(np.array(rewards_list)[:, None])

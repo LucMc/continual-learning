@@ -1,0 +1,69 @@
+resources:
+  infra: vast
+  accelerators: RTX3090:1
+  disk_size: 50
+
+workdir: .
+
+envs:
+  OVERALL_MAX_OBS_DELAY: "1"
+  OVERALL_MAX_ACT_DELAY: "1"
+  DELAY_MODE: fixed
+  FIXED_OBS_DELAY: "0"
+  FIXED_ACT_DELAY: "0"
+  NUM_TASKS: "2"
+  STEPS_PER_TASK: "20000000"
+  NUM_ENVS: "2048"
+  OPTIMIZERS: "adam"
+  SEEDS: "0"
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+
+setup: |
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running TD-Ant: overall_obs=$OVERALL_MAX_OBS_DELAY overall_act=$OVERALL_MAX_ACT_DELAY mode=$DELAY_MODE"
+  echo "             fixed_obs=$FIXED_OBS_DELAY fixed_act=$FIXED_ACT_DELAY"
+  echo "             tasks=$NUM_TASKS steps_per_task=$STEPS_PER_TASK opts=$OPTIMIZERS seeds=$SEEDS"
+
+  IFS=',' read -ra OPT_LIST <<< "$OPTIMIZERS"
+  OPT_FLAGS=""
+  for opt in "${OPT_LIST[@]}"; do
+    OPT_FLAGS="$OPT_FLAGS --optimizers $opt"
+  done
+
+  for SEED in $SEEDS; do
+    echo "============================================"
+    echo "Starting seed=$SEED"
+    echo "============================================"
+    python experiments/td_ant.py \
+      --seed "$SEED" \
+      --overall-max-obs-delay "$OVERALL_MAX_OBS_DELAY" \
+      --overall-max-act-delay "$OVERALL_MAX_ACT_DELAY" \
+      --delay-mode "$DELAY_MODE" \
+      --fixed-obs-delay "$FIXED_OBS_DELAY" \
+      --fixed-act-delay "$FIXED_ACT_DELAY" \
+      --num-tasks "$NUM_TASKS" \
+      --steps-per-task "$STEPS_PER_TASK" \
+      --num-envs "$NUM_ENVS" \
+      $OPT_FLAGS \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  done
+
+  echo "All seeds complete."

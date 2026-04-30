@@ -574,6 +574,10 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
                 [(beta_delay - self.overall_obs_delay_range.start) / n_obs],
                 dtype=np.float32,
             )
+        elif self.delay_emb_type is None:
+            obs_emb = np.zeros(0, dtype=np.float32)
+            act_emb = np.zeros(0, dtype=np.float32)
+            beta_emb = np.zeros(0, dtype=np.float32)
         else:
             raise ValueError(f"Invalid delay_emb_type: {self.delay_emb_type}")
 
@@ -627,9 +631,26 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
     # --- gym API ---
 
     def step(self, action, **kwargs):
-        received_obs, *aux = super().step(action)
+        received_obs, r, term, trun, info = super().step(action)
         padded_act_buf = self.get_padded_act_buf(received_obs)
         received_obs = self.get_int_emb_obs(received_obs, padded_act_buf)
+
+        # Surface realised delays + current/overall intervals for logging.
+        # received_obs[2] = alpha (obs delay), received_obs[3] = kappa (act delay).
+        info = dict(info)
+        info["realised_obs_delay"] = int(received_obs[2])
+        info["realised_act_delay"] = int(received_obs[3])
+        info["current_obs_interval"] = (
+            int(self.obs_delay_range.start), int(self.obs_delay_range.stop - 1))
+        info["current_act_interval"] = (
+            int(self.act_delay_range.start), int(self.act_delay_range.stop - 1))
+        info["overall_obs_interval"] = (
+            int(self.overall_obs_delay_range.start),
+            int(self.overall_obs_delay_range.stop - 1))
+        info["overall_act_interval"] = (
+            int(self.overall_act_delay_range.start),
+            int(self.overall_act_delay_range.stop - 1))
+
         obs = received_obs if self.output == "dcac" else self.format_obs(received_obs)
 
         self._step_counter += 1
@@ -638,7 +659,7 @@ class ContinualRandomIntervalDelayWrapper(RandomDelayWrapper):
                 and self._step_counter % self.resample_every == 0):
             self._resample_intervals()
 
-        return (obs, *aux)
+        return obs, r, term, trun, info
 
     def reset(self, *, seed=None, **kwargs):
         if self.mode == "multi-task":

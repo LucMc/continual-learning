@@ -1,0 +1,57 @@
+resources:
+  infra: vast
+  accelerators: RTX3090:1
+  disk_size: 50
+
+workdir: .
+
+envs:
+  TASK: reach-v3
+  OPTIMIZER: adam
+  MAX_OBS_DELAY: "0"
+  MAX_ACT_DELAY: "0"
+  DELAY_MODE: fixed
+  DELAY_EMB_TYPE: one_hot
+  SEEDS: "0"
+  TOTAL_STEPS: "5000000"
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+
+setup: |
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running TD-MT1: task=$TASK opt=$OPTIMIZER obs=$MAX_OBS_DELAY act=$MAX_ACT_DELAY mode=$DELAY_MODE emb=$DELAY_EMB_TYPE seeds=$SEEDS"
+
+  for SEED in $SEEDS; do
+    echo "============================================"
+    echo "Starting task=$TASK opt=$OPTIMIZER obs=$MAX_OBS_DELAY act=$MAX_ACT_DELAY emb=$DELAY_EMB_TYPE seed=$SEED"
+    echo "============================================"
+    python experiments/td_worldmt1.py \
+      --task-name "$TASK" \
+      --optimizer "$OPTIMIZER" \
+      --seed "$SEED" \
+      --max-obs-delay "$MAX_OBS_DELAY" \
+      --max-act-delay "$MAX_ACT_DELAY" \
+      --delay-mode "$DELAY_MODE" \
+      --delay-emb-type "$DELAY_EMB_TYPE" \
+      --total-steps "$TOTAL_STEPS" \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  done
+
+  echo "All seeds complete for delay (obs=$MAX_OBS_DELAY, act=$MAX_ACT_DELAY)"

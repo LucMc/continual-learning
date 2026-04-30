@@ -214,3 +214,4 @@ flake.nix
 .envrc
 checkpoints/
 .claude
+CLAUDE.md
