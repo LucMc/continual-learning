@@ -28,6 +28,12 @@ Continual [0,8] (plasticity)::
     python experiments/td_ant.py \
         --overall-max-obs-delay 9 --overall-max-act-delay 9 \
         --delay-mode task_boundary --num-tasks 20 --steps-per-task 20000000
+
+Alternating ramp 20 increments (no delay-info oracle, plasticity benchmark)::
+
+    python experiments/td_ant.py \
+        --delay-mode ramp --ramp-num-increments 20 \
+        --delay-info-mode none --steps-per-task 20000000
 """
 
 import time
@@ -73,9 +79,17 @@ class Args:
     # Delay schedule
     overall_max_obs_delay: int = 1  # exclusive upper bound for obs delays
     overall_max_act_delay: int = 1  # exclusive upper bound for action delays
-    delay_mode: Literal["fixed", "task_boundary"] = "fixed"
+    delay_mode: Literal["fixed", "task_boundary", "ramp"] = "fixed"
     fixed_obs_delay: int = 0  # used iff mode == "fixed"; alpha is sampled in {fixed_obs_delay}
     fixed_act_delay: int = 0  # used iff mode == "fixed"; kappa is sampled in {fixed_act_delay}
+    ramp_num_increments: int = 20  # used iff mode == "ramp"; total tasks = 1 + this
+
+    # Delay-info channel: what (if anything) to append to the augmented obs
+    # alongside the delayed obs and action buffer.
+    #   "one_hot": current alpha/kappa one-hots (oracle; original td_ant default)
+    #   "scalar":  two scalars in [0,1]
+    #   "none":    omit — agent must infer delay from action-history dynamics
+    delay_info_mode: Literal["one_hot", "scalar", "none"] = "one_hot"
 
     # Training schedule
     num_tasks: int = 2
@@ -90,6 +104,23 @@ class Args:
     wandb_mode: Literal["online", "offline", "disabled"] = "online"
     wandb_project: str = ""
     wandb_entity: str = ""
+
+
+def _alternating_ramp_schedule(num_increments: int) -> list[tuple[int, int]]:
+    """(0,0) → +1 obs → +1 act → +1 obs → ... for ``num_increments`` steps.
+
+    Returns ``num_increments + 1`` task entries; with even ``num_increments``
+    the final delay is ``(N/2, N/2)``.
+    """
+    schedule = [(0, 0)]
+    obs, act = 0, 0
+    for i in range(num_increments):
+        if i % 2 == 0:
+            obs += 1
+        else:
+            act += 1
+        schedule.append((obs, act))
+    return schedule
 
 
 def _get_optimizer_config(name: str, seed: int, lr: float = 1e-3):
@@ -157,10 +188,27 @@ def run():
                 f"Unknown optimizer {name!r}; choose from {OPTIMIZER_NAMES}"
             )
 
-    overall_obs = range(0, args.overall_max_obs_delay)
-    overall_act = range(0, args.overall_max_act_delay)
     fixed_obs = range(args.fixed_obs_delay, args.fixed_obs_delay + 1)
     fixed_act = range(args.fixed_act_delay, args.fixed_act_delay + 1)
+    ramp_schedule: list[tuple[int, int]] | None = None
+
+    if args.delay_mode == "ramp":
+        # Ramp auto-derives overall ranges and num_tasks from the schedule;
+        # any user-passed overall_max_*_delay / num_tasks is overridden.
+        ramp_schedule = _alternating_ramp_schedule(args.ramp_num_increments)
+        max_obs = max(d for d, _ in ramp_schedule)
+        max_act = max(d for _, d in ramp_schedule)
+        overall_obs = range(0, max_obs + 1)
+        overall_act = range(0, max_act + 1)
+        num_tasks = len(ramp_schedule)
+        print(
+            f"[ramp] {args.ramp_num_increments} increments → {num_tasks} tasks; "
+            f"final delay (obs={max_obs}, act={max_act}); schedule={ramp_schedule}"
+        )
+    else:
+        overall_obs = range(0, args.overall_max_obs_delay)
+        overall_act = range(0, args.overall_max_act_delay)
+        num_tasks = args.num_tasks
 
     if args.delay_mode == "fixed":
         if not (overall_obs.start <= fixed_obs.start and fixed_obs.stop <= overall_obs.stop):
@@ -174,19 +222,31 @@ def run():
                 f"{args.overall_max_act_delay})"
             )
 
-    # W&B group: matches the td_mt1 convention so 0,0 / 1,1 / continual auto-cluster
+    # W&B group: keep one_hot groups (the prior default) byte-identical so old
+    # runs cluster correctly. Append `_info-{mode}` only for non-default
+    # delay_info_mode, so oracle-removal ablations on any mode get their own
+    # bucket without polluting the existing groupings.
+    info_suffix = "" if args.delay_info_mode == "one_hot" else f"_info-{args.delay_info_mode}"
     if args.delay_mode == "fixed":
-        group = f"{args.fixed_act_delay}act{args.fixed_obs_delay}obs_fixed"
+        group = f"{args.fixed_act_delay}act{args.fixed_obs_delay}obs_fixed{info_suffix}"
+    elif args.delay_mode == "ramp":
+        assert ramp_schedule is not None
+        group = (
+            f"ramp{args.ramp_num_increments}"
+            f"_obs{max(d for d, _ in ramp_schedule)}"
+            f"_act{max(d for _, d in ramp_schedule)}"
+            f"{info_suffix}"
+        )
     else:
         group = (
             f"obs{args.overall_max_obs_delay - 1}_act{args.overall_max_act_delay - 1}"
-            f"_task_boundary"
+            f"_task_boundary{info_suffix}"
         )
 
     env_cfg = EnvConfig(
         name="delayed_ant",
         num_envs=args.num_envs,
-        num_tasks=args.num_tasks,
+        num_tasks=num_tasks,
         episode_length=args.episode_length,
     )
 
@@ -203,6 +263,8 @@ def run():
             delay_mode=args.delay_mode,
             fixed_obs_delay_range=fixed_obs if args.delay_mode == "fixed" else None,
             fixed_act_delay_range=fixed_act if args.delay_mode == "fixed" else None,
+            ramp_schedule=ramp_schedule,
+            delay_info_mode=args.delay_info_mode,
         )
 
         trainer = JittedContinualPPOTrainer(
@@ -248,8 +310,7 @@ def run():
             ),
             logs_cfg=LoggingConfig(
                 run_name=(
-                    f"td_ant_{opt_name}_obs{args.overall_max_obs_delay - 1}"
-                    f"_act{args.overall_max_act_delay - 1}_{args.delay_mode}_s{args.seed}"
+                    f"td_ant_{opt_name}_{group}_s{args.seed}"
                 ),
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,

@@ -280,11 +280,17 @@ def _sample_subinterval(overall: range, rng: np.random.Generator) -> range:
 class ContinualDelayedAnt(JittableContinualLearningEnv):
     """Ant + Brax-native time-delay wrapper, parameterised per-task.
 
-    Two modes:
+    Three modes:
     - ``"fixed"``: every task uses the same fixed sub-interval supplied via
       ``fixed_obs_delay_range`` / ``fixed_act_delay_range``.
     - ``"task_boundary"``: at each task, sample a new contiguous sub-interval
       from ``overall_obs_delay_range`` / ``overall_act_delay_range``.
+    - ``"ramp"``: deterministic per-task schedule supplied via
+      ``ramp_schedule`` — each entry ``(d_obs, d_act)`` gives a fixed delay
+      for that task (``range(d, d+1)``).
+
+    ``delay_info_mode`` is forwarded to the wrapper and controls whether the
+    augmented obs includes one-hot / scalar / no current-delay channel.
     """
 
     def __init__(
@@ -297,10 +303,12 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
         delay_mode: str = "fixed",
         fixed_obs_delay_range: range | None = None,
         fixed_act_delay_range: range | None = None,
+        ramp_schedule: list[tuple[int, int]] | None = None,
+        delay_info_mode: str = "one_hot",
     ):
-        if delay_mode not in ("fixed", "task_boundary"):
+        if delay_mode not in ("fixed", "task_boundary", "ramp"):
             raise ValueError(
-                f"delay_mode={delay_mode!r}; must be 'fixed' or 'task_boundary'"
+                f"delay_mode={delay_mode!r}; must be 'fixed', 'task_boundary', or 'ramp'"
             )
 
         self._num_envs = config.num_envs
@@ -314,10 +322,31 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
         self.overall_obs_delay_range = overall_obs_delay_range
         self.overall_act_delay_range = overall_act_delay_range
         self.delay_mode = delay_mode
+        self.delay_info_mode = delay_info_mode
+
+        if delay_mode == "ramp":
+            if ramp_schedule is None:
+                raise ValueError("ramp mode requires ramp_schedule")
+            if len(ramp_schedule) != config.num_tasks:
+                raise ValueError(
+                    f"ramp_schedule has {len(ramp_schedule)} entries but "
+                    f"config.num_tasks={config.num_tasks}"
+                )
+            for d_obs, d_act in ramp_schedule:
+                if not (0 <= d_obs < overall_obs_delay_range.stop):
+                    raise ValueError(
+                        f"ramp obs delay {d_obs} outside "
+                        f"[0, {overall_obs_delay_range.stop})"
+                    )
+                if not (0 <= d_act < overall_act_delay_range.stop):
+                    raise ValueError(
+                        f"ramp act delay {d_act} outside "
+                        f"[0, {overall_act_delay_range.stop})"
+                    )
 
         rng = np.random.default_rng(seed)
         self.task_ranges: list[tuple[range, range]] = []
-        for _ in range(config.num_tasks):
+        for i in range(config.num_tasks):
             if delay_mode == "fixed":
                 if fixed_obs_delay_range is None or fixed_act_delay_range is None:
                     raise ValueError(
@@ -325,6 +354,12 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
                         "fixed_act_delay_range"
                     )
                 self.task_ranges.append((fixed_obs_delay_range, fixed_act_delay_range))
+            elif delay_mode == "ramp":
+                assert ramp_schedule is not None  # validated at top of __init__
+                d_obs, d_act = ramp_schedule[i]
+                self.task_ranges.append(
+                    (range(d_obs, d_obs + 1), range(d_act, d_act + 1))
+                )
             else:
                 self.task_ranges.append(
                     (
@@ -377,6 +412,7 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
             base_obs_dim=self._base_obs_dim,
             action_dim=self._action_dim,
             seed=self.seed + 1000 * (self.current_task + 1),
+            delay_info_mode=self.delay_info_mode,
         )
         return DelayedJittableVectorEnv(
             seed=self.seed,
@@ -392,12 +428,16 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
 
     @property
     def observation_spec(self) -> jax.ShapeDtypeStruct:
-        aug = (
+        base = (
             self._base_obs_dim
             + max(self.overall_act_delay_range.stop, 1) * self._action_dim
-            + self.overall_obs_delay_range.stop
-            + self.overall_act_delay_range.stop
         )
+        if self.delay_info_mode == "one_hot":
+            aug = base + self.overall_obs_delay_range.stop + self.overall_act_delay_range.stop
+        elif self.delay_info_mode == "scalar":
+            aug = base + 2
+        else:
+            aug = base
         return jax.ShapeDtypeStruct((1, aug), jnp.float32)
 
     @property

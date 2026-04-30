@@ -55,6 +55,7 @@ class BraxRandomDelayWrapper(Wrapper):
         action_dim: int,
         seed: int,
         action_clip: float | None = 5.0,
+        delay_info_mode: str = "one_hot",
     ):
         super().__init__(env)
         if obs_delay_range.start < 0 or obs_delay_range.stop > overall_obs_delay_max:
@@ -66,6 +67,10 @@ class BraxRandomDelayWrapper(Wrapper):
             raise ValueError(
                 f"act_delay_range {act_delay_range} must lie inside "
                 f"[0, {overall_act_delay_max})"
+            )
+        if delay_info_mode not in ("one_hot", "scalar", "none"):
+            raise ValueError(
+                f"delay_info_mode={delay_info_mode!r}; must be 'one_hot', 'scalar', or 'none'"
             )
 
         self.num_envs = num_envs
@@ -88,15 +93,20 @@ class BraxRandomDelayWrapper(Wrapper):
         # std≈1 essentially never samples beyond a few sigma. ``None`` disables
         # clipping entirely.
         self.action_clip = None if action_clip is None else float(action_clip)
+        # Controls the trailing channel of the augmented obs:
+        #   "one_hot" — alpha + kappa one-hots (oracle; original behaviour)
+        #   "scalar"  — two scalars in [0,1]: alpha/(α_max-1), kappa/(κ_max-1)
+        #   "none"    — omitted entirely; agent must infer delay from act_buffer
+        self.delay_info_mode = delay_info_mode
 
     @property
     def observation_size(self) -> int:
-        return (
-            self.base_obs_dim
-            + self.act_buf_size * self.action_dim
-            + self.overall_obs_delay_max
-            + self.overall_act_delay_max
-        )
+        base = self.base_obs_dim + self.act_buf_size * self.action_dim
+        if self.delay_info_mode == "one_hot":
+            return base + self.overall_obs_delay_max + self.overall_act_delay_max
+        if self.delay_info_mode == "scalar":
+            return base + 2
+        return base
 
     def _sample_alpha_kappa(self, alpha_keys: jax.Array, kappa_keys: jax.Array):
         alphas = jax.vmap(
@@ -119,11 +129,16 @@ class BraxRandomDelayWrapper(Wrapper):
             obs_buffer, obs_indices[:, None, None], axis=1
         ).squeeze(1)
         act_buffer_flat = act_buffer.reshape(self.num_envs, -1)
-        alpha_one_hot = jax.nn.one_hot(alphas, self.overall_obs_delay_max)
-        kappa_one_hot = jax.nn.one_hot(kappas, self.overall_act_delay_max)
-        return jnp.concatenate(
-            [delayed_obs, act_buffer_flat, alpha_one_hot, kappa_one_hot], axis=-1
-        )
+        parts = [delayed_obs, act_buffer_flat]
+        if self.delay_info_mode == "one_hot":
+            parts.append(jax.nn.one_hot(alphas, self.overall_obs_delay_max))
+            parts.append(jax.nn.one_hot(kappas, self.overall_act_delay_max))
+        elif self.delay_info_mode == "scalar":
+            obs_div = max(self.overall_obs_delay_max - 1, 1)
+            act_div = max(self.overall_act_delay_max - 1, 1)
+            parts.append((alphas[:, None].astype(jnp.float32) / obs_div))
+            parts.append((kappas[:, None].astype(jnp.float32) / act_div))
+        return jnp.concatenate(parts, axis=-1)
 
     def _interval_arrays(self) -> tuple[jax.Array, jax.Array]:
         obs_lohi = jnp.broadcast_to(
