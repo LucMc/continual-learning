@@ -280,11 +280,17 @@ def _sample_subinterval(overall: range, rng: np.random.Generator) -> range:
 class ContinualDelayedAnt(JittableContinualLearningEnv):
     """Ant + Brax-native time-delay wrapper, parameterised per-task.
 
-    Three modes:
+    Four modes:
     - ``"fixed"``: every task uses the same fixed sub-interval supplied via
       ``fixed_obs_delay_range`` / ``fixed_act_delay_range``.
     - ``"task_boundary"``: at each task, sample a new contiguous sub-interval
-      from ``overall_obs_delay_range`` / ``overall_act_delay_range``.
+      (width >= 2) from ``overall_obs_delay_range`` / ``overall_act_delay_range``.
+      Within a task the per-step delay is itself stochastic over that interval.
+    - ``"task_boundary_constant"``: at each task, sample a single integer
+      delay independently for obs and act from the overall ranges; the delay
+      is *constant* within the task (width-1 sub-interval ``range(d, d+1)``).
+      Same boundary stochasticity as ``task_boundary`` but no per-step
+      randomness within a task.
     - ``"ramp"``: deterministic per-task schedule supplied via
       ``ramp_schedule`` — each entry ``(d_obs, d_act)`` gives a fixed delay
       for that task (``range(d, d+1)``).
@@ -306,9 +312,15 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
         ramp_schedule: list[tuple[int, int]] | None = None,
         delay_info_mode: str = "one_hot",
     ):
-        if delay_mode not in ("fixed", "task_boundary", "ramp"):
+        if delay_mode not in (
+            "fixed",
+            "task_boundary",
+            "task_boundary_constant",
+            "ramp",
+        ):
             raise ValueError(
-                f"delay_mode={delay_mode!r}; must be 'fixed', 'task_boundary', or 'ramp'"
+                f"delay_mode={delay_mode!r}; must be one of 'fixed', "
+                "'task_boundary', 'task_boundary_constant', or 'ramp'"
             )
 
         self._num_envs = config.num_envs
@@ -357,6 +369,20 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
             elif delay_mode == "ramp":
                 assert ramp_schedule is not None  # validated at top of __init__
                 d_obs, d_act = ramp_schedule[i]
+                self.task_ranges.append(
+                    (range(d_obs, d_obs + 1), range(d_act, d_act + 1))
+                )
+            elif delay_mode == "task_boundary_constant":
+                d_obs = int(
+                    rng.integers(
+                        overall_obs_delay_range.start, overall_obs_delay_range.stop
+                    )
+                )
+                d_act = int(
+                    rng.integers(
+                        overall_act_delay_range.start, overall_act_delay_range.stop
+                    )
+                )
                 self.task_ranges.append(
                     (range(d_obs, d_obs + 1), range(d_act, d_act + 1))
                 )

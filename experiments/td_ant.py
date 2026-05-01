@@ -34,6 +34,13 @@ Alternating ramp 20 increments (no delay-info oracle, plasticity benchmark)::
     python experiments/td_ant.py \
         --delay-mode ramp --ramp-num-increments 20 \
         --delay-info-mode none --steps-per-task 20000000
+
+Constant per-task delay sampled at boundary (no oracle, max=8)::
+
+    python experiments/td_ant.py \
+        --overall-max-obs-delay 9 --overall-max-act-delay 9 \
+        --delay-mode task_boundary_constant --delay-info-mode none \
+        --num-tasks 40 --steps-per-task 20000000
 """
 
 import time
@@ -79,7 +86,9 @@ class Args:
     # Delay schedule
     overall_max_obs_delay: int = 1  # exclusive upper bound for obs delays
     overall_max_act_delay: int = 1  # exclusive upper bound for action delays
-    delay_mode: Literal["fixed", "task_boundary", "ramp"] = "fixed"
+    delay_mode: Literal[
+        "fixed", "task_boundary", "task_boundary_constant", "ramp"
+    ] = "fixed"
     fixed_obs_delay: int = 0  # used iff mode == "fixed"; alpha is sampled in {fixed_obs_delay}
     fixed_act_delay: int = 0  # used iff mode == "fixed"; kappa is sampled in {fixed_act_delay}
     ramp_num_increments: int = 20  # used iff mode == "ramp"; total tasks = 1 + this
@@ -237,7 +246,12 @@ def run():
             f"_act{max(d for _, d in ramp_schedule)}"
             f"{info_suffix}"
         )
-    else:
+    elif args.delay_mode == "task_boundary_constant":
+        group = (
+            f"obs{args.overall_max_obs_delay - 1}_act{args.overall_max_act_delay - 1}"
+            f"_task_boundary_const{info_suffix}"
+        )
+    else:  # task_boundary
         group = (
             f"obs{args.overall_max_obs_delay - 1}_act{args.overall_max_act_delay - 1}"
             f"_task_boundary{info_suffix}"
