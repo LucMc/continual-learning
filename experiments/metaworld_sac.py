@@ -58,9 +58,9 @@ class Args:
     include: list[str] = field(default_factory=list)
 
     # SAC settings
-    replay_ratio: int = 4  # Gradient updates per env step
-    buffer_size: int = 1_000_000
-    batch_size: int = 256
+    replay_ratio: int = 16  # Gradient updates per env step
+    buffer_size: int = 500_000
+    batch_size: int = 64
     learning_starts: int = 5_000
     steps_per_task: int = 1_000_000
     num_envs: int = 10  # Match MT1 async envs for more transitions per step
@@ -102,9 +102,9 @@ def run_metaworld_sac():
         ),
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=lr),
-            replacement_rate=1e-5,
+            replacement_rate=1e-6,
             decay_rate=0.999,
-            maturity_threshold=1000,
+            maturity_threshold=10000,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -166,9 +166,9 @@ def run_metaworld_sac():
         ),
         "muon_cbp": CbpConfig(
             tx=MuonConfig(learning_rate=muon_lr),
-            replacement_rate=1e-5,
+            replacement_rate=1e-6,
             decay_rate=0.999,
-            maturity_threshold=1000,
+            maturity_threshold=10000,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -292,10 +292,10 @@ def run_metaworld_sac():
                 steps_per_task=args.steps_per_task,
             ),
             logs_cfg=LoggingConfig(
-                run_name=f"sac_{opt_name}_{args.seed}",
+                run_name=f"sac_{opt_name}_{args.seed}_cbp_low_rr",
                 wandb_entity=args.wandb_entity,
                 wandb_project=args.wandb_project,
-                group="metaworld_mt10_sac",
+                group="metaworld_mt10_sac_cbp_low_rr",
                 save=False,
                 wandb_mode=args.wandb_mode,
             ),

@@ -337,6 +337,20 @@ class BROTrainer:
                             avg_logs[key] = float(np.mean(values))
                     log_dict.update(prefix_dict("train", avg_logs))
 
+                # Neuron statistics (dormant, linearized, srank)
+                if self.total_steps >= self.cfg.learning_starts:
+                    self.key, neuron_key = jax.random.split(self.key)
+                    neuron_batch = ReplayBuffer.sample(
+                        self.buffer_state,
+                        neuron_key,
+                        min(4096, self.cfg.batch_size),
+                    )
+                    neuron_logs = self.learner.get_neuron_logs(
+                        neuron_batch.observations,
+                        neuron_batch.actions,
+                    )
+                    log_dict.update(neuron_logs)
+
                 self.logger.log(log_dict, step=self.total_steps)
                 last_log_step = self.total_steps
 

@@ -1,0 +1,31 @@
+# Large directories
+continual_learning/plots/
+plots/
+.venv/
+.git/
+wandb/
+
+# Build artifacts
+*.egg-info/
+__pycache__/
+build/
+dist/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
+# Misc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.claude/
+node_modules/
+checkpoints/
+results/
+logs*/
+videos/
+MUJOCO_LOG.TXT

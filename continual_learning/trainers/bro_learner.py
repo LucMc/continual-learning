@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import flax.traverse_util
 from flax.core import FrozenDict
 from jaxtyping import Array, Float, PRNGKeyArray
 
@@ -39,6 +40,12 @@ from continual_learning.models.rl import (
 )
 from continual_learning.optim import get_optimizer
 from continual_learning.types import LogDict
+from continual_learning.utils.monitoring import (
+    get_dormant_neuron_logs,
+    get_linearised_neuron_logs,
+    compute_srank,
+    prefix_dict,
+)
 from continual_learning.utils.training import TrainState
 
 
@@ -714,6 +721,81 @@ class BROLearner:
             state.critic.params,
         )
         return state._replace(target_critic_params=new_target_params)
+
+    def get_neuron_logs(
+        self,
+        observations: jax.Array,
+        actions: jax.Array,
+    ) -> LogDict:
+        """Compute neuron statistics (dormant, linearized, srank) for all networks.
+
+        Args:
+            observations: Batch of observations for forward passes
+            actions: Batch of actions (needed for critic forward pass)
+
+        Returns:
+            Dictionary of neuron statistics prefixed by network name
+        """
+        state = self.state
+        cfg = self.cfg
+
+        # Conservative actor forward pass
+        (_, mu_c, std_c), actor_intermediates = state.actor.apply_fn(
+            state.actor.params,
+            observations,
+            return_params=True,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+
+        # Optimistic actor forward pass (needs conservative actor's mean/std)
+        _, actor_o_intermediates = state.actor_o.apply_fn(
+            state.actor_o.params,
+            observations,
+            mu_c,
+            std_c,
+            cfg.std_multiplier,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+
+        # Critic forward pass
+        _, critic_intermediates = state.critic.apply_fn(
+            state.critic.params,
+            observations,
+            actions,
+            training=False,
+            mutable=("activations", "preactivations"),
+        )
+
+        logs: LogDict = {}
+
+        for name, intermediates in [
+            ("actor", actor_intermediates),
+            ("actor_o", actor_o_intermediates),
+            ("critic", critic_intermediates),
+        ]:
+            activations = intermediates.get("activations", {})
+            activations_flat = {
+                k: v[0]
+                for k, v in flax.traverse_util.flatten_dict(activations, sep="/").items()
+            }
+
+            preactivations = intermediates.get("preactivations", {})
+            preactivations_flat = {
+                k: v[0]
+                for k, v in flax.traverse_util.flatten_dict(preactivations, sep="/").items()
+            }
+
+            dormant_logs = get_dormant_neuron_logs(activations_flat)
+            linearised_logs = get_linearised_neuron_logs(preactivations_flat)
+            srank_logs = jax.tree.map(compute_srank, activations_flat)
+
+            logs.update(prefix_dict(f"nn/{name}_dormant_neurons", dormant_logs))
+            logs.update(prefix_dict(f"nn/{name}_linearised_neurons", linearised_logs))
+            logs.update(prefix_dict(f"nn/{name}_srank", srank_logs))
+
+        return logs
 
     def update(
         self,

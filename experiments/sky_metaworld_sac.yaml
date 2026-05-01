@@ -1,0 +1,41 @@
+name: metaworld-sac-cbp-low-rr
+
+resources:
+  infra: vast
+  accelerators: [RTX5090:1, RTX5060:1]
+  disk_size: 100
+
+autodown: true
+
+workdir: .
+
+envs:
+  ALGO: null
+  WANDB_API_KEY: null
+  WANDB_ENTITY: null
+  WANDB_PROJECT: null
+
+setup: |
+  if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e ".[cuda12]"
+
+  python -c "import jax; print('GPU:', jax.devices())"
+
+run: |
+  source .venv/bin/activate
+  export PATH="$HOME/.local/bin:$PATH"
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+  echo "Running MetaWorld SAC: algo=$ALGO seed=44"
+
+  python -m experiments.metaworld_sac \
+    --wandb-project "$WANDB_PROJECT" \
+    --wandb-entity "$WANDB_ENTITY" \
+    --seed 44 \
+    --include "$ALGO"

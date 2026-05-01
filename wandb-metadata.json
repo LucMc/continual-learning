@@ -1,0 +1,96 @@
+{
+  "os":  "Linux-4.18.0-477.10.1.el8_8.x86_64-x86_64-with-glibc2.28",
+  "python":  "CPython 3.12.9",
+  "startedAt":  "2026-04-30T05:46:01.874430Z",
+  "args":  [
+    "--include",
+    "muon_shrink_and_perturb",
+    "--seed",
+    "3",
+    "--wandb-entity",
+    "lucmc",
+    "--wandb-project",
+    "metaworld_sac"
+  ],
+  "program":  "/mnt/fast/nobackup/users/lm01065/crl-extra/experiments/metaworld_sac.py",
+  "codePath":  "experiments/metaworld_sac.py",
+  "git":  {
+    "remote":  "https://github.com/LucMc/continual-learning.git",
+    "commit":  "f6fa33b8a7fd163022732ce22c45037b7b15856f"
+  },
+  "email":  "lucmccutcheon.home@gmail.com",
+  "root":  "/mnt/fast/nobackup/users/lm01065/crl-extra/experiments/batch_runs",
+  "host":  "aisurrey20.surrey.ac.uk",
+  "executable":  "/mnt/fast/nobackup/users/lm01065/crl-extra/.venv/bin/python",
+  "cpu_count":  40,
+  "cpu_count_logical":  40,
+  "gpu":  "Quadro RTX 8000",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "31441920000",
+      "used":  "11419099136"
+    }
+  },
+  "memory":  {
+    "total":  "201357877248"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "Quadro RTX 8000",
+      "memoryTotal":  "51539607552",
+      "cudaCores":  4608,
+      "architecture":  "Turing",
+      "uuid":  "GPU-f6deb35c-369f-d8d1-a51b-54bdac0f7dd0"
+    }
+  ],
+  "cudaVersion":  "12.4",
+  "slurm":  {
+    "array_job_id":  "2112882",
+    "array_task_count":  "8",
+    "array_task_id":  "27",
+    "array_task_max":  "27",
+    "array_task_min":  "20",
+    "array_task_step":  "1",
+    "cluster_name":  "aisurrey",
+    "conf":  "/etc/slurm/slurm.conf",
+    "cpus_on_node":  "10",
+    "cpus_per_task":  "10",
+    "gpus":  "1",
+    "gpus_on_node":  "1",
+    "gtids":  "0",
+    "job_account":  "uos",
+    "job_cpus_per_node":  "10",
+    "job_end_time":  "1777787143",
+    "job_gid":  "5000001",
+    "job_gpus":  "2",
+    "job_id":  "2112882",
+    "job_name":  "metaworld_sac",
+    "job_nodelist":  "aisurrey20",
+    "job_num_nodes":  "1",
+    "job_partition":  "rtx8000",
+    "job_qos":  "normal",
+    "job_start_time":  "1777527943",
+    "job_uid":  "275948",
+    "job_user":  "lm01065",
+    "jobid":  "2112882",
+    "localid":  "0",
+    "mem_per_node":  "65536",
+    "nnodes":  "1",
+    "nodeid":  "0",
+    "nodelist":  "aisurrey20",
+    "nprocs":  "1",
+    "ntasks":  "1",
+    "ntasks_per_node":  "1",
+    "prio_process":  "0",
+    "procid":  "0",
+    "submit_dir":  "/mnt/fast/nobackup/users/lm01065/crl-extra/experiments/batch_runs",
+    "submit_host":  "aisurrey-submit01.surrey.ac.uk",
+    "task_pid":  "4039572",
+    "tasks_per_node":  "1",
+    "topology_addr":  "aisurrey20",
+    "topology_addr_pattern":  "node",
+    "tres_per_task":  "cpu=10"
+  },
+  "writerId":  "lwk851rwbv7m78f4mzasjamcr0eh2tkv"
+}
