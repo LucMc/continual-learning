@@ -423,6 +423,7 @@ def compare_all_algos(
     tail_frac: float,
     top_k: int = 1,
     max_age_days: Optional[float] = None,
+    min_seeds: int = 1,
 ) -> pd.DataFrame:
     """Fetch sweeps for all algorithms, pick the top-k config from each, and
     return a combined comparison table."""
@@ -439,6 +440,13 @@ def compare_all_algos(
         table = build_comparison_table(sweep_df, adam_baseline)
         if table.empty:
             continue
+
+        if min_seeds > 1:
+            before = len(table)
+            table = table[table["n_seeds"] >= min_seeds].reset_index(drop=True)
+            print(f"  filtered by n_seeds>={min_seeds}: {len(table)}/{before} configs kept")
+            if table.empty:
+                continue
 
         top = table.head(top_k).copy()
         top.insert(0, "algorithm", algo)
@@ -659,7 +667,11 @@ def plot_best_configs(
     output_dir: str = "./plots",
     bin_size: int = 10_000,
 ) -> None:
-    """Plot mean episodic return over training steps for best configs."""
+    """Plot mean episodic return over training steps for best configs.
+
+    Renders three horizontal panels (one per task), each with its own y-axis
+    so asterix/seaquest detail isn't compressed by space_invaders.
+    """
     if timeseries_df.empty:
         print("No data to plot.")
         return
@@ -667,88 +679,113 @@ def plot_best_configs(
     df = timeseries_df.copy()
     df["binned_step"] = (df["step"] / bin_size).round().astype(int) * bin_size
     df["step_M"] = df["binned_step"] / 1_000_000
+    # Tag each row with the active task based on its step
+    df["task"] = (df["binned_step"] // STEPS_PER_TASK).clip(upper=len(TASKS) - 1)
+    df["task"] = df["task"].apply(lambda i: TASKS[int(i)])
 
-    # Aggregate: mean across seeds per (algorithm, binned_step)
-    agg = df.groupby(["algorithm", "step_M"]).agg(
+    # Aggregate across seeds per (algorithm, task, step)
+    agg = df.groupby(["algorithm", "task", "step_M"]).agg(
         mean_return=("mean_return", "mean"),
-        q25=("mean_return", lambda x: float(np.percentile(x, 25)) if len(x) > 1 else float(x.mean())),
-        q75=("mean_return", lambda x: float(np.percentile(x, 75)) if len(x) > 1 else float(x.mean())),
+        q25=(
+            "mean_return",
+            lambda x: float(np.percentile(x, 25)) if len(x) > 1 else float(x.mean()),
+        ),
+        q75=(
+            "mean_return",
+            lambda x: float(np.percentile(x, 75)) if len(x) > 1 else float(x.mean()),
+        ),
         n_seeds=("seed", "nunique"),
     ).reset_index()
 
-    max_step = agg["step_M"].max()
+    task_titles = {
+        "space_invaders": "Space Invaders",
+        "asterix": "Asterix",
+        "seaquest": "Seaquest",
+    }
 
-    base = alt.Chart(agg).encode(
-        x=alt.X(
-            "step_M:Q",
-            title="Training Steps (Millions)",
-            scale=alt.Scale(domain=[0, max_step * 1.02], nice=True),
-            axis=alt.Axis(labelFontSize=12, titleFontSize=14),
-        ),
-        color=alt.Color(
-            "algorithm:N",
-            title="Algorithm",
-            legend=alt.Legend(
-                title=None,
-                orient="bottom",
-                labelFontSize=11,
-                symbolSize=150,
+    panels: list[alt.Chart] = []
+    for i, task in enumerate(TASKS):
+        task_df = agg[agg["task"] == task]
+        if task_df.empty:
+            continue
+
+        x_lo = i * STEPS_PER_TASK / 1_000_000
+        x_hi = (i + 1) * STEPS_PER_TASK / 1_000_000
+
+        base = alt.Chart(task_df).encode(
+            x=alt.X(
+                "step_M:Q",
+                title="Training Steps (Millions)",
+                scale=alt.Scale(domain=[x_lo, x_hi], nice=False),
+                axis=alt.Axis(labelFontSize=11, titleFontSize=13),
             ),
-        ),
-    )
+            color=alt.Color(
+                "algorithm:N",
+                title="Algorithm",
+                legend=alt.Legend(
+                    title=None,
+                    orient="bottom",
+                    labelFontSize=11,
+                    symbolSize=150,
+                )
+                if i == 0
+                else None,
+            ),
+        )
 
-    smoothed = base.transform_window(
-        frame=[-5, 5],
-        groupby=["algorithm"],
-        smooth_mean="mean(mean_return)",
-        smooth_q25="mean(q25)",
-        smooth_q75="mean(q75)",
-    )
+        smoothed = base.transform_window(
+            frame=[-10, 10],
+            groupby=["algorithm"],
+            smooth_mean="mean(mean_return)",
+            smooth_q25="mean(q25)",
+            smooth_q75="mean(q75)",
+        )
 
-    bands = smoothed.mark_area(opacity=0.15).encode(
-        y=alt.Y("smooth_q25:Q", title="Mean Episode Return"),
-        y2=alt.Y2("smooth_q75:Q"),
-    )
+        bands = smoothed.mark_area(opacity=0.18).encode(
+            y=alt.Y(
+                "smooth_q25:Q",
+                title="Mean Episode Return" if i == 0 else None,
+            ),
+            y2=alt.Y2("smooth_q75:Q"),
+        )
 
-    lines = smoothed.mark_line(strokeWidth=2).encode(
-        y=alt.Y("smooth_mean:Q"),
-        tooltip=[
-            alt.Tooltip("algorithm:N", title="Algorithm"),
-            alt.Tooltip("step_M:Q", title="Step (M)", format=".2f"),
-            alt.Tooltip("smooth_mean:Q", title="Mean Return", format=".1f"),
-            alt.Tooltip("n_seeds:Q", title="Seeds"),
-        ],
-    )
+        lines = smoothed.mark_line(strokeWidth=2).encode(
+            y=alt.Y("smooth_mean:Q"),
+            tooltip=[
+                alt.Tooltip("algorithm:N", title="Algorithm"),
+                alt.Tooltip("step_M:Q", title="Step (M)", format=".2f"),
+                alt.Tooltip("smooth_mean:Q", title="Mean Return", format=".2f"),
+                alt.Tooltip("n_seeds:Q", title="Seeds"),
+            ],
+        )
 
-    boundary_data = pd.DataFrame(
-        {"x": [STEPS_PER_TASK * i / 1_000_000 for i in range(1, len(TASKS))]}
-    )
-    boundary_lines = (
-        alt.Chart(boundary_data)
-        .mark_rule(strokeDash=[4, 3], strokeWidth=1, color="gray", opacity=0.6)
-        .encode(x="x:Q")
-    )
+        panel = alt.layer(bands, lines).properties(
+            width=340,
+            height=320,
+            title=alt.TitleParams(
+                text=task_titles.get(task, task),
+                fontSize=13,
+                fontWeight="bold",
+            ),
+        )
+        panels.append(panel)
 
-    task_label_data = pd.DataFrame([
-        {"x": (STEPS_PER_TASK * i + STEPS_PER_TASK / 2) / 1_000_000,
-         "task": t.replace("_", " ").title()}
-        for i, t in enumerate(TASKS)
-    ])
-    task_labels = (
-        alt.Chart(task_label_data)
-        .mark_text(dy=-10, fontSize=12, fontWeight="bold", color="gray")
-        .encode(x="x:Q", text="task:N")
-    )
+    if not panels:
+        print("No data to plot.")
+        return
 
-    chart = (bands + lines + boundary_lines + task_labels).properties(
-        width=900,
-        height=400,
-        title=alt.TitleParams(
-            text="Best Sweep Config per Algorithm vs Adam Baseline",
-            fontSize=16,
-            fontWeight="bold",
-        ),
-    ).configure_axis(grid=True, gridOpacity=0.3).interactive()
+    chart = (
+        alt.hconcat(*panels)
+        .resolve_scale(color="shared")
+        .properties(
+            title=alt.TitleParams(
+                text="Best Sweep Config per Algorithm vs Adam Baseline",
+                fontSize=15,
+                fontWeight="bold",
+            )
+        )
+        .configure_axis(grid=True, gridOpacity=0.3)
+    )
 
     out_dir = Path(output_dir)
     for ext in ("html", "png"):
@@ -770,6 +807,7 @@ def main(
     sweep_project: str = "cont-minatar-sweep",
     baseline_project: str = "cont-minatar",
     tail_frac: float = 0.2,
+    min_seeds: int = 1,
     output_csv: Optional[str] = None,
     output_dir: str = "./plots",
 ):
@@ -802,7 +840,13 @@ def main(
 
     if all:
         table = compare_all_algos(
-            wandb_entity, sweep_project, adam_baseline, tail_frac, top_k, max_age_days,
+            wandb_entity,
+            sweep_project,
+            adam_baseline,
+            tail_frac,
+            top_k,
+            max_age_days,
+            min_seeds=min_seeds,
         )
         print_all_table(table, adam_baseline, top_k)
 
@@ -833,6 +877,10 @@ def main(
         print(f"Seeds: {sweep_df['seed'].unique().tolist()}")
 
         table = build_comparison_table(sweep_df, adam_baseline)
+        if min_seeds > 1 and not table.empty:
+            before = len(table)
+            table = table[table["n_seeds"] >= min_seeds].reset_index(drop=True)
+            print(f"\nFiltered by n_seeds>={min_seeds}: {len(table)}/{before} configs kept")
         print_table(table, algo, adam_baseline)
 
     if output_csv:

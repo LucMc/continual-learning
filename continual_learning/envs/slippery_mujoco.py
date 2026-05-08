@@ -296,7 +296,8 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
       for that task (``range(d, d+1)``).
 
     ``delay_info_mode`` is forwarded to the wrapper and controls whether the
-    augmented obs includes one-hot / scalar / no current-delay channel.
+    augmented obs includes one-hot / scalar / no current-delay channel, or
+    hides the action buffer entirely.
     """
 
     def __init__(
@@ -454,10 +455,9 @@ class ContinualDelayedAnt(JittableContinualLearningEnv):
 
     @property
     def observation_spec(self) -> jax.ShapeDtypeStruct:
-        base = (
-            self._base_obs_dim
-            + max(self.overall_act_delay_range.stop, 1) * self._action_dim
-        )
+        base = self._base_obs_dim
+        if self.delay_info_mode != "blind":
+            base += max(self.overall_act_delay_range.stop, 1) * self._action_dim
         if self.delay_info_mode == "one_hot":
             aug = base + self.overall_obs_delay_range.stop + self.overall_act_delay_range.stop
         elif self.delay_info_mode == "scalar":

@@ -41,6 +41,13 @@ Constant per-task delay sampled at boundary (no oracle, max=8)::
         --overall-max-obs-delay 9 --overall-max-act-delay 9 \
         --delay-mode task_boundary_constant --delay-info-mode none \
         --num-tasks 40 --steps-per-task 20000000
+
+Blind constant per-task delay (no oracle, no action history)::
+
+    python experiments/td_ant.py \
+        --overall-max-obs-delay 9 --overall-max-act-delay 9 \
+        --delay-mode task_boundary_constant --delay-info-mode blind \
+        --num-tasks 40 --steps-per-task 20000000
 """
 
 import time
@@ -97,8 +104,9 @@ class Args:
     # alongside the delayed obs and action buffer.
     #   "one_hot": current alpha/kappa one-hots (oracle; original td_ant default)
     #   "scalar":  two scalars in [0,1]
-    #   "none":    omit — agent must infer delay from action-history dynamics
-    delay_info_mode: Literal["one_hot", "scalar", "none"] = "one_hot"
+    #   "none":    omit delay info, but keep action history
+    #   "blind":   omit delay info and action history; agent sees delayed obs only
+    delay_info_mode: Literal["one_hot", "scalar", "none", "blind"] = "one_hot"
 
     # Training schedule
     num_tasks: int = 2

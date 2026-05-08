@@ -19,6 +19,7 @@ def _make_delay_env(
     num_envs: int = 4,
     episode_length: int = 200,
     seed: int = 0,
+    delay_info_mode: str = "one_hot",
 ):
     base = Ant(backend="generalized")
     wrapped = brax_envs.training.wrap(
@@ -34,6 +35,7 @@ def _make_delay_env(
         base_obs_dim=int(base.observation_size),
         action_dim=int(base.action_size),
         seed=seed,
+        delay_info_mode=delay_info_mode,
     )
     keys = jax.random.split(jax.random.PRNGKey(seed), num_envs)
     reset = jax.jit(delayed.reset)
@@ -90,6 +92,36 @@ def test_fixed_two_step_obs_delay():
         assert jnp.all(state.info["realised_act_delay"] == 0)
 
     # For t >= 2, delayed_obs at history index t must equal raw_obs at history t-2.
+    for t in range(2, len(delayed_history)):
+        np.testing.assert_allclose(
+            np.asarray(delayed_history[t]), np.asarray(raw_history[t - 2])
+        )
+
+
+def test_blind_mode_omits_action_buffer_and_delay_info():
+    """blind mode exposes only the delayed raw observation to the policy."""
+    delayed, reset, step, keys, obs_dim, action_dim = _make_delay_env(
+        obs_delay_range=range(2, 3),
+        act_delay_range=range(3, 4),
+        overall_obs_delay_max=5,
+        overall_act_delay_max=5,
+        num_envs=4,
+        delay_info_mode="blind",
+    )
+    assert delayed.observation_size == obs_dim
+
+    state = reset(keys)
+    assert state.obs.shape == (4, obs_dim)
+
+    raw_history: list[jnp.ndarray] = []
+    delayed_history: list[jnp.ndarray] = []
+    for _ in range(15):
+        action = jnp.zeros((4, action_dim), dtype=jnp.float32)
+        state = step(state, action)
+        assert state.obs.shape == (4, obs_dim)
+        raw_history.append(state.info["delay_obs_buffer"][:, -1, :])
+        delayed_history.append(state.obs)
+
     for t in range(2, len(delayed_history)):
         np.testing.assert_allclose(
             np.asarray(delayed_history[t]), np.asarray(raw_history[t - 2])

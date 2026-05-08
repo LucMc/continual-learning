@@ -68,9 +68,9 @@ class BraxRandomDelayWrapper(Wrapper):
                 f"act_delay_range {act_delay_range} must lie inside "
                 f"[0, {overall_act_delay_max})"
             )
-        if delay_info_mode not in ("one_hot", "scalar", "none"):
+        if delay_info_mode not in ("one_hot", "scalar", "none", "blind"):
             raise ValueError(
-                f"delay_info_mode={delay_info_mode!r}; must be 'one_hot', 'scalar', or 'none'"
+                f"delay_info_mode={delay_info_mode!r}; must be 'one_hot', 'scalar', 'none', or 'blind'"
             )
 
         self.num_envs = num_envs
@@ -97,11 +97,14 @@ class BraxRandomDelayWrapper(Wrapper):
         #   "one_hot" — alpha + kappa one-hots (oracle; original behaviour)
         #   "scalar"  — two scalars in [0,1]: alpha/(α_max-1), kappa/(κ_max-1)
         #   "none"    — omitted entirely; agent must infer delay from act_buffer
+        #   "blind"   — omit act_buffer and delay info; agent sees delayed obs only
         self.delay_info_mode = delay_info_mode
 
     @property
     def observation_size(self) -> int:
-        base = self.base_obs_dim + self.act_buf_size * self.action_dim
+        base = self.base_obs_dim
+        if self.delay_info_mode != "blind":
+            base += self.act_buf_size * self.action_dim
         if self.delay_info_mode == "one_hot":
             return base + self.overall_obs_delay_max + self.overall_act_delay_max
         if self.delay_info_mode == "scalar":
@@ -128,8 +131,9 @@ class BraxRandomDelayWrapper(Wrapper):
         delayed_obs = jnp.take_along_axis(
             obs_buffer, obs_indices[:, None, None], axis=1
         ).squeeze(1)
-        act_buffer_flat = act_buffer.reshape(self.num_envs, -1)
-        parts = [delayed_obs, act_buffer_flat]
+        parts = [delayed_obs]
+        if self.delay_info_mode != "blind":
+            parts.append(act_buffer.reshape(self.num_envs, -1))
         if self.delay_info_mode == "one_hot":
             parts.append(jax.nn.one_hot(alphas, self.overall_obs_delay_max))
             parts.append(jax.nn.one_hot(kappas, self.overall_act_delay_max))
