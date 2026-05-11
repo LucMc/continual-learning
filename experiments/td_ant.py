@@ -61,6 +61,7 @@ from chex import dataclass
 
 from continual_learning.configs import (
     AdamConfig,
+    MuonConfig,
     CbpConfig,
     CprConfig,
     LoggingConfig,
@@ -81,7 +82,7 @@ from continual_learning.trainers.ppo_trainer import JittedContinualPPOTrainer
 from continual_learning.types import Activation, StdType
 
 
-OPTIMIZER_NAMES = ("adam", "regrama", "cpr", "redo", "cbp", "shrink_and_perturb")
+OPTIMIZER_NAMES = ("muon", "adam", "regrama", "cpr", "redo", "cbp", "shrink_and_perturb")
 
 
 @dataclass(frozen=True)
@@ -143,12 +144,14 @@ def _alternating_ramp_schedule(num_increments: int) -> list[tuple[int, int]]:
 def _get_optimizer_config(name: str, seed: int, lr: float = 1e-3):
     if name == "adam":
         return AdamConfig(learning_rate=lr)
+    if name == "muon":
+        return MuonConfig(learning_rate=1e-4)
     if name == "regrama":
         return RegramaConfig(
             tx=AdamConfig(learning_rate=lr),
             update_frequency=1000,
-            score_threshold=0.0095,
-            max_reset_frac=0.05,
+            score_threshold=0.2,
+            max_reset_frac=None,
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         )
@@ -156,18 +159,19 @@ def _get_optimizer_config(name: str, seed: int, lr: float = 1e-3):
         return CprConfig(
             tx=AdamConfig(learning_rate=lr),
             seed=seed,
-            decay_rate=0.9,
-            sharpness=10,
-            threshold=0.5,
+            decay_rate=0.99,
+            replacement_rate=0.0015,
+            sharpness=16,
+            threshold=1,
             update_frequency=1000,
-            transform_type="linear",
+            transform_type="sigmoid",
         )
     if name == "redo":
         return RedoConfig(
             tx=AdamConfig(learning_rate=lr),
             update_frequency=1000,
-            score_threshold=0.055,
-            max_reset_frac=0.05,
+            score_threshold=0.1,
+            max_reset_frac=None,
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         )
@@ -175,7 +179,7 @@ def _get_optimizer_config(name: str, seed: int, lr: float = 1e-3):
         return CbpConfig(
             tx=AdamConfig(learning_rate=lr),
             decay_rate=0.99,
-            replacement_rate=0.0002,
+            replacement_rate=0.003,
             maturity_threshold=100,
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -185,8 +189,8 @@ def _get_optimizer_config(name: str, seed: int, lr: float = 1e-3):
             param_noise_fn=jax.nn.initializers.lecun_normal(),
             tx=AdamConfig(learning_rate=lr),
             seed=seed,
-            shrink=1 - 0.001,
-            perturb=0.005,
+            shrink=1 - 1e-3,
+            perturb=5e-3,
             every_n=1000,
         )
     raise ValueError(f"Unknown optimizer name: {name!r}")

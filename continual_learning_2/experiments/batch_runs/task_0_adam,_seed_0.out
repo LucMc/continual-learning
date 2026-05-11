@@ -1,0 +1,1265 @@
+wandb: Currently logged in as: lucmc (cavlab) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.21.0
+wandb: Run data is saved locally in /mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/batch_runs/wandb/run-20250918_184942-cvk40xd4
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run ccbp_0
+wandb: ⭐️ View project at https://wandb.ai/lucmc/crl_experiments
+wandb: 🚀 View run at https://wandb.ai/lucmc/crl_experiments/runs/cvk40xd4
+Running algorithms: ['ccbp']
+Config: CcbpConfig(tx=AdamConfig(learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-08), weight_init_fn=<function variance_scaling.<locals>.init at 0x7f3185f739c0>, seed=0, replacement_rate=0.1, sharpness=5, threshold=0.2, decay_rate=0.99, update_frequency=1000, transform_type='sigmoid')
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 0
+- Evaluating on task 1
+- Evaluating on task 1
+- Evaluating on task 1
+- Evaluating on task 1
+- Evaluating oRunning algorithms: ['standard']
+0, SPS: 0.0
+2560000, SPS: 4514.05224609375
+5120000, SPS: 5092.75830078125
+7680000, SPS: 5319.48974609375
+10240000, SPS: 5444.35791015625
+12800000, SPS: 5521.482421875
+15360000, SPS: 5575.9345703125
+17920000, SPS: 5616.9501953125
+20480000, SPS: 5649.28466796875
+23040000, SPS: 5677.33056640625
+25600000, SPS: 5700.68505859375
+28160000, SPS: 5720.52392578125
+30720000, SPS: 5736.46142578125
+33280000, SPS: 5751.02490234375
+35840000, SPS: 5763.00537109375
+38400000, SPS: 5773.71240234375
+40960000, SPS: 5785.029296875
+43520000, SPS: 5793.9013671875
+46080000, SPS: 5801.9677734375
+48640000, SPS: 5809.56591796875
+51200000, SPS: 5816.7373046875
+53760000, SPS: 5823.68603515625
+56320000, SPS: 5830.17431640625
+58880000, SPS: 5836.72607421875
+61440000, SPS: 5841.84228515625
+64000000, SPS: 5846.75390625
+66560000, SPS: 5851.63330078125
+69120000, SPS: 5856.13818359375
+71680000, SPS: 5859.7109375
+74240000, SPS: 5863.9970703125
+76800000, SPS: 5867.9658203125
+79360000, SPS: 5871.984375
+81920000, SPS: 5875.3359375
+84480000, SPS: 5878.58056640625
+87040000, SPS: 5878.27197265625
+89600000, SPS: 5876.13818359375
+92160000, SPS: 5874.3662109375
+94720000, SPS: 5872.6875
+97280000, SPS: 5871.51123046875
+99840000, SPS: 5870.92236328125
+102400000, SPS: 5870.1611328125
+104960000, SPS: 5869.94873046875
+107520000, SPS: 5869.5048828125
+110080000, SPS: 5868.76611328125
+112640000, SPS: 5868.1943359375
+115200000, SPS: 5867.71923828125
+117760000, SPS: 5867.40576171875
+120320000, SPS: 5867.19140625
+122880000, SPS: 5857.8056640625
+125440000, SPS: 5857.41845703125
+128000000, SPS: 5856.994140625
+130560000, SPS: 5856.3388671875
+133120000, SPS: 5856.43408203125
+135680000, SPS: 5856.69091796875
+138240000, SPS: 5856.615234375
+140800000, SPS: 5856.4072265625
+143360000, SPS: 5856.525390625
+145920000, SPS: 5856.47265625
+148480000, SPS: 5856.49609375
+151040000, SPS: 5856.826171875
+153600000, SPS: 5856.984375
+156160000, SPS: 5856.90283203125
+158720000, SPS: 5856.783203125
+161280000, SPS: 5857.01904296875
+163840000, SPS: 5857.12451171875
+166400000, SPS: 5857.24072265625
+168960000, SPS: 5857.42236328125
+171520000, SPS: 5857.49609375
+174080000, SPS: 5857.38232421875
+176640000, SPS: 5857.4921875
+179200000, SPS: 5857.771484375
+181760000, SPS: 5858.12744140625
+184320000, SPS: 5858.6259765625
+186880000, SPS: 5859.12353515625
+189440000, SPS: 5859.48095703125
+192000000, SPS: 5859.97802734375
+194560000, SPS: 5860.23828125
+197120000, SPS: 5860.607421875
+199680000, SPS: 5861.06689453125
+202240000, SPS: 5861.38037109375
+204800000, SPS: 5861.44677734375
+207360000, SPS: 5861.91162109375
+209920000, SPS: 5862.37255859375
+212480000, SPS: 5862.64794921875
+215040000, SPS: 5862.94580078125
+217600000, SPS: 5863.30810546875
+220160000, SPS: 5863.60693359375
+222720000, SPS: 5863.81201171875
+225280000, SPS: 5864.21923828125
+227840000, SPS: 5864.4716796875
+230400000, SPS: 5864.89111328125
+232960000, SPS: 5865.29345703125
+235520000, SPS: 5865.6416015625
+238080000, SPS: 5865.77880859375
+240640000, SPS: 5865.7099609375
+243200000, SPS: 5865.79052734375
+245760000, SPS: 5861.66455078125
+248320000, SPS: 5861.94970703125
+250880000, SPS: 5862.4384765625
+253440000, SPS: 5862.83349609375
+256000000, SPS: 5863.193359375
+258560000, SPS: 5863.79931640625
+261120000, SPS: 5864.32568359375
+263680000, SPS: 5865.07958984375
+266240000, SPS: 5865.86865234375
+268800000, SPS: 5866.86376953125
+271360000, SPS: 5867.70849609375
+273920000, SPS: 5868.5009765625
+276480000, SPS: 5869.23828125
+279040000, SPS: 5870.02587890625
+281600000, SPS: 5870.837890625
+284160000, SPS: 5871.57763671875
+286720000, SPS: 5872.34033203125
+289280000, SPS: 5873.16943359375
+291840000, SPS: 5874.06201171875
+294400000, SPS: 5874.92724609375
+296960000, SPS: 5875.6875
+299520000, SPS: 5876.3994140625
+302080000, SPS: 5876.9951171875
+304640000, SPS: 5877.65185546875
+307200000, SPS: 5878.30322265625
+309760000, SPS: 5878.99072265625
+312320000, SPS: 5879.529296875
+314880000, SPS: 5880.2158203125
+317440000, SPS: 5881.0546875
+320000000, SPS: 5881.63330078125
+322560000, SPS: 5882.22607421875
+325120000, SPS: 5882.79443359375
+327680000, SPS: 5883.29931640625
+330240000, SPS: 5883.91357421875
+332800000, SPS: 5884.57763671875
+335360000, SPS: 5885.2255859375
+Traceback (most recent call last):
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/batch_runs/../slippery_humanoid.py", line 177, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/batch_runs/../slippery_humanoid.py", line 169, in run_all_slippery_humanoid
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/trainers/continual_rl.py", line 431, in train
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/traceback_util.py", line 182, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/pjit.py", line 340, in cache_miss
+    pgle_profiler) = _python_pjit_helper(fun, jit_info, *args, **kwargs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/pjit.py", line 191, in _python_pjit_helper
+    out_flat, compiled, profiler = _pjit_call_impl_python(*args_flat, **p.params)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/pjit.py", line 1831, in _pjit_call_impl_python
+    return compiled.unsafe_call(*args), compiled, pgle_profiler
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/profiler.py", line 334, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/jax/_src/interpreters/pxla.py", line 1289, in __call__
+    results = self.xla_executable.execute_sharded(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mstandard_new_0[0m at: [34mhttps://wandb.ai/lucmc/crl_experiments/runs/igksa6rd[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20250918_182951-igksa6rd/logs[0m
+ 31
+- Evaluating on task 31
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 32
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 33
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on ta34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 34
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 35
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 36
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 37
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 38
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 39
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 40
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 41
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 42
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 43
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 44
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 45
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 46
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 47
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 48
+- Evaluating on task 49
+- Evaluating on task 49
+- Evaluating on task 49
+- Evaluating on task 49
+- Evaluating on task 49
+- E- Evaluating on task 49
+- Evaluating on task 49
+- Evaluating on task 49
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 50
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 51
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 52
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluation task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 53
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 54
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 55
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 56
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 57
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 58
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 59
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 60
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 61
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 62
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 63
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 64
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 65
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 66
+- Evaluating on task 67
+- Evaluating on task 67
+- Evaluating on task 67
+- Evaluating on task 67
+- Evaluating on task 67
+- E- Evaluating on task 67
+- Evaluating on task 67
+- Evaluating on task 67
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 68
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 69
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 70
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 71
+- Evaluating on task 72
+- Evaluating on task 72
+- luating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 72
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 73
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 74
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 75
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 76
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 77
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 78
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 79
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 80
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 81
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 82
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 83
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 84
+- Evaluating on task 85
+- Evaluating on task 85
+- Evaluating on task 85
+- Evaluating on task 85
+- E- Evaluating on task 85
+- Evaluating on task 85
+- Evaluating on task 85
+- Evaluating on task 85
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 86
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 87
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 88
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 89
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 90
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 91
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 92
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 93
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 94
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 95
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 96
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 97
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 98
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 99
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 100
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 101
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 102
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 103
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 104
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 105
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 106
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 107
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 108
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 109
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 110
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 111
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 112
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 113
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 114
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 115
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 116
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 117
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 118
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 119
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 120
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 121
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 122
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 123
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 124
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 125
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 126
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 127
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 128
+- Evaluating on task 129
+- Evaluating on task 129
+- Evaluating on task 129
+- Evaluating on task 129
+- Evaluating on task 129
+- Evaluating on task 129
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+    exitcode = _main(fd, parent_sentinel)
+    exitcode = _main(fd, parent_sentinel)
+    exitcode = _main(fd, parent_sentinel)
+    exitcode = _main(fd, parent_sentinel)
+    exitcode = _main(fd, parent_sentinel)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+    prepare(preparation_data)
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+    prepare(preparation_data)
+    prepare(preparation_data)
+    prepare(preparation_data)
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+    prepare(preparation_data)
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+Traceback (most recent call last):
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+    _fixup_main_from_path(data['init_main_from_path'])
+    _fixup_main_from_path(data['init_main_from_path'])
+    _fixup_main_from_path(data['init_main_from_path'])
+    _fixup_main_from_path(data['init_main_from_path'])
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    _fixup_main_from_path(data['init_main_from_path'])
+    _fixup_main_from_path(data['init_main_from_path'])
+    exitcode = _main(fd, parent_sentinel)
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+    main_content = runpy.run_path(main_path,
+    main_content = runpy.run_path(main_path,
+    main_content = runpy.run_path(main_path,
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 287, in run_path
+    main_content = runpy.run_path(main_path,
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+    main_content = runpy.run_path(main_path,
+    prepare(preparation_data)
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+    main_content = runpy.run_path(main_path,
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 88, in _run_code
+  File "<frozen runpy>", line 287, in run_path
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+    import modal
+    _fixup_main_from_path(data['init_main_from_path'])
+ModuleNotFoundError: No module named 'modal'
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    main_content = runpy.run_path(main_path,
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 122, in spawn_main
+    import modal
+ModuleNotFoundError: No module named 'modal'
+    exitcode = _main(fd, parent_sentinel)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+  File "/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/perm_mnist.py", line 9, in <module>
+    import modal
+ModuleNotFoundError: No module named 'modal'
+ERROR:absl:Processing Failed. Shutting down.
+Traceback (most recent call last):
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/batch_runs/../perm_mnist.py", line 149, in <module>
+    weight_init_fn=jax.nn.initializers.he_uniform(),
+    ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/experiments/batch_runs/../perm_mnist.py", line 142, in run_all_perm_mnist
+    update_frequency=100,
+    ^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/trainers/continual_supervised_learning.py", line 378, in train
+    metrics = self.dataset.evaluate(self.network, forgetting=False)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/data/base.py", line 287, in evaluate
+    latest_metrics = self._eval_task(model, self._get_task_test(self.current_task))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/data/base.py", line 294, in _eval_task
+    for data in test_set:
+                ^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/data_loader.py", line 479, in __next__
+    result_record = next(self._iterator)
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/data_loader.py", line 380, in _iterator_with_context
+    yield from it
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 784, in __next__
+    raise element
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 616, in _process_elements_in_grain_pool
+    for element in g_pool:
+                   ^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 505, in __next__
+    raise RuntimeError(
+RuntimeError: Grain worker process 0 was terminated unexpectedly with exit code 1. Search the logs above for the source of the crash.
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mccbp_0[0m at: [34mhttps://wandb.ai/lucmc/crl_experiments/runs/cvk40xd4[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20250918_184942-cvk40xd4/logs[0m
+/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/resource_tracker.py:255: UserWarning: resource_tracker: There appear to be 2 leaked shared_memory objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/continual_learning_2/data/base.py", line 294, in _eval_task
+    for data in test_set:
+                ^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/data_loader.py", line 479, in __next__
+    result_record = next(self._iterator)
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/data_loader.py", line 380, in _iterator_with_context
+    yield from it
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 784, in __next__
+    raise element
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 616, in _process_elements_in_grain_pool
+    for element in g_pool:
+                   ^^^^^^
+  File "/mnt/fast/nobackup/users/lm01065/continual-learning/.venv/lib/python3.12/site-packages/grain/_src/python/grain_pool.py", line 505, in __next__
+    raise RuntimeError(
+RuntimeError: Grain worker process 0 was terminated unexpectedly with exit code 1. Search the logs above for the source of the crash.
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mccbp_0[0m at: [34mhttps://wandb.ai/lucmc/crl_experiments/runs/p4irpjia[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20250918_184826-p4irpjia/logs[0m
+/mnt/fast/nobackup/users/lm01065/.local/share/uv/python/cpython-3.12.9-linux-x86_64-gnu/lib/python3.12/multiprocessing/resource_tracker.py:255: UserWarning: resource_tracker: There appear to be 2 leaked shared_memory objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+ng: resource_tracker: There appear to be 2 leaked shared_memory objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

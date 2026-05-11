@@ -9,7 +9,7 @@
 #SBATCH --time=02-23:00:00
 #SBATCH -o slurm.%N.%j.out
 #SBATCH -e slurm.%N.%j.err
-#SBATCH --array=0-5   # 6 algos x 2 seeds = 12 jobs
+#SBATCH --array=0-1   # 6 algos x 2 seeds = 12 jobs
 
 # Time-delayed Ant constant-per-task sweep on Surrey aisurrey.
 #
@@ -36,8 +36,8 @@
 VENV_DIR="../../../.venv"
 script_name="${1:-td_ant.py}"
 
-algos=("adam" "regrama" "cpr" "redo" "cbp" "shrink_and_perturb")
-seeds=(0)
+algos=("muon" "adam" "regrama" "cpr" "redo" "cbp" "shrink_and_perturb")
+seeds=(1)
 
 num_algos=${#algos[@]}
 num_seeds=${#seeds[@]}
@@ -50,12 +50,12 @@ seed="${seeds[$seed_idx]}"
 output_filename="td_ant_const_${SLURM_ARRAY_TASK_ID}_${algo}_seed_${seed}.out"
 
 # Constant-per-task config — overall ranges define the i.i.d. uniform support.
-overall_obs=9
-overall_act=9
+overall_obs=10
+overall_act=10
 delay_mode="task_boundary_constant"
-delay_info_mode="blind"
-num_tasks=100
-steps_per_task=20000000
+delay_info_mode="none"
+num_tasks=50
+steps_per_task=40000000
 num_envs=2048
 
 wandb_entity="lucmc"
