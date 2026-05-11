@@ -266,7 +266,7 @@ def run_config(
     fixed_act_delay: int = 0,
     ramp_num_increments: int = 20,
     delay_info_mode: str = "one_hot",
-    num_tasks: int = 40,
+    num_tasks: int = 10,
     steps_per_task: int = 40_000_000,
     num_envs: int = 2048,
     episode_length: int = 1000,
@@ -415,7 +415,7 @@ def run_all_configs(
     fixed_act_delay: int = 0,
     ramp_num_increments: int = 20,
     delay_info_mode: str = "one_hot",
-    num_tasks: int = 40,
+    num_tasks: int = 10,
     steps_per_task: int = 40_000_000,
     num_envs: int = 2048,
     episode_length: int = 1000,
@@ -485,7 +485,7 @@ class Args:
     ramp_num_increments: int = 20
     delay_info_mode: Literal["one_hot", "scalar", "none", "blind"] = "one_hot"
 
-    num_tasks: int = 40
+    num_tasks: int = 10
     steps_per_task: int = 40_000_000
     num_envs: int = 2048
     episode_length: int = 1000
