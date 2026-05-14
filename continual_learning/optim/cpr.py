@@ -44,14 +44,14 @@ def get_updated_utility(
     return updated_utility
 
 
-def continuous_reset_weights(
+def calibrated_reset_weights(
     key_tree: PRNGKeyArray,
     weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     replacement_rate: float = 0.012,
-    sharpness: float = 16,  # How linear/expone)ntial? inf=hard resets
-    threshold: float = 0.95,  # Where is the cut off to hard reset
+    sharpness: float = 16,  # Shape of calibration curve
+    threshold: float = 1.0,  # Inflection point, typically stays at 1.0
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
 ):
     all_layer_names = list(weights.keys())
@@ -113,7 +113,7 @@ def continuous_reset_weights(
 
         logs[layer_name] = {
             "nodes_reset": reset_prop.mean(),
-            "low_utility": jnp.sum(utilities[layer_name] < 0.95),
+            "low_utility": jnp.sum(utilities[layer_name] < threshold),
             "mean_utils": jnp.mean(utilities[layer_name]),
         }
 
@@ -126,14 +126,14 @@ def cpr(
     seed: int,
     replacement_rate: float = 0.012,
     sharpness: float = 16,
-    threshold: float = 0.95,
+    threshold: float = 1.0,
     decay_rate: float = 0.99,
     update_frequency: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
 ) -> GradientTransformationExtraArgsReset:
-    """Continuous Partial Resets (CPR)"""
+    """Calibrated Partial Resets (CPR)"""
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
@@ -179,7 +179,7 @@ def cpr(
             _logs = {
                 "std_util": all_utils.std(),
                 "nodes_reset": 0.0,  # state.logs['nodes_reset'],
-                "low_utility": jnp.sum(all_utils < 0.95),
+                "low_utility": jnp.sum(all_utils < threshold),
                 "mean_utils": all_utils.mean(),
             }
 
@@ -212,7 +212,7 @@ def cpr(
             )
 
             # reset weights given mask
-            _weights, reset_logs = continuous_reset_weights(
+            _weights, reset_logs = calibrated_reset_weights(
                 key_tree,
                 # reset_mask,  # No out_layer
                 weights,  # Yes out_layer
@@ -224,7 +224,6 @@ def cpr(
                 transform_type,
             )
 
-            # Expermiment: reset bias/continuous reset bias/ leave bias alone/ bias correction
             _biases = biases
 
             new_params = {}
@@ -234,7 +233,6 @@ def cpr(
             # avg_util = jax.tree.map(lambda v: v.mean(), _utility)
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
-            # Logging TODO: Add stats from continuous resetweights
             for layer_name in weights.keys():  # Exclude output layer
                 new_params[layer_name] = {
                     "kernel": _weights[layer_name],
@@ -242,8 +240,6 @@ def cpr(
                 }
 
             for layer_name in _utility.keys():
-                # _logs["avg_age"] += avg_ages[layer_name]
-                # _logs["avg_util"] += avg_util[layer_name]
                 _logs["std_util"] += std_util[layer_name]
                 _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
                 _logs["low_utility"] += reset_logs[layer_name]["low_utility"]
@@ -262,7 +258,6 @@ def cpr(
                 time_step=state.time_step + 1,
             )
             flat_new_params, _ = jax.tree.flatten(new_params)
-            # Experiment: Update bias and tx_state
 
             return (
                 jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
