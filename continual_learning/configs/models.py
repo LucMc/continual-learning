@@ -45,17 +45,3 @@ class CNNConfig(struct.PyTreeNode):
     bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
     use_bias: bool = True
     dtype: jnp.dtype = jnp.bfloat16
-
-
-@struct.dataclass(frozen=True)
-class ResNetConfig(struct.PyTreeNode):
-    output_size: int = 1
-
-    # ConvNet feature extractor
-    stage_sizes: Sequence[int] = (2, 2, 2, 2)
-    num_filters: int = 64
-
-    activation_fn: Activation = Activation.ReLU
-    kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
-    bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
-    dtype: jnp.dtype = jnp.bfloat16

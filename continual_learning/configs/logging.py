@@ -8,7 +8,7 @@ class LoggingConfig:
     run_name: str
     wandb_entity: str
     wandb_project: str
-    wandb_mode: Literal["online", "offline", "disabled"] = "online"
+    wandb_mode: Literal["online", "offline", "disabled"] = "disabled"
     group: str | None = None
 
     checkpoint_dir: Path = Path("./checkpoints").absolute()

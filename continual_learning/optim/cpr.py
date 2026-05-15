@@ -50,18 +50,34 @@ def calibrated_reset_weights(
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     replacement_rate: float = 0.012,
-    sharpness: float = 16,  # Shape of calibration curve
-    threshold: float = 1.0,  # Inflection point, typically stays at 1.0
+    sharpness: float = 16,
+    threshold: float = 0.95,
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
+    out_layer_name: str = "output",
 ):
-    all_layer_names = list(weights.keys())
+    """Partially reset low-utility neurons.
+
+    Keys are full-path tuples (e.g. ('q1','main','0_conv_16_0')) to support
+    nested sub-networks like twin Q-critics.  Outgoing-weight resets only
+    happen between consecutive layers in the same sub-network chain
+    (same key prefix).
+    """
+    all_keys = list(weights.keys())
     logs = {}
 
-    assert all_layer_names[-1] == "output", "Last layer should be Dense with name 'output'"
+    # Pre-compute next layer within the same sub-network chain
+    next_in_chain = {}
+    for i, key in enumerate(all_keys):
+        if i + 1 < len(all_keys):
+            next_key = all_keys[i + 1]
+            if key[:-1] == next_key[:-1]:  # Same prefix → same chain
+                next_in_chain[key] = next_key
 
-    for idx, layer_name in enumerate(all_layer_names[:-1]):
+    hidden_keys = [k for k in all_keys if k[-1] != out_layer_name]
+
+    for layer_key in hidden_keys:
         # Reset incoming weights
-        init_weights = weight_init_fn(key_tree[layer_name], weights[layer_name].shape)
+        init_weights = weight_init_fn(key_tree[layer_key], weights[layer_key].shape)
 
         match transform_type:
             case "exp": transform = lambda x: jnp.minimum(jnp.exp(-sharpness * (x - threshold)), 1.0)
@@ -71,53 +87,55 @@ def calibrated_reset_weights(
 
         transformed_utilities = jax.tree.map(transform, utilities)
 
-        reset_prop = replacement_rate * transformed_utilities[layer_name]
+        reset_prop = replacement_rate * transformed_utilities[layer_key]
 
         keep_prop = 1 - reset_prop
 
-        weights[layer_name] = (keep_prop * weights[layer_name]) + (reset_prop * init_weights)
+        weights[layer_key] = (keep_prop * weights[layer_key]) + (reset_prop * init_weights)
 
-        # Reset outgoing weights
-        if idx + 1 < len(all_layer_names):
-            next_layer = all_layer_names[idx + 1]
-            out_weight_shape = weights[next_layer].shape
+        # Reset outgoing weights (only within same sub-network)
+        if layer_key in next_in_chain:
+            next_key = next_in_chain[layer_key]
+            out_weight_shape = weights[next_key].shape
 
             # Handle shape transitions
             if len(out_weight_shape) == 2:  # Dense layer
-                if len(weights[layer_name].shape) == 4:  # Conv -> Dense
+                if len(weights[layer_key].shape) == 4:  # Conv -> Dense
                     spatial_size = (
-                        out_weight_shape[0] // transformed_utilities[layer_name].size
+                        out_weight_shape[0] // transformed_utilities[layer_key].size
                     )
                     out_utilities_1d = jnp.tile(
-                        transformed_utilities[layer_name], spatial_size
+                        transformed_utilities[layer_key], spatial_size
                     )
 
                 else:  # Dense -> Dense
-                    out_utilities_1d = transformed_utilities[layer_name]
+                    out_utilities_1d = transformed_utilities[layer_key]
 
             elif len(out_weight_shape) == 4:  # Conv layer
-                out_utilities_1d = transformed_utilities[layer_name]
+                out_utilities_1d = transformed_utilities[layer_key]
             else:
                 raise ValueError(f"Unexpected shape {out_weight_shape}")
 
             expanded_utils = utils.expand_mask_for_weights(
-                out_utilities_1d, weights[next_layer].shape, mask_type="outgoing"
+                out_utilities_1d, weights[next_key].shape, mask_type="outgoing"
             )
 
             out_reset_prop = replacement_rate * expanded_utils
             out_keep_prop = 1 - out_reset_prop
 
-            weights[next_layer] = (
-                out_keep_prop * weights[next_layer]
+            weights[next_key] = (
+                out_keep_prop * weights[next_key]
             )  # + (out_reset_prop * out_init_weights) # Decay towards zero
 
-        logs[layer_name] = {
+        logs[layer_key] = {
             "nodes_reset": reset_prop.mean(),
-            "low_utility": jnp.sum(utilities[layer_name] < threshold),
-            "mean_utils": jnp.mean(utilities[layer_name]),
+            "low_utility": jnp.sum(utilities[layer_key] < threshold),
+            "mean_utils": jnp.mean(utilities[layer_key]),
         }
 
-    logs[all_layer_names[-1]] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
+    for k in all_keys:
+        if k[-1] == out_layer_name:
+            logs[k] = {"nodes_reset": 0.0, "low_utility": 0, "mean_utils": 0.0}
 
     return weights, logs
 
@@ -126,19 +144,19 @@ def cpr(
     seed: int,
     replacement_rate: float = 0.012,
     sharpness: float = 16,
-    threshold: float = 1.0,
+    threshold: float = 0.95,
     decay_rate: float = 0.99,
     update_frequency: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
 ) -> GradientTransformationExtraArgsReset:
-    """Calibrated Partial Resets (CPR)"""
+    """Calibrated Partial Resets (CPR)."""
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
-        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-        biases.pop(out_layer_name)
+        biases = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
+        biases = {k: v for k, v in biases.items() if k[-1] != out_layer_name}
 
         return CprOptimState(
             # initial_weights=deepcopy(weights),
@@ -166,9 +184,8 @@ def cpr(
 
         def no_update(updates):
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
-
-            weight_grads.pop(out_layer_name)
+            weight_grads = {k[:-1]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {k: v for k, v in weight_grads.items() if k[-1] != out_layer_name}
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
@@ -194,17 +211,17 @@ def cpr(
         ) -> Tuple[optax.Updates, CprOptimState, optax.OptState | None]:
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            weights = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
             # out_w_mag = utils.get_out_weights_mag(weights)
 
             new_rng, util_key = random.split(state.rng)
             key_tree = utils.gen_key_tree(util_key, weights)
 
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {k[:-1]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {k: v for k, v in weight_grads.items() if k[-1] != out_layer_name}
 
-            weight_grads.pop(out_layer_name)
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
                 weight_grads,
@@ -214,7 +231,6 @@ def cpr(
             # reset weights given mask
             _weights, reset_logs = calibrated_reset_weights(
                 key_tree,
-                # reset_mask,  # No out_layer
                 weights,  # Yes out_layer
                 _utility,
                 weight_init_fn,
@@ -222,28 +238,25 @@ def cpr(
                 sharpness,
                 threshold,
                 transform_type,
+                out_layer_name,
             )
 
+            # Keep biases unchanged for partial resets.
             _biases = biases
 
-            new_params = {}
             _logs = {k: 0 for k in state.logs}  # TODO: Slow operation
 
             # avg_ages = jax.tree.map(lambda a: a.mean(), state.ages)
             # avg_util = jax.tree.map(lambda v: v.mean(), _utility)
             std_util = jax.tree.map(lambda v: v.std(), _utility)
 
-            for layer_name in weights.keys():  # Exclude output layer
-                new_params[layer_name] = {
-                    "kernel": _weights[layer_name],
-                    "bias": _biases[layer_name],
-                }
-
-            for layer_name in _utility.keys():
-                _logs["std_util"] += std_util[layer_name]
-                _logs["nodes_reset"] += reset_logs[layer_name]["nodes_reset"]
-                _logs["low_utility"] += reset_logs[layer_name]["low_utility"]
-                _logs["mean_utils"] += reset_logs[layer_name]["mean_utils"]
+            for layer_key in _utility.keys():
+                # _logs["avg_age"] += avg_ages[layer_key]
+                # _logs["avg_util"] += avg_util[layer_key]
+                _logs["std_util"] += std_util[layer_key]
+                _logs["nodes_reset"] += reset_logs[layer_key]["nodes_reset"]
+                _logs["low_utility"] += reset_logs[layer_key]["low_utility"]
+                _logs["mean_utils"] += reset_logs[layer_key]["mean_utils"]
 
             _logs["mean_utils"] /= len(reset_logs.keys())  # pyright: ignore[reportArgumentType]
 
@@ -254,13 +267,17 @@ def cpr(
                 logs=FrozenDict(_logs),
                 rng=new_rng,
                 utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
-                # utilities=_utility, # Try with and without keeping the runing average
+                # utilities=_utility, # Try with and without keeping the running average
                 time_step=state.time_step + 1,
             )
-            flat_new_params, _ = jax.tree.flatten(new_params)
+            new_params = utils.reconstruct_params(
+                params,
+                utils.split_by_chain(_weights),
+                utils.split_by_chain(_biases),
+            )
 
             return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
+                new_params,
                 new_state,
                 tx_state,
             )

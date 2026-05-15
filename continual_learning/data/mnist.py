@@ -48,7 +48,7 @@ class MNIST:
         if self.flatten:
             return jax.ShapeDtypeStruct((1, 28 * 28), dtype=jnp.float32)
         else:
-            return jax.ShapeDtypeStruct((1, 1, 28, 28), dtype=jnp.float32)
+            return jax.ShapeDtypeStruct((1, 28, 28, 1), dtype=jnp.float32)
         # fmt: on
 
 

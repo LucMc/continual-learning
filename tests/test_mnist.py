@@ -16,7 +16,7 @@ def test_process_mnist(dataset):
     assert isinstance(processed_element, tuple)
     assert len(processed_element) == 2
     x, y = processed_element
-    assert x.shape == (28, 28)
+    assert x.shape == (28, 28, 1)
     assert y.shape == (10,)
     assert y.argmax().item() == test_element["label"]
 
@@ -34,14 +34,8 @@ def test_split_mnist():
         )
     )
 
-    for task in ds.tasks:
-        train, test = task
+    for train in ds.tasks:
         for batch in train:
-            x, y = batch
-            assert len(x) == batch_size
-            assert len(y) == batch_size
-            break
-        for batch in test:
             x, y = batch
             assert len(x) == batch_size
             assert len(y) == batch_size

@@ -45,30 +45,27 @@ def shrink_perturb(
 
         def apply_shrink_perturb(params):
             flat_params = flax.traverse_util.flatten_dict(params["params"])
-            weights = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
+
+            # Tuple-keyed dicts preserve sub-network structure (q1/q2)
+            weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
 
             new_rng, noise_rng = random.split(state.rng, num=2)
-            noise_key_tree = utils.gen_key_tree(noise_rng, weights)
+            noise_key_tree = utils.gen_key_tree(noise_rng, weights_full)
 
-            new_params = jax.tree.map(
-                lambda w, b, k: {
-                    "kernel": w * shrink + param_noise_fn(k, shape=w.shape) * perturb,
-                    "bias": b,
-                },
-                weights,
-                biases,
+            new_weights = jax.tree.map(
+                lambda w, k: w * shrink + param_noise_fn(k, shape=w.shape) * perturb,
+                weights_full,
                 noise_key_tree,
             )
 
-            new_state = state.replace(count=(state.count + 1) % every_n, rng=new_rng)
-            flat_new_params, _ = jax.tree.flatten(new_params)
+            weight_chains = utils.split_by_chain(new_weights)
+            bias_chains = utils.split_by_chain(biases_full)
 
-            return (
-                jax.tree.unflatten(jax.tree.structure(params), flat_new_params),
-                new_state,
-                tx_state,
-            )
+            new_state = state.replace(count=(state.count + 1) % every_n, rng=new_rng)
+            new_params = utils.reconstruct_params(params, weight_chains, bias_chains)
+
+            return new_params, new_state, tx_state
 
         should_apply = (state.count % every_n == 0) & (state.count > 0)
 

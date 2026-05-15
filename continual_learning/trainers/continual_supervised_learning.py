@@ -429,8 +429,8 @@ if __name__ == "__main__":
         ),
         logs_cfg=LoggingConfig(
             run_name="split_cifar10_debug_1",
-            wandb_entity="evangelos-ch",
-            wandb_project="continual_learning",
+            wandb_entity="",
+            wandb_project="",
             wandb_mode="disabled",
             interval=100,
             eval_during_training=True,

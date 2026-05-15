@@ -31,9 +31,6 @@ SWEEP_RANGES = {
     "adam": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "adamw": {"learning_rate": [1e-3, 3e-4, 1e-4]},
     "muon": {"learning_rate": [1e-3, 3e-4, 1e-4]},
-    "regrama": {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
-    "redo":    {"tx_lr": [1e-3], "max_reset_frac": [None], "update_frequency": [100, 1000, 10_000], "score_threshold": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,]},
-    "cbp": {"tx_lr": [1e-3], "decay_rate": [0.95, 0.99], "replacement_rate": [1e-6, 1e-5, 1e-4], "maturity_threshold": [100, 1000]},
     "cpr_exp": {
         "tx_lr": [1e-3],
         "decay_rate": [0.9],
@@ -116,6 +113,7 @@ SWEEP_RANGES = {
         "perturb": [1e-3, 1e-4, 1e-5],
         "every_n": [1, 10, 100],
     },
+}
 
 
 def _all_configs_for(algo: str):

@@ -3,6 +3,7 @@ from .logging import LoggingConfig
 from .models import MLPConfig
 from .training import TrainingConfig
 from .envs import EnvConfig
+from .rl import QNetworkConfig, SACConfig
 from .optim import (
     AdamConfig,
     AdamwConfig,
@@ -23,6 +24,8 @@ __all__ = [
     "LoggingConfig",
     "TrainingConfig",
     "EnvConfig",
+    "QNetworkConfig",
+    "SACConfig",
     "AdamConfig",
     "AdamwConfig",
     "MuonConfig",

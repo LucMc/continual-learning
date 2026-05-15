@@ -8,9 +8,9 @@ In this project we introduce a new reset method, CPR (Calibrated Partial Resets)
 
 ## Example Usage
 ```bash
-python continual_learning/experiments/slippery_ant.py --include CPR
+uv run python -m experiments.slippery_ant --include cpr
 ```
 With W&B logging
 ```bash
-python continual_learning/experiments/slippery_ant.py --include CPR --wandb_entity XXX --wandb_project XXX
+uv run python -m experiments.slippery_ant --include cpr --wandb-mode online --wandb-entity XXX --wandb-project XXX
 ```

@@ -562,10 +562,10 @@ if __name__ == "__main__":
         ),
         logs_cfg=LoggingConfig(
             run_name="continual_ant_debug_12",
-            wandb_entity="lucmc",
-            wandb_project="crl_experiments",
+            wandb_entity="",
+            wandb_project="",
             save=False,  # Disable checkpoints cause it's so fast anyway
-            wandb_mode="online",
+            wandb_mode="disabled",
         ),
     )
 

@@ -129,7 +129,7 @@ for seed in "${seeds[@]}"; do
         job_pids[$pid]=$gpu_id
         ((gpu_job_count[$gpu_id]++))
         
-        # Small delay to avoid race conditions
+        # Small pause to avoid race conditions
         sleep 0.5
     done
 done

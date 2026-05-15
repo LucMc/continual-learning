@@ -32,7 +32,7 @@ seed="${seeds[$seed_idx]}"
 output_filename="task_${SLURM_ARRAY_TASK_ID}_${algo}_seed_${seed}.out"
 
 # WandB settings (fill in your values)
-wandb_entity="lucmc"
+wandb_entity="${WANDB_ENTITY:-}"
 wandb_project="crl_experiments"
 
 # --- Setup environment (uv or venv) ---
@@ -55,4 +55,3 @@ echo "Running $script_name for algo=$algo seed=$seed"
 python "../$script_name" --include "$algo" --seed "$seed" \
        --wandb-entity "$wandb_entity" --wandb-project "$wandb_project" \
        > "$output_filename" 2>&1
-

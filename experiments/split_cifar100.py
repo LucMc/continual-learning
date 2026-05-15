@@ -28,7 +28,7 @@ from dataclasses import field
 @dataclass(frozen=True)
 class Args:
     seed: int = 42
-    wandb_mode: Literal["online", "offline", "disabled"] = "online"
+    wandb_mode: Literal["online", "offline", "disabled"] = "disabled"
     wandb_project: str = ""
     wandb_entity: str = ""
     # data_dir: Path = Path("./experiment_results")

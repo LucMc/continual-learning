@@ -1,4 +1,5 @@
 import time
+from dataclasses import field
 from typing import Literal
 
 import jax
@@ -10,9 +11,9 @@ from continual_learning.configs import (
     AdamConfig,
     CbpConfig,
     CprConfig,
-    RegramaConfig,
     LoggingConfig,
     RedoConfig,
+    RegramaConfig,
     ShrinkAndPerterbConfig,
 )
 from continual_learning.configs.envs import EnvConfig
@@ -26,13 +27,10 @@ from continual_learning.types import (
 )
 
 
-from dataclasses import field
-
-
 @dataclass(frozen=True)
 class Args:
     seed: int = 42
-    wandb_mode: Literal["online", "offline", "disabled"] = "online"
+    wandb_mode: Literal["online", "offline", "disabled"] = "disabled"
     wandb_project: str = ""
     wandb_entity: str = ""
     # data_dir: Path = Path("./experiment_results")
@@ -52,34 +50,34 @@ def run_all_slippery_ant():
         "adam": AdamConfig(learning_rate=1e-3),
         "regrama": RegramaConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=1000,
-            score_threshold=0.0095,
-            max_reset_frac=0.05,
+            update_frequency=100,
+            score_threshold=0.25,
+            max_reset_frac=None,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "cpr": CprConfig(
             tx=AdamConfig(learning_rate=1e-3),
             seed=args.seed,
-            decay_rate=0.9,
-            # replacement_rate=0.01,
-            sharpness=10,
-            threshold=0.5,
+            decay_rate=0.99,
+            replacement_rate=0.015,
+            sharpness=16,
+            threshold=1,
             update_frequency=1000,
-            transform_type="linear",
+            transform_type="sigmoid",
         ),
         "redo": RedoConfig(
             tx=AdamConfig(learning_rate=1e-3),
-            update_frequency=1000,
-            score_threshold=0.055,
-            max_reset_frac=0.05,
+            update_frequency=100,
+            score_threshold=0.65,
+            max_reset_frac=None,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
         "cbp": CbpConfig(
             tx=AdamConfig(learning_rate=1e-3),
             decay_rate=0.99,
-            replacement_rate=0.0002,
+            replacement_rate=0.003,
             maturity_threshold=100,
             seed=args.seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
@@ -169,17 +167,3 @@ def run_all_slippery_ant():
 
 if __name__ == "__main__":
     run_all_slippery_ant()
-
-#     num_rollout_steps=2048 * 32 * 5,
-#     num_epochs=4,
-#     num_gradient_steps=32,
-#     gamma=0.97,
-#     gae_lambda=0.95,
-#     entropy_coefficient=1e-2,
-#     clip_eps=0.3,
-#     vf_coefficient=0.5,
-#     normalize_advantages=True,
-# ),
-# env_cfg=EnvConfig(
-#     "slippery_ant", num_envs=4096, num_tasks=20, episode_length=1000
-# ),

@@ -1,12 +1,12 @@
 import jax
 from flax import struct
 
-from continual_learning.configs.models import CNNConfig, MLPConfig, ResNetConfig
+from continual_learning.configs.models import CNNConfig, MLPConfig
 from continual_learning.types import StdType
 
 from .optim import OptimizerConfig
 
-NetworkConfigType = MLPConfig | CNNConfig | ResNetConfig
+NetworkConfigType = MLPConfig | CNNConfig
 
 
 @struct.dataclass(frozen=True)
@@ -53,3 +53,32 @@ class PPOConfig(struct.PyTreeNode):
     This should be False to make the agent "continual-learning-agnostic",
     and is only added as a debug flag if things go wrong.
     """
+
+
+@struct.dataclass(frozen=True)
+class QNetworkConfig(struct.PyTreeNode):
+    optimizer: OptimizerConfig
+    network: NetworkConfigType
+
+    kernel_init: jax.nn.initializers.Initializer = jax.nn.initializers.he_uniform()
+    bias_init: jax.nn.initializers.Initializer = jax.nn.initializers.zeros  # pyright: ignore[reportAssignmentType]
+
+
+@struct.dataclass(frozen=True)
+class SACConfig(struct.PyTreeNode):
+    actor_config: PolicyNetworkConfig
+    critic_config: QNetworkConfig
+
+    # SAC hyperparameters
+    gamma: float = 0.99
+    tau: float = 0.005
+    alpha: float = 1.0
+    alpha_lr: float = 3e-4
+    auto_entropy: bool = True
+    target_entropy: float | None = None
+
+    # Replay buffer settings
+    buffer_size: int = 1_000_000
+    batch_size: int = 256
+    learning_starts: int = 10_000
+    replay_ratio: int = 1

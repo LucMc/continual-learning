@@ -13,12 +13,7 @@ def compute_gae_scan(
     gamma: float,
     gae_lambda: float,
 ) -> tuple[Value, Value]:
-    """Adapted from https://github.com/google/brax/blob/main/brax/training/agents/ppo/losses.py#L38
-
-    NOTE: This GAE implementation essentially ignores truncated timesteps and takes them out of learning entirely.
-    This is an efficient way of circumventing the "poisoning" of the learning process from bad value target estimates at truncated timesteps.
-    However, this is sample inefficient, and ideally we would get the value of the final observation and add it to the target for truncated timesteps. But, that would require extra neural network forward passes, which is hardware inefficient. So that's the trade-off.
-    """
+    """Adapted from https://github.com/google/brax/blob/main/brax/training/agents/ppo/losses.py#L38 """
     truncation_mask = 1 - rollout.truncated
     # Append bootstrapped value to get [v1, ..., v_t+1]
     values_t_plus_1 = jnp.concatenate([values[1:], last_values[None, ...]], axis=0)
