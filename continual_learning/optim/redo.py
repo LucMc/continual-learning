@@ -43,6 +43,7 @@ def redo(
     score_threshold: float = 0.0095,
     max_reset_frac: float | None = None,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
+    out_layer_name: str = "output",
 ) -> GradientTransformationExtraArgsReset:
     """Recycle Dormant Neurons (ReDo): [Sokar et al.](https://arxiv.org/pdf/2302.12902)"""
 
@@ -91,13 +92,13 @@ def redo(
 
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
 
-            # String-keyed scores (q2 overwrites q1 for twin-Q — fine for dormancy scoring)
+            features_by_layer = utils.flatten_activation_tree(features, strip_suffix=True)
             scores = {
-                key.split("_act")[0]: get_score(feature_tuple[0])
-                for key, feature_tuple in features.items()
+                key: get_score(feature_tuple[0])
+                for key, feature_tuple in features_by_layer.items()
+                if key[-1] != out_layer_name
             }
             reset_mask = jax.tree.map(get_reset_mask, scores)
-            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
 
             # Tuple-keyed dicts preserve sub-network structure (q1/q2)
             weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
@@ -114,13 +115,17 @@ def redo(
 
                 _rng, key = random.split(_rng)
                 key_tree = utils.gen_key_tree(key, chain_w)
+                chain_reset_mask = utils.split_reset_mask(reset_mask, prefix)
 
                 chain_w, reset_logs = utils.reset_weights(
-                    key_tree, reset_mask, chain_w, weight_init_fn,
+                    key_tree, chain_reset_mask, chain_w, weight_init_fn,
+                )
+                chain_reset_mask = utils.add_output_mask(
+                    chain_reset_mask, chain_b[out_layer_name], out_layer_name
                 )
                 chain_b = jax.tree.map(
                     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                    reset_mask, chain_b,
+                    chain_reset_mask, chain_b,
                 )
 
                 weight_chains[prefix] = chain_w

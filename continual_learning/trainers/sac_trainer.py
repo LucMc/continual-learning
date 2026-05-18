@@ -24,29 +24,14 @@ from continual_learning.models.rl import QNetwork, TanhPolicy
 from continual_learning.optim import get_optimizer
 from continual_learning.types import LogDict, Observation
 from continual_learning.utils.monitoring import Logger, prefix_dict
+from continual_learning.utils.optim import flatten_activation_tree
 from continual_learning.utils.replay_buffer import ReplayBatch, ReplayBuffer
 from continual_learning.utils.training import TrainState
 
 
 def flatten_activations(features: dict) -> dict:
     """Flatten nested activation dict for reset methods. """
-    flat = {}
-
-    def _process(d: dict) -> None:
-        for key, value in d.items():
-            if isinstance(value, dict):
-                _process(value)
-            else:
-                arr = value[0]  # unwrap sow tuple
-                if arr.ndim > 2:  # conv: (B, H, W, C) → spatial mean → (B, C)
-                    arr = arr.mean(axis=tuple(range(1, arr.ndim - 1)))
-                flat[key] = (arr,)
-
-    for module_feats in features.values():
-        if isinstance(module_feats, dict):
-            _process(module_feats)
-
-    return flat
+    return flatten_activation_tree(features)
 
 
 class SACTrainState(NamedTuple):

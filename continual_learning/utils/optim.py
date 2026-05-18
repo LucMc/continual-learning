@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, PRNGKeyArray, PyTree
@@ -6,7 +9,6 @@ from jaxtyping import (
 )
 import optax
 
-from typing import Callable
 from copy import deepcopy
 
 import flax.traverse_util
@@ -23,12 +25,37 @@ def split_by_chain(full_dict):
     """
     chains = {}
     for key, value in full_dict.items():
-        prefix = key[:-1]
-        layer = key[-1]
+        if isinstance(key, tuple):
+            prefix = key[:-1]
+            layer = key[-1]
+        else:
+            prefix = ()
+            layer = key
         if prefix not in chains:
             chains[prefix] = {}
         chains[prefix][layer] = value
     return chains
+
+
+def get_chain_dict(full_dict, prefix):
+    """Return a single chain with local layer names.
+
+    Reset methods keep full tuple keys internally, e.g. ("q1", "layer_0"),
+    but the low-level reset helpers operate on one chain at a time using local
+    names, e.g. "layer_0".
+    """
+    if not full_dict:
+        return {}
+
+    sample_key = next(iter(full_dict.keys()))
+    if not isinstance(sample_key, tuple):
+        return full_dict
+
+    return {
+        key[-1]: value
+        for key, value in full_dict.items()
+        if key[:-1] == prefix
+    }
 
 
 def reconstruct_params(params, weight_chains, bias_chains):
@@ -61,21 +88,79 @@ def get_out_weights_mag(weights):
         else:  # Dense->Dense
             return jnp.abs(next_layer_w).mean(axis=1)
 
-    keys = list(weights.keys())
+    def calculate_chain_mags(chain_weights):
+        keys = list(chain_weights.keys())
+        w_mags = {}
+
+        for i in range(len(keys) - 1):
+            curr_key = keys[i]
+            next_key = keys[i + 1]
+            curr_weights = chain_weights[curr_key]
+            next_weights = chain_weights[next_key]
+
+            # Check if this is a conv->dense
+            is_conv_to_dense = len(curr_weights.shape) == 4 and len(next_weights.shape) == 2
+
+            w_mags[curr_key] = calculate_mag(curr_weights, next_weights, is_conv_to_dense)
+
+        return w_mags
+
+    if not weights:
+        return {}
+
+    sample_key = next(iter(weights.keys()))
+    if not isinstance(sample_key, tuple):
+        return calculate_chain_mags(weights)
+
     w_mags = {}
-
-    for i in range(len(keys) - 1):
-        curr_key = keys[i]
-        next_key = keys[i + 1]
-        curr_weights = weights[curr_key]
-        next_weights = weights[next_key]
-
-        # Check if this is a conv->dense
-        is_conv_to_dense = len(curr_weights.shape) == 4 and len(next_weights.shape) == 2
-
-        w_mags[curr_key] = calculate_mag(curr_weights, next_weights, is_conv_to_dense)
+    for prefix, chain_weights in split_by_chain(weights).items():
+        for layer, value in calculate_chain_mags(chain_weights).items():
+            w_mags[prefix + (layer,)] = value
 
     return w_mags
+
+
+def flatten_activation_tree(features, strip_suffix: bool = False) -> dict:
+    """Flatten Flax activation collections while preserving module prefixes."""
+    flat = {}
+
+    def append_key(prefix, key):
+        if isinstance(key, tuple):
+            return prefix + key
+        return prefix + (key,)
+
+    def maybe_strip_suffix(key):
+        if not strip_suffix:
+            return key
+        *prefix, layer = key
+        if isinstance(layer, str) and layer.endswith("_act"):
+            layer = layer.removesuffix("_act")
+        return (*prefix, layer)
+
+    def visit(prefix, value):
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                visit(append_key(prefix, key), child)
+            return
+
+        arr = value[0] if isinstance(value, tuple) else value
+        if arr.ndim > 2:  # conv activations: (B, H, W, C) -> (B, C)
+            arr = arr.mean(axis=tuple(range(1, arr.ndim - 1)))
+        flat[maybe_strip_suffix(prefix)] = (arr,)
+
+    visit((), features)
+    return flat
+
+
+def add_output_mask(reset_mask, output_bias, out_layer_name: str = "output"):
+    return {
+        **reset_mask,
+        out_layer_name: jnp.zeros_like(output_bias, dtype=bool),
+    }
+
+
+def split_reset_mask(reset_mask, prefix):
+    return get_chain_dict(reset_mask, prefix)
 
 
 def attach_reset_method(
@@ -208,7 +293,7 @@ def reset_weights(
 def reset_optim_params(tx_state, reset_mask):
     """Reset optimizer momentum/variance for neurons identified by reset_mask. """
 
-    def _process_chain(layers):
+    def _process_chain(layers, chain_reset_mask):
         """Reset momentum for a single sub-network chain (string-keyed layer dict)."""
         new_layers = {}
         all_layer_names = list(layers.keys())
@@ -222,9 +307,9 @@ def reset_optim_params(tx_state, reset_mask):
 
         # Apply incoming + bias + outgoing resets
         for idx, layer_name in enumerate(all_layer_names[:-1]):
-            if layer_name not in reset_mask:
+            if layer_name not in chain_reset_mask:
                 continue
-            in_mask_1d = reset_mask[layer_name]
+            in_mask_1d = chain_reset_mask[layer_name]
 
             # Zero incoming kernel momentum
             in_mask = expand_mask_for_weights(
@@ -282,7 +367,8 @@ def reset_optim_params(tx_state, reset_mask):
                 for layer, kernel in chain_w.items()
                 if layer in chain_b
             }
-            processed = _process_chain(layers)
+            chain_reset_mask = split_reset_mask(reset_mask, prefix)
+            processed = _process_chain(layers, chain_reset_mask)
             for layer, values in processed.items():
                 flat[prefix + (layer, "kernel")] = values["kernel"]
                 flat[prefix + (layer, "bias")] = values["bias"]

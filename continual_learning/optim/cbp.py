@@ -143,8 +143,11 @@ def cbp(
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
-        biases = {k[-2]: v for k, v in flat_params.items() if k[-1] == "bias"}
-        biases.pop(out_layer_name)
+        biases = {
+            k[:-1]: v
+            for k, v in flat_params.items()
+            if k[-1] == "bias" and k[-2] != out_layer_name
+        }
 
         return CbpOptimState(
             utilities=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
@@ -170,21 +173,23 @@ def cbp(
             del updates
 
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
-            flat_feats, _ = jax.tree.flatten(features)
 
-            # String-keyed dicts for scoring (q2 overwrites q1 for twin-Q)
-            weights_str = {k[-2]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            out_w_mag = utils.get_out_weights_mag(weights_str)
+            weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
+            biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
+            out_w_mag = utils.get_out_weights_mag(weights_full)
+            features_by_layer = utils.flatten_activation_tree(features, strip_suffix=True)
+            _features = {
+                key: features_by_layer[key][0]
+                for key in out_w_mag.keys()
+            }
 
             new_rng, util_key, acc_key = random.split(state.rng, 3)
 
             # Build acc_tree matching state utilities (string-keyed, no output)
-            util_keys = {k: v for k, v in weights_str.items() if k != out_layer_name}
+            util_keys = {
+                k: v for k, v in weights_full.items() if k[-1] != out_layer_name
+            }
             acc_tree = utils.gen_key_tree(acc_key, util_keys)
-
-            # Features arrive as tuple so we have to restructure
-            w_mag_tdef = jax.tree.structure(out_w_mag)
-            _features = jax.tree.unflatten(w_mag_tdef, flat_feats[:-1])
 
             _utility = jax.tree.map(
                 partial(get_updated_utility, decay_rate=decay_rate),
@@ -230,8 +235,6 @@ def cbp(
             )
 
             # Apply resets per sub-network chain
-            weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
-            biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
             weight_chains = utils.split_by_chain(weights_full)
             bias_chains = utils.split_by_chain(biases_full)
 
@@ -244,16 +247,18 @@ def cbp(
 
                 _rng, key = random.split(_rng)
                 key_tree = utils.gen_key_tree(key, chain_w)
+                chain_reset_mask = utils.split_reset_mask(reset_mask, prefix)
+                chain_mfa = utils.get_chain_dict(_mean_feature_act, prefix)
+                chain_ages = utils.get_chain_dict(state.ages, prefix)
 
                 # reset_weights modifies chain_w in place
                 chain_w, reset_logs = utils.reset_weights(
-                    key_tree, reset_mask, chain_w, weight_init_fn,
+                    key_tree, chain_reset_mask, chain_w, weight_init_fn,
                 )
 
                 # Zero biases of reset nodes
-                mask_with_output = dict(reset_mask)
-                mask_with_output[out_layer_name] = jnp.zeros_like(
-                    chain_b[out_layer_name], dtype=bool
+                mask_with_output = utils.add_output_mask(
+                    chain_reset_mask, chain_b[out_layer_name], out_layer_name
                 )
                 zeroed_chain_b = jax.tree.map(
                     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
@@ -262,8 +267,12 @@ def cbp(
 
                 # Bias correction (uses post-reset chain weights)
                 corrected_chain_b = bias_correction(
-                    chain_w, zeroed_chain_b, _mean_feature_act,
-                    state.ages, reset_mask, decay_rate,
+                    chain_w,
+                    zeroed_chain_b,
+                    chain_mfa,
+                    chain_ages,
+                    chain_reset_mask,
+                    decay_rate,
                 )
 
                 weight_chains[prefix] = chain_w

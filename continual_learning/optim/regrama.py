@@ -41,6 +41,7 @@ def regrama(
     score_threshold: float = 0.01,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     max_reset_frac: float | None = None,
+    out_layer_name: str = "output",
 ) -> GradientTransformationExtraArgsReset:
     """(Resetting nuerons guided by) Gradient Magnitude based Nueronal Activity Metric (ReGraMa): [Liu et al.](https://arxiv.org/pdf/2505.24061v1)"""
 
@@ -90,11 +91,13 @@ def regrama(
             flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
             flat_updates = flax.traverse_util.flatten_dict(updates["params"])  # pyright: ignore[reportIndexIssue]
 
-            # String-keyed scores (q2 overwrites q1 for twin-Q — fine for gradient scoring)
-            weight_grads = {k[-2]: v for k, v in flat_updates.items() if k[-1] == "kernel"}
+            weight_grads = {
+                k[:-1]: v
+                for k, v in flat_updates.items()
+                if k[-1] == "kernel" and k[-2] != out_layer_name
+            }
             scores = jax.tree.map(get_score, weight_grads)
             reset_mask = jax.tree.map(get_reset_mask, scores)
-            reset_mask["output"] = jnp.zeros_like(reset_mask["output"], dtype=bool)
 
             # Tuple-keyed dicts preserve sub-network structure (q1/q2)
             weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
@@ -111,13 +114,17 @@ def regrama(
 
                 _rng, key = random.split(_rng)
                 key_tree = utils.gen_key_tree(key, chain_w)
+                chain_reset_mask = utils.split_reset_mask(reset_mask, prefix)
 
                 chain_w, reset_logs = utils.reset_weights(
-                    key_tree, reset_mask, chain_w, weight_init_fn,
+                    key_tree, chain_reset_mask, chain_w, weight_init_fn,
+                )
+                chain_reset_mask = utils.add_output_mask(
+                    chain_reset_mask, chain_b[out_layer_name], out_layer_name
                 )
                 chain_b = jax.tree.map(
                     lambda m, b: jnp.where(m, jnp.zeros_like(b, dtype=b.dtype), b),
-                    reset_mask, chain_b,
+                    chain_reset_mask, chain_b,
                 )
 
                 weight_chains[prefix] = chain_w

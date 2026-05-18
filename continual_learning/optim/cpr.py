@@ -55,13 +55,7 @@ def calibrated_reset_weights(
     transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
     out_layer_name: str = "output",
 ):
-    """Partially reset low-utility neurons.
-
-    Keys are full-path tuples (e.g. ('q1','main','0_conv_16_0')) to support
-    nested sub-networks like twin Q-critics.  Outgoing-weight resets only
-    happen between consecutive layers in the same sub-network chain
-    (same key prefix).
-    """
+    """ Core CPR algorithm. Takes in updated utilities and computes partially reset weights """
     all_keys = list(weights.keys())
     logs = {}
 
@@ -142,16 +136,16 @@ def calibrated_reset_weights(
 
 def cpr(
     seed: int,
-    replacement_rate: float = 0.012,
+    replacement_rate: float = 0.015,
     sharpness: float = 16,
-    threshold: float = 0.95,
+    threshold: float = 1.0,
     decay_rate: float = 0.99,
     update_frequency: int = 1000,
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
     out_layer_name: str = "output",
-    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "sigmoid",
 ) -> GradientTransformationExtraArgsReset:
-    """Calibrated Partial Resets (CPR)."""
+    """ Calibrated Partial Resets (CPR) """
 
     def init(params: optax.Params, **kwargs):
         flat_params = flax.traverse_util.flatten_dict(params["params"])  # pyright: ignore[reportIndexIssue]
@@ -165,10 +159,9 @@ def cpr(
             remainder=jax.tree.map(lambda _: 0.0, biases),
             mean_feature_act=jax.tree.map(
                 lambda layer: jnp.zeros_like(layer), biases
-            ),  # TODO: Remove
+            ),
             rng=jax.random.PRNGKey(seed),
             time_step=0,
-            # update_frequency=update_frequency, # TODO: Change to update_frequency
             **kwargs,
         )
 
@@ -267,7 +260,6 @@ def cpr(
                 logs=FrozenDict(_logs),
                 rng=new_rng,
                 utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), _utility),
-                # utilities=_utility, # Try with and without keeping the running average
                 time_step=state.time_step + 1,
             )
             new_params = utils.reconstruct_params(
