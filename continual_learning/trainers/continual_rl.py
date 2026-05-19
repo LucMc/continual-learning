@@ -187,7 +187,7 @@ class PPO:
             clip_fracs = jax.lax.stop_gradient((jnp.abs(ratio - 1.0) > cfg.clip_eps).mean())
 
             # Intermediates
-            actor_feats = actor_intermediates["activations"]  # ["main"]
+            actor_feats = actor_intermediates["activations"]
             value_feats = value_intermediates["activations"]
 
             vf_optim_logs = vf.opt_state["reset_method"].logs  # pyright: ignore[reportAttributeAccessIssue,reportIndexIssue]
@@ -205,7 +205,7 @@ class PPO:
                     **prefix_dict("actor", actor_optim_logs),
                     **prefix_dict("value", vf_optim_logs),
                 },
-                actor_feats["main"],
+                actor_feats,
                 value_feats,
             )
 
