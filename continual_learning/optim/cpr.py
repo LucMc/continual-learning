@@ -49,10 +49,10 @@ def calibrated_reset_weights(
     weights: PyTree[Float[Array, "..."]],
     utilities: PyTree[Float[Array, "..."]],
     weight_init_fn: Callable = jax.nn.initializers.he_uniform(),
-    replacement_rate: float = 0.012,
+    replacement_rate: float = 0.015,
     sharpness: float = 16,
-    threshold: float = 0.95,
-    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp",
+    threshold: float = 1.0,
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "sigmoid",
     out_layer_name: str = "output",
 ):
     """ Core CPR algorithm. Takes in updated utilities and computes partially reset weights """
