@@ -18,11 +18,7 @@ from continual_learning.types import GradientTransformationExtraArgsReset
 
 
 def split_by_chain(full_dict):
-    """Split a dict with tuple keys into per-chain dicts with string keys.
-
-    Example: {('q1', 'conv'): v1, ('q1', 'dense'): v2, ('q2', 'conv'): v3}
-    → {('q1',): {'conv': v1, 'dense': v2}, ('q2',): {'conv': v3}}
-    """
+    """Split a dict with tuple keys into per-chain dicts with string keys"""
     chains = {}
     for key, value in full_dict.items():
         if isinstance(key, tuple):
@@ -38,12 +34,7 @@ def split_by_chain(full_dict):
 
 
 def get_chain_dict(full_dict, prefix):
-    """Return a single chain with local layer names.
-
-    Reset methods keep full tuple keys internally, e.g. ("q1", "layer_0"),
-    but the low-level reset helpers operate on one chain at a time using local
-    names, e.g. "layer_0".
-    """
+    """Return a single chain with local layer names"""
     if not full_dict:
         return {}
 
@@ -59,7 +50,7 @@ def get_chain_dict(full_dict, prefix):
 
 
 def reconstruct_params(params, weight_chains, bias_chains):
-    """Rebuild full param tree from per-chain weight/bias dicts."""
+    """Rebuild full param tree from per-chain weight/bias dicts"""
     flat_full = flax.traverse_util.flatten_dict(params)
     for prefix, chain_w in weight_chains.items():
         for layer, kernel in chain_w.items():
