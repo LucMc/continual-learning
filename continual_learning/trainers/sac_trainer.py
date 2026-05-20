@@ -131,7 +131,6 @@ class SAC:
         ) -> tuple[TrainState, LogDict]:
             """Update critic using TD learning."""
             # Sample a' from current policy for next states
-            # Use sample_and_log_prob for numerical stability (avoids atanh(tanh(z)))
             next_dist = state.actor.apply_fn(state.actor.params, batch.next_observations)
             next_actions, next_action_log_probs = next_dist.sample_and_log_prob(
                 seed=critic_loss_key
@@ -215,7 +214,6 @@ class SAC:
         def actor_loss_fn(actor_params):
             """Compute actor loss, also triggers alpha and critic updates."""
             # Sample actions from policy with activation collection
-            # Use sample_and_log_prob for numerical stability (avoids atanh(tanh(z)))
             dist, intermediates = state.actor.apply_fn(
                 actor_params,
                 batch.observations,

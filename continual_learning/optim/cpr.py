@@ -64,7 +64,7 @@ def calibrated_reset_weights(
     for i, key in enumerate(all_keys):
         if i + 1 < len(all_keys):
             next_key = all_keys[i + 1]
-            if key[:-1] == next_key[:-1]:  # Same prefix → same chain
+            if key[:-1] == next_key[:-1]:  # Same prefix -> same chain
                 next_in_chain[key] = next_key
 
     hidden_keys = [k for k in all_keys if k[-1] != out_layer_name]
@@ -224,7 +224,7 @@ def cpr(
             # reset weights given mask
             _weights, reset_logs = calibrated_reset_weights(
                 key_tree,
-                weights,  # Yes out_layer
+                weights,
                 _utility,
                 weight_init_fn,
                 replacement_rate,
