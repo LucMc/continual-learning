@@ -59,7 +59,7 @@ def run_metaworld_sac():
     muon_lr = 1e-4
     base_muon = MuonConfig(learning_rate=muon_lr)
 
-    # Paper-reported methods: reset methods use Muon as the SAC base optimizer.
+    # Note reset methods use Muon as the SAC base optimizer by default in this experiment
     optimizers = {
         "adam": AdamConfig(learning_rate=adam_lr),
         "muon": base_muon,
