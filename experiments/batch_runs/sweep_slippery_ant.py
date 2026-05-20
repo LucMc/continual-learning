@@ -206,7 +206,7 @@ def run_config(
     base_seed = params.get("seed", 0)
     run_seed = base_seed + seed
     tag = _format_tag(params)
-    opt_config = build_optimizer(algo, params, params["seed"] + seed)
+    opt_config = build_optimizer(algo, params, run_seed)
 
     trainer = JittedContinualPPOTrainer(
         seed=run_seed,

@@ -79,9 +79,9 @@ class CbpConfig(ResetMethodConfig):
 class CprConfig(ResetMethodConfig):
     weight_init_fn: Callable = jax.nn.initializers.he_uniform()
     seed: int = 42
-    replacement_rate: float = 0.01
+    replacement_rate: float = 0.015
     sharpness: float = 16
-    threshold: float = 0.95
+    threshold: float = 1.0
     decay_rate: float = 0.99
     update_frequency: int = 1000
-    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "exp"
+    transform_type: Literal["exp", "sigmoid", "softplus", "linear"] = "sigmoid"
