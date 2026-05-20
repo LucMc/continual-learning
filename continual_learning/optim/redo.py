@@ -100,7 +100,7 @@ def redo(
             }
             reset_mask = jax.tree.map(get_reset_mask, scores)
 
-            # Tuple-keyed dicts preserve sub-network structure (q1/q2)
+            # Tuple-keyed dicts preserve sub-network structure
             weights_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "kernel"}
             biases_full = {k[:-1]: v for k, v in flat_params.items() if k[-1] == "bias"}
             weight_chains = utils.split_by_chain(weights_full)

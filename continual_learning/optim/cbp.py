@@ -71,7 +71,7 @@ def bias_correction(weights, biases, mean_feature_act, ages, reset_mask, decay_r
             mask, mean_feature_act[layer_name] / jnp.maximum(bias_correction_factor, 1e-6), 0.0
         )
 
-        # Tile for conv→dense transition (spatial flattening)
+        # Tile for conv to dense transition (spatial flattening)
         curr_weights = weights[layer_name]
         if len(curr_weights.shape) == 4 and len(next_weights.shape) == 2:
             spatial_size = next_weights.shape[0] // correction_term.size
@@ -151,7 +151,6 @@ def cbp(
 
         return CbpOptimState(
             utilities=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
-            # utilities=jax.tree.map(lambda layer: jnp.ones_like(layer), biases),
             ages=jax.tree.map(lambda x: jnp.zeros_like(x), biases),
             mean_feature_act=jax.tree.map(lambda layer: jnp.zeros_like(layer), biases),
             rng=jax.random.PRNGKey(seed),
