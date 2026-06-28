@@ -25,6 +25,7 @@ from typing import Any, Dict, Literal, Optional
 import jax
 import jax.numpy as jnp
 import tyro
+import wandb
 from chex import dataclass
 
 from continual_learning.configs import (
@@ -56,6 +57,21 @@ SWEEP_RANGES = {
         "decay_rate": [0.99],
         "replacement_rate": [0.0075, 0.01, 0.0125, 0.015, 0.0175, 0.02, 0.025, 0.03],
         "update_frequency": FREQUENCIES,
+    },
+    # CPR reset-SELECTIVITY sweep (paired-seed, ramp benchmark). Holds the
+    # known-good magnitude/cadence fixed (replacement_rate=0.0015 ~ the "VL" ramp
+    # setting; update_frequency=1000) and sweeps the never-tuned knobs that
+    # control *which* neurons get reset. threshold=1.0 & sharpness=16 reproduce
+    # the current ramp `cpr`, so the baseline is itself a grid point. Add "exp"
+    # to transform_type for the follow-up pass.  3 x 3 x 1 = 9 configs.
+    "cpr_sel": {
+        "tx_lr": [1e-3],
+        "decay_rate": [0.99],
+        "replacement_rate": [0.0015],
+        "update_frequency": [1000],
+        "threshold": [0.9, 0.95, 1.0],
+        "sharpness": [8, 16, 32],
+        "transform_type": ["sigmoid"],
     },
     # CBP keeps decay fixed and sweeps replacement around the TD Ant starting point.
     "cbp": {
@@ -213,6 +229,17 @@ def build_optimizer(algo: str, params: Dict[str, Any], seed: int):
             threshold=1,
             update_frequency=params["update_frequency"],
             transform_type="sigmoid",
+            seed=seed,
+            weight_init_fn=jax.nn.initializers.lecun_normal(),
+        ),
+        "cpr_sel": lambda: CprConfig(
+            tx=tx,
+            decay_rate=params["decay_rate"],
+            replacement_rate=params["replacement_rate"],
+            sharpness=params["sharpness"],
+            threshold=params["threshold"],
+            update_frequency=params["update_frequency"],
+            transform_type=params["transform_type"],
             seed=seed,
             weight_init_fn=jax.nn.initializers.lecun_normal(),
         ),
@@ -377,6 +404,29 @@ def run_config(
         ),
         benchmark=benchmark,
     )
+
+    # Log a flat, queryable copy of the hyperparameters to W&B config. The
+    # trainer's own run_config passes nested dataclasses with Callable fields
+    # (weight_init_fn, kernel_init) that W&B cannot serialise, so wandb.config
+    # otherwise comes back EMPTY -- which is exactly why the earlier CPR
+    # variants' HP values were unrecoverable. Keep this so sweeps stay
+    # reproducible.
+    if wandb_mode != "disabled" and wandb.run is not None:
+        wandb.run.config.update(
+            {
+                "algo": algo,
+                "seed": seed,
+                "delay_mode": delay_mode,
+                "delay_info_mode": delay_info_mode,
+                "ramp_num_increments": ramp_num_increments,
+                "steps_per_task": steps_per_task,
+                "num_tasks": resolved_num_tasks,
+                "num_envs": num_envs,
+                **params,
+            },
+            allow_val_change=True,
+        )
+
     trainer.train()
 
 

@@ -59,7 +59,7 @@ def continuous_reset_weights(
 
     Keys are full-path tuples (e.g. ('q1','main','0_conv_16_0')) to support
     nested sub-networks like twin Q-critics.  Outgoing-weight resets only
-    happen between consecutive layers in the *same* sub-network chain
+    happen between consecutive layers in the same sub-network chain
     (same key prefix).
     """
     all_keys = list(weights.keys())

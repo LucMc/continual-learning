@@ -17,11 +17,17 @@ def compute_iqm(values: np.ndarray) -> float:
     return np.mean(values[mask]) if np.any(mask) else np.mean(values)
 
 
-def fetch_runs(entity: str, project: str, group: str):
+def fetch_runs(entity: str, project: str, group: str, since: Optional[str] = None):
     api = wandb.Api()
     runs = list(api.runs(f"{entity}/{project}", filters={"group": group}, per_page=300))
     finished = [r for r in runs if r.state == "finished"]
-    print(f"Fetched {len(runs)} runs, {len(finished)} finished")
+    if since is not None:
+        # run.created_at is an ISO-8601 string (e.g. "2026-06-16T02:06:31Z"),
+        # so lexicographic comparison against an ISO date prefix works.
+        finished = [r for r in finished if r.created_at >= since]
+        print(f"Fetched {len(runs)} runs, {len(finished)} finished after {since}")
+    else:
+        print(f"Fetched {len(runs)} runs, {len(finished)} finished")
     return finished
 
 
@@ -74,8 +80,10 @@ def fetch_and_process_data(
     group: str,
     metrics: Union[str, List[str]],
     combine_networks: bool = False,
+    since: Optional[str] = None,
+    floor: Optional[float] = None,
 ) -> pd.DataFrame:
-    runs = fetch_runs(entity, project, group)
+    runs = fetch_runs(entity, project, group, since)
 
     # Handle single metric or list of metrics
     if isinstance(metrics, str):
@@ -129,6 +137,20 @@ def fetch_and_process_data(
                 for metric in metrics:
                     value = row.get(metric)
                     if pd.notna(value):
+                        # Some runs log a literal "NaN"/"Infinity" string for a step;
+                        # coerce to float and drop non-finite so np.percentile (IQM)
+                        # doesn't choke on a string-dtype array.
+                        try:
+                            value = float(value)
+                        except (ValueError, TypeError):
+                            continue
+                        if not np.isfinite(value):
+                            continue
+                        # Reconstruct the intended metric: training floors per-step
+                        # reward (ppo_trainer.py:409) but the logged sum_reward is raw,
+                        # so collapsed seeds log absurd magnitudes. Floor here to match.
+                        if floor is not None:
+                            value = max(value, floor)
                         algo_data[algo_name][metric][binned_step][seed_id].append(value)
                         data_points += 1
 
@@ -277,6 +299,8 @@ def create_chart(
     metrics: Union[str, List[str]],
     title: str = "",
     combine_networks: bool = False,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
 ) -> alt.Chart:
     """Create a smoothed Altair chart with a line for IQM and a shaded area for IQR."""
 
@@ -435,19 +459,30 @@ def create_chart(
         smooth_q75="mean(q75)",
     )
 
+    # Optional display-only y-axis clip. Some seeds diverge (policy collapse) to
+    # huge magnitudes that otherwise dominate the auto-scaled axis; clamp+clip
+    # keeps out-of-range bands from blowing up the domain without altering data.
+    y_scale = (
+        alt.Scale(domain=[y_min, y_max], clamp=True)
+        if y_min is not None and y_max is not None
+        else alt.Undefined
+    )
+    clip = y_min is not None and y_max is not None
+
     # Create the shaded area using the SMOOTHED q25 and q75 values
-    bands = smoothed_base.mark_area(opacity=0.25).encode(
+    bands = smoothed_base.mark_area(opacity=0.25, clip=clip).encode(
         y=alt.Y(
             "smooth_q25:Q",
             title=metric.replace("_", " ").title(),
+            scale=y_scale,
             axis=alt.Axis(labelFontSize=14, titleFontSize=16),
         ),
         y2=alt.Y2("smooth_q75:Q", title=""),
     )
 
     # Create the line chart using the SMOOTHED iqm value
-    lines = smoothed_base.mark_line(strokeWidth=2).encode(
-        y=alt.Y("smooth_iqm:Q", title=""),
+    lines = smoothed_base.mark_line(strokeWidth=2, clip=clip).encode(
+        y=alt.Y("smooth_iqm:Q", title="", scale=y_scale),
         tooltip=[
             alt.Tooltip("algorithm:N", title="Algorithm"),
             alt.Tooltip("step:Q", title="Step (M)", format=".2f"),
@@ -485,6 +520,10 @@ def main(
     combine_networks: bool = False,
     output_dir: str = "./plots",
     ext: str = "png",
+    since: Optional[str] = None,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
+    floor: Optional[float] = None,
     debug: bool = False,
 ):
     if not metrics:
@@ -501,7 +540,7 @@ def main(
             for m in metrics
         ]
 
-    df = fetch_and_process_data(wandb_entity, wandb_project, group, metrics, combine_networks)
+    df = fetch_and_process_data(wandb_entity, wandb_project, group, metrics, combine_networks, since, floor)
     if df.empty:
         return print(f"No data found for group: '{group}'")
 
@@ -511,9 +550,11 @@ def main(
         if combine_networks
         else "_".join([m.replace("/", "_") for m in metrics])
     )
-    chart = create_chart(df, metrics, title, combine_networks)
+    chart = create_chart(df, metrics, title, combine_networks, y_min, y_max)
 
-    save_path = Path(output_dir) / ext / f"{group}_{save_suffix}_iqm_smoothed.{ext}"
+    clip_suffix = "_clipped" if y_min is not None and y_max is not None else ""
+    floor_suffix = f"_floor{int(floor)}" if floor is not None else ""
+    save_path = Path(output_dir) / ext / f"{group}_{save_suffix}_iqm_smoothed{floor_suffix}{clip_suffix}.{ext}"
     save_path.parent.mkdir(exist_ok=True, parents=True)
     chart.save(str(save_path))
     print(f"Chart saved to: {save_path}")

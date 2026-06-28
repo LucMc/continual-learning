@@ -395,6 +395,7 @@ class JittedContinualPPOTrainer(PPO):
                 ).sample_and_log_prob(seed=action_key)
                 values = vf.apply_fn(vf.params, fwd_observation).squeeze(-1)
 
+                actions = jnp.clip(actions, -5, 5)
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
@@ -406,7 +407,7 @@ class JittedContinualPPOTrainer(PPO):
                 rollout = Rollout(
                     observations=observation,
                     actions=actions,
-                    rewards=jnp.maximum(data.reward, -5),
+                    rewards=jnp.clip(data.reward, -5, 10),
                     terminated=data.terminated,
                     truncated=data.truncated,
                     log_probs=log_probs,
