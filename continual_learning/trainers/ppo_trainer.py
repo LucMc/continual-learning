@@ -390,12 +390,18 @@ class JittedContinualPPOTrainer(PPO):
                     fwd_observation = running_statistics.normalize(observation, normalizer)  # pyright: ignore[reportArgumentType]
 
                 key, action_key = jax.random.split(key)
-                actions, log_probs = policy.apply_fn(
-                    policy.params, fwd_observation
-                ).sample_and_log_prob(seed=action_key)
+                dist = policy.apply_fn(policy.params, fwd_observation)
+                actions = dist.sample(seed=action_key)
                 values = vf.apply_fn(vf.params, fwd_observation).squeeze(-1)
 
+                # Clip actions to the env's safe range, then take the log-prob of the
+                # CLIPPED action so the stored action and its log-prob stay consistent.
+                # Storing the pre-clip log-prob makes the PPO ratio
+                # exp(logp_new(a_clipped) - logp_old(a_unclipped)), whose Gaussian
+                # quadratic terms no longer cancel and blow up to inf -> NaN once the
+                # policy std collapses toward min_std.
                 actions = jnp.clip(actions, -5, 5)
+                log_probs = dist.log_prob(actions)
                 env_states, data = envs.step(env_states, actions)
 
                 def _print(x: int):
